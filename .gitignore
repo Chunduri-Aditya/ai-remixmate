@@ -1,24 +1,22 @@
-audio_input/
+# Ignore all contents in these folders
+audio_input/*
+audio_output/*
+output/*
+separated/*
+stems/*
+lyrics/*
+models/*
+
+# But keep the folder placeholder
 !audio_input/.gitkeep
-
-audio_output/
 !audio_output/.gitkeep
-
-output/
 !output/.gitkeep
-
-separated/
 !separated/.gitkeep
-
-stems/
 !stems/.gitkeep
-
-lyrics/
 !lyrics/.gitkeep
-
-models/
 !models/.gitkeep
 
+# Ignore other junk
 remix-env/
 __pycache__/
 *.pyc
