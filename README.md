@@ -125,6 +125,8 @@ python3 scripts/smart_remix.py --base "Timeless"
 open audio_output/
 ```
 
+⚠️ *Note: Remix results are experimental and may require fine-tuning for musical smoothness or genre transitions. This is a research-grade prototype and not yet production-ready.*
+
 ---
 
 ## 🧹 Folder Notes
@@ -144,6 +146,15 @@ Dependencies listed in `requirements.txt` (e.g., `librosa`, `numpy`, `pydub`, et
 ## 🤝 Contributions
 
 Pull requests and suggestions welcome!
+
+---
+
+## ⚖️ Disclaimer
+
+This project is intended for educational and research purposes only.  
+The author **is not responsible** for any misuse, copyright infringement, or distribution of generated remixes.  
+It is the user’s responsibility to ensure lawful and ethical use of AI RemixMate.  
+All music rights remain with original creators and copyright holders.
 
 ---
 
