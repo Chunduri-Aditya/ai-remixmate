@@ -1,0 +1,12 @@
+audio_input/
+audio_output/
+output/
+separated/
+stems/
+lyrics/
+models/
+remix-env/
+__pycache__/
+*.pyc
+*.log
+*.DS_Store
