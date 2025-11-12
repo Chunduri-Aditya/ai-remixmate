@@ -1,0 +1,27 @@
+╔══════════════════════════════════════════════════════════╗
+║         🎵 AI RemixMate - Quick Start Guide 🎵           ║
+╚══════════════════════════════════════════════════════════╝
+
+🚀 TO START THE WEB APPLICATION:
+
+   cd github
+   python app.py
+
+That's it! The app will:
+  ✅ Check for missing packages
+  ✅ Install them automatically
+  ✅ Launch the web interface
+
+📱 Then open your browser to:
+   http://127.0.0.1:7860
+
+🎯 Features:
+  • Upload two audio files
+  • Real-time track analysis
+  • Intelligent mixing
+  • Arrangement-level DJ mixing
+  • Playlist management
+  • Song recommendations
+
+📖 For more info: See START_APP.md
+
