@@ -16,6 +16,7 @@ from scripts.api.routers import (
     jobs,
     library,
     remix,
+    setlist,
     spotify,
     stems,
     system,
@@ -33,3 +34,4 @@ router.include_router(spotify.router)
 router.include_router(jobs.router)
 router.include_router(crates.router)
 router.include_router(events.router)
+router.include_router(setlist.router)

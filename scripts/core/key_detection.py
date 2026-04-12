@@ -362,6 +362,170 @@ def camelot_compatible(a: str, b: str) -> bool:
     return dist <= 1
 
 
+def camelot_modulation(a: str, b: str) -> dict:
+    """
+    Classify the harmonic modulation between two Camelot positions.
+
+    Goes beyond simple distance — returns the *named* modulation type,
+    psychoacoustic impact, mixing recommendation, and a transition cost
+    (0.0 = perfect, 1.0 = most dissonant).
+
+    Modulation types (from the DJ theory literature):
+      • perfect_match       — same key, fully transparent
+      • relative_shift      — same number, A↔B (relative major/minor)
+      • perfect_fifth       — ±1 step same ring, 85% common notes
+      • energy_boost        — +2 steps same ring, whole-tone uplift
+      • double_energy_boost — +4 steps same ring, major third, peak-hour climax
+      • modulated_boost     — +7 steps (half-step modulation), jarring/attention
+      • add_four_protocol   — +4 steps cross-ring (Guetta move), dissonant but compelling
+      • diagonal            — ±1 step cross-ring, modal interchange (Major→Minor or vice-versa)
+      • non_standard        — everything else; cost scaled by distance
+
+    Args:
+        a: Source Camelot code (e.g., '8A')
+        b: Target Camelot code (e.g., '10B')
+
+    Returns:
+        Dict with keys:
+          type (str), semitone_shift (int), cost (float 0-1),
+          impact (str), recommendation (str), safe_to_blend (bool)
+    """
+    _UNKNOWN = {
+        "type": "unknown",
+        "semitone_shift": 0,
+        "cost": 1.0,
+        "impact": "Cannot classify — invalid Camelot codes.",
+        "recommendation": "Verify key data.",
+        "safe_to_blend": False,
+    }
+
+    try:
+        num_a, ring_a = int(a[:-1]), a[-1].upper()
+        num_b, ring_b = int(b[:-1]), b[-1].upper()
+    except (ValueError, IndexError):
+        return _UNKNOWN
+
+    same_ring = ring_a == ring_b
+    # Signed clockwise delta on the wheel (1–12 positions)
+    delta = (num_b - num_a) % 12   # clockwise steps 0-11
+    delta_cw = delta                # clockwise
+    delta_ccw = (12 - delta) % 12  # counter-clockwise
+    min_delta = min(delta_cw, delta_ccw)
+
+    semitone_shift = pitch_shift_for_camelot(a, b)
+
+    # ── classify ──────────────────────────────────────────────────────────────
+
+    if same_ring and delta == 0:
+        return {
+            "type": "perfect_match",
+            "semitone_shift": 0,
+            "cost": 0.0,
+            "impact": "Fully transparent — both tracks share the same key. "
+                      "Ideal for sustained energy sections.",
+            "recommendation": "Long blends, stem-layering, and extended overlaps are all safe.",
+            "safe_to_blend": True,
+        }
+
+    if not same_ring and delta == 0:
+        return {
+            "type": "relative_shift",
+            "semitone_shift": semitone_shift,
+            "cost": 0.05,
+            "impact": "Relative major/minor swap — identical note set, shifted tonal centre. "
+                      "Subtle mood change (bright→dark or vice-versa).",
+            "recommendation": "Very safe to blend. Effective for mood transitions without "
+                              "disrupting the crowd's kinetic state.",
+            "safe_to_blend": True,
+        }
+
+    if same_ring and min_delta == 1:
+        return {
+            "type": "perfect_fifth",
+            "semitone_shift": semitone_shift,
+            "cost": 0.10,
+            "impact": "Perfect fifth shift — 6 of 7 scale notes are shared (≈85% harmonic overlap). "
+                      "Sounds natural and forward-moving.",
+            "recommendation": "Standard safe blend. 16-bar transition window is fine.",
+            "safe_to_blend": True,
+        }
+
+    if not same_ring and min_delta == 1:
+        return {
+            "type": "diagonal",
+            "semitone_shift": semitone_shift,
+            "cost": 0.15,
+            "impact": "Modal interchange — cross-ring diagonal shift. Subtle mood colour change "
+                      "while maintaining structural coherence. Borrowed chord territory.",
+            "recommendation": "Blend carefully. EQ sculpting on the mid-range prevents "
+                              "harmonic muddiness at the overlap.",
+            "safe_to_blend": True,
+        }
+
+    if same_ring and min_delta == 2:
+        return {
+            "type": "energy_boost",
+            "semitone_shift": semitone_shift,
+            "cost": 0.30,
+            "impact": "Whole-tone modulation (+2 semitones) — injects a surge of brightness "
+                      "and adrenaline. Perceptible key change but not jarring.",
+            "recommendation": "Use at peak-hour to lift energy. Prefer quick cuts or very short "
+                              "blends (<8 bars) to avoid melodic clash.",
+            "safe_to_blend": False,
+        }
+
+    if same_ring and min_delta == 4:
+        return {
+            "type": "double_energy_boost",
+            "semitone_shift": semitone_shift,
+            "cost": 0.50,
+            "impact": "Major third modulation (+4 semitones) — extreme, highly noticeable "
+                      "energy uplift. Signals the absolute climax of a set.",
+            "recommendation": "Hard cut only. Reserve for set-defining moments. "
+                              "Don't blend — the dissonance is intentional.",
+            "safe_to_blend": False,
+        }
+
+    if not same_ring and min_delta == 4:
+        return {
+            "type": "add_four_protocol",
+            "semitone_shift": semitone_shift,
+            "cost": 0.55,
+            "impact": "The 'Add Four' protocol — cross-ring +4 shift. Mathematically dissonant "
+                      "but effective on tracks with minimal melodic content. Popularised by "
+                      "David Guetta for festival-scale energy surges.",
+            "recommendation": "Hard cut only. Works best with drop-centric tracks where "
+                              "the melody is simple or absent in the transition window.",
+            "safe_to_blend": False,
+        }
+
+    if min_delta == 7:
+        return {
+            "type": "modulated_boost",
+            "semitone_shift": semitone_shift,
+            "cost": 0.75,
+            "impact": "Half-step modulation (+1 semitone) — maximally jarring key change. "
+                      "Forces the audience into heightened attention. Use deliberately.",
+            "recommendation": "Instant cut only, never blend. Best deployed at the apex of "
+                              "a build or after a spinback.",
+            "safe_to_blend": False,
+        }
+
+    # Non-standard — scale cost by distance
+    dist = camelot_distance(a, b)
+    cost = min(0.95, dist / 12.0 + 0.3)
+    return {
+        "type": "non_standard",
+        "semitone_shift": semitone_shift,
+        "cost": round(cost, 2),
+        "impact": f"Unconventional harmonic jump (distance {dist}). "
+                  "Use with caution — may cause dissonance.",
+        "recommendation": "Quick cut or transition through an intermediate key. "
+                          "Consider whether the energy context justifies the jump.",
+        "safe_to_blend": False,
+    }
+
+
 def pitch_shift_for_camelot(source: str, target: str) -> int:
     """
     Calculate the semitone shift needed to transpose from source to target Camelot position.

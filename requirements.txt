@@ -58,6 +58,10 @@ altair==5.5.0
 # --- Loudness / mastering (AI Studio per-stem LUFS analysis) ---
 pyloudnorm>=0.1.1              # ITU-R BS.1770-4 integrated loudness + true peak
 
+# --- Setlist planner / Wordplay NLP (optional — degrades gracefully if absent) ---
+lyricsgenius>=3.0.1            # Genius API lyrics fetcher (wordplay transitions)
+nltk>=3.9                      # Tokenisation + stop-word removal for lyric matching
+
 # --- Neural audio codecs (optional — install separately if you want DAC tokenization) ---
 # descript-audio-codec conflicts with streamlit's protobuf requirement and is
 # imported with a try/except fallback — all core features work without it.
