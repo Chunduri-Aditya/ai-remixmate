@@ -1,0 +1,2161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI RemixMate</title>
+<style>
+/* ── Variables ─────────────────────────────────────────────────────────────── */
+:root {
+  --bg:        #0b0b12;
+  --bg2:       #12121d;
+  --bg3:       #1a1a2e;
+  --bg4:       #222238;
+  --accent:    #7c3aed;
+  --accent2:   #a855f7;
+  --accent-g:  rgba(124,58,237,.25);
+  --pink:      #ec4899;
+  --cyan:      #22d3ee;
+  --green:     #4ade80;
+  --red:       #f87171;
+  --text:      #f1f1f8;
+  --text2:     #94a3b8;
+  --text3:     #475569;
+  --border:    rgba(255,255,255,.07);
+  --radius:    12px;
+  --player-h:  88px;
+  --viz-h:     56px;
+  --sidebar-w: 240px;
+  --transition: .2s ease;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 14px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-areas:
+    "sidebar main"
+    "player  player";
+}
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 9px; }
+button { cursor: pointer; border: none; background: none; color: inherit; font: inherit; }
+input, select { font: inherit; color: var(--text); }
+
+/* ── Sidebar ───────────────────────────────────────────────────────────────── */
+#sidebar {
+  grid-area: sidebar;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 20px 0 12px;
+  overflow-y: auto;
+}
+.logo {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 20px 24px;
+  font-size: 1.3rem; font-weight: 700; letter-spacing: -.3px;
+}
+.logo-icon {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, var(--accent), var(--pink));
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem;
+  box-shadow: 0 0 18px var(--accent-g);
+}
+.nav-section { padding: 8px 12px; margin-bottom: 4px; }
+.nav-label { font-size: .7rem; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .08em; padding: 0 8px 8px; }
+.nav-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border-radius: 8px;
+  font-size: .9rem; font-weight: 500; color: var(--text2);
+  cursor: pointer; transition: var(--transition);
+  user-select: none;
+}
+.nav-item:hover { background: var(--bg3); color: var(--text); }
+.nav-item.active { background: var(--bg4); color: var(--text); }
+.nav-item.active .nav-icon { color: var(--accent2); }
+.nav-icon { font-size: 1.1rem; width: 20px; text-align: center; }
+.nav-badge {
+  margin-left: auto; background: var(--accent); color: #fff;
+  border-radius: 20px; padding: 1px 7px; font-size: .7rem; font-weight: 700;
+}
+.sidebar-divider { height: 1px; background: var(--border); margin: 8px 20px; }
+/* Mini now-playing in sidebar */
+.sidebar-playing {
+  margin-top: auto;
+  padding: 14px 16px;
+  margin: auto 8px 0;
+  background: var(--bg3);
+  border-radius: var(--radius);
+  display: none;
+}
+.sidebar-playing.show { display: block; }
+.sp-label { font-size: .65rem; color: var(--text3); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+.sp-title { font-size: .82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-sub { font-size: .72rem; color: var(--text2); margin-top: 2px; }
+.sp-bar { height: 3px; background: var(--bg4); border-radius: 9px; margin-top: 10px; }
+.sp-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 9px; transition: width .5s linear; }
+
+/* ── Main area ─────────────────────────────────────────────────────────────── */
+#main {
+  grid-area: main;
+  overflow-y: auto;
+  padding-bottom: 20px;
+}
+.page { display: none; }
+.page.active { display: block; }
+.page-header {
+  position: sticky; top: 0; z-index: 10;
+  background: linear-gradient(to bottom, var(--bg) 70%, transparent);
+  padding: 24px 28px 12px;
+  display: flex; align-items: center; gap: 16px;
+}
+.page-title { font-size: 1.5rem; font-weight: 700; }
+.page-body { padding: 0 28px; }
+
+/* ── Search bar ────────────────────────────────────────────────────────────── */
+.search-wrap {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg3); border-radius: 24px;
+  padding: 8px 16px; flex: 1; max-width: 380px;
+  border: 1px solid transparent;
+  transition: var(--transition);
+}
+.search-wrap:focus-within { border-color: var(--accent); background: var(--bg4); }
+.search-wrap input {
+  background: none; border: none; outline: none;
+  flex: 1; font-size: .9rem; color: var(--text);
+}
+.search-wrap input::placeholder { color: var(--text3); }
+
+/* ── Song Cards Grid ───────────────────────────────────────────────────────── */
+.section-label {
+  font-size: 1.1rem; font-weight: 700; margin-bottom: 16px; margin-top: 8px;
+}
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
+  gap: 14px;
+}
+.song-card {
+  background: var(--bg2);
+  border-radius: var(--radius);
+  padding: 14px;
+  cursor: pointer;
+  transition: var(--transition);
+  position: relative;
+  border: 1px solid transparent;
+}
+.song-card:hover { background: var(--bg3); border-color: var(--border); transform: translateY(-2px); }
+.song-card.playing { border-color: var(--accent); background: var(--bg3); }
+.card-art {
+  width: 100%; aspect-ratio: 1;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  position: relative;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.5rem;
+}
+.card-art canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.card-play {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.5);
+  opacity: 0; transition: var(--transition);
+  font-size: 2rem;
+}
+.song-card:hover .card-play { opacity: 1; }
+.song-card.playing .card-play { opacity: 1; }
+.card-title { font-size: .85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-meta { font-size: .72rem; color: var(--text2); margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
+.badge {
+  background: var(--bg4); padding: 2px 7px; border-radius: 20px;
+  font-size: .65rem; font-weight: 600; letter-spacing: .02em;
+}
+.badge.accent { background: var(--accent-g); color: var(--accent2); }
+.badge.green { background: rgba(74,222,128,.15); color: var(--green); }
+.badge.pink { background: rgba(236,72,153,.15); color: var(--pink); }
+
+/* ── Buttons ───────────────────────────────────────────────────────────────── */
+.btn {
+  padding: 9px 20px; border-radius: 24px; font-weight: 600; font-size: .85rem;
+  transition: var(--transition); display: inline-flex; align-items: center; gap: 7px;
+}
+.btn-primary {
+  background: var(--accent); color: #fff;
+  box-shadow: 0 0 20px var(--accent-g);
+}
+.btn-primary:hover { background: var(--accent2); transform: scale(1.03); }
+.btn-outline {
+  background: transparent; color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-outline:hover { background: var(--bg3); border-color: var(--accent); }
+.btn-ghost { color: var(--text2); padding: 9px 14px; }
+.btn-ghost:hover { color: var(--text); background: var(--bg3); border-radius: 8px; }
+.btn-icon {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; color: var(--text2);
+  transition: var(--transition);
+}
+.btn-icon:hover { background: var(--bg3); color: var(--text); }
+.btn-lg { padding: 13px 32px; font-size: 1rem; border-radius: 30px; }
+
+/* ── DJ Remix Page ─────────────────────────────────────────────────────────── */
+.remix-layout {
+  display: grid;
+  grid-template-columns: 1fr 140px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.remix-col { background: var(--bg2); border-radius: var(--radius); padding: 20px; }
+.remix-mid { display: flex; flex-direction: column; align-items: center; gap: 16px; padding-top: 24px; }
+.remix-label { font-size: .75rem; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 10px; }
+.song-select-wrap {
+  background: var(--bg3); border-radius: 10px; padding: 12px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; transition: var(--transition); border: 1px solid transparent;
+  margin-bottom: 12px;
+}
+.song-select-wrap:hover, .song-select-wrap.open { border-color: var(--accent); }
+.song-select-text { font-size: .85rem; font-weight: 500; }
+.song-select-placeholder { color: var(--text3); }
+.select-dropdown {
+  background: var(--bg3); border-radius: 10px; max-height: 200px;
+  overflow-y: auto; position: absolute; width: 100%;
+  border: 1px solid var(--border); z-index: 20;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+}
+.select-item {
+  padding: 10px 14px; font-size: .85rem; cursor: pointer;
+  transition: var(--transition); display: flex; align-items: center; gap: 10px;
+}
+.select-item:hover { background: var(--bg4); }
+.select-item.selected { color: var(--accent2); }
+.song-chosen { background: var(--bg3); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.chosen-title { font-size: .9rem; font-weight: 600; margin-bottom: 4px; }
+.chosen-meta { font-size: .72rem; color: var(--text2); display: flex; gap: 8px; }
+.vs-badge {
+  width: 48px; height: 48px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--pink));
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: .8rem; letter-spacing: .05em;
+  box-shadow: 0 0 24px var(--accent-g);
+}
+.ctrl-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.ctrl-label { font-size: .75rem; color: var(--text2); font-weight: 500; }
+select.ctrl-select {
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 10px; font-size: .8rem; outline: none;
+  cursor: pointer; max-width: 110px;
+}
+select.ctrl-select:focus { border-color: var(--accent); }
+.progress-bar {
+  height: 4px; background: var(--bg4); border-radius: 9px; overflow: hidden;
+  margin: 10px 0;
+}
+.progress-fill {
+  height: 100%; border-radius: 9px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  transition: width .3s ease;
+}
+.result-player { background: var(--bg3); border-radius: 10px; padding: 14px; margin-top: 16px; display: none; }
+.result-player.show { display: block; }
+.result-player audio { width: 100%; margin-top: 8px; }
+
+/* ── Download Page ─────────────────────────────────────────────────────────── */
+.dl-form {
+  background: var(--bg2); border-radius: var(--radius);
+  padding: 24px; max-width: 600px;
+}
+.dl-mode-tabs {
+  display: flex; gap: 8px; margin-bottom: 20px;
+}
+.dl-tab {
+  flex: 1; padding: 9px 0; border-radius: 10px; border: 1.5px solid var(--border);
+  background: transparent; color: var(--text2); font-size: .85rem; cursor: pointer;
+  transition: var(--transition);
+}
+.dl-tab.active {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+}
+.dl-tab:not(.active):hover { border-color: var(--accent); color: var(--text1); }
+.dl-input-row {
+  display: flex; gap: 10px; margin-bottom: 14px;
+}
+.dl-input {
+  flex: 1; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 10px; padding: 11px 16px; font-size: .9rem; outline: none;
+  transition: var(--transition);
+}
+.dl-input:focus { border-color: var(--accent); }
+.dl-limit-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px; font-size: .82rem; color: var(--text2);
+}
+.dl-limit-row input[type=number] {
+  width: 72px; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 10px; color: var(--text1); font-size: .82rem;
+  outline: none;
+}
+.dl-limit-row input[type=number]:focus { border-color: var(--accent); }
+.dl-jobs { margin-top: 24px; }
+.pl-track-list {
+  margin-top: 8px; max-height: 130px; overflow-y: auto;
+  font-size: .76rem; color: var(--text2); border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+.pl-track-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.pl-track-ok  { color: #1db954; }
+.pl-track-err { color: #e05252; }
+.job-item {
+  background: var(--bg3); border-radius: 10px; padding: 14px;
+  margin-bottom: 10px; display: flex; align-items: center; gap: 14px;
+}
+.job-icon { font-size: 1.4rem; }
+.job-info { flex: 1; }
+.job-name { font-size: .85rem; font-weight: 600; }
+.job-status { font-size: .72rem; color: var(--text2); margin-top: 2px; }
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.status-dot.running { background: var(--cyan); animation: pulse 1.2s infinite; }
+.status-dot.done { background: var(--green); }
+.status-dot.failed { background: var(--red); }
+.status-dot.pending { background: var(--text3); }
+
+/* ── Chain Page ────────────────────────────────────────────────────────────── */
+.chain-list { min-height: 60px; }
+.chain-item {
+  background: var(--bg2); border-radius: 10px; padding: 12px 16px;
+  margin-bottom: 10px; display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--border); transition: var(--transition);
+}
+.chain-item:hover { border-color: var(--accent); }
+.chain-num {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--bg4); display: flex; align-items: center; justify-content: center;
+  font-size: .72rem; font-weight: 700; color: var(--text2); flex-shrink: 0;
+}
+.chain-name { flex: 1; font-size: .85rem; font-weight: 500; }
+.chain-remove { color: var(--text3); font-size: 1.1rem; transition: var(--transition); }
+.chain-remove:hover { color: var(--red); }
+.chain-add {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--bg3); border-radius: 10px; padding: 10px 14px;
+  cursor: pointer; transition: var(--transition); border: 1px dashed var(--border);
+  font-size: .85rem; color: var(--text2);
+}
+.chain-add:hover { border-color: var(--accent); color: var(--text); }
+
+/* ── Player Bar ────────────────────────────────────────────────────────────── */
+#player-bar {
+  grid-area: player;
+  background: rgba(11,11,18,.97);
+  border-top: 1px solid var(--border);
+  backdrop-filter: blur(20px);
+  display: flex; flex-direction: column;
+}
+/* Visualizer canvas */
+#viz-canvas {
+  width: 100%; height: var(--viz-h);
+  display: block;
+}
+.player-row {
+  height: var(--player-h);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 24px;
+  gap: 16px;
+}
+
+/* Track info */
+.track-info { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.track-art {
+  width: 52px; height: 52px; border-radius: 8px; flex-shrink: 0;
+  background: var(--bg3);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem;
+  position: relative; overflow: hidden;
+}
+.track-art .art-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.track-text { min-width: 0; }
+.track-name {
+  font-size: .88rem; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 180px;
+}
+.track-sub { font-size: .72rem; color: var(--text2); margin-top: 2px; }
+.track-like { margin-left: 10px; color: var(--text3); font-size: 1rem; transition: var(--transition); }
+.track-like:hover { color: var(--pink); }
+.track-like.liked { color: var(--pink); }
+
+/* Playback controls */
+.playback-controls { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.control-btns { display: flex; align-items: center; gap: 6px; }
+.ctrl-btn { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .9rem; color: var(--text2); transition: var(--transition); }
+.ctrl-btn:hover { color: var(--text); background: var(--bg3); }
+.ctrl-btn-main {
+  width: 40px; height: 40px;
+  background: var(--text); color: var(--bg);
+  border-radius: 50%; font-size: 1rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: var(--transition);
+}
+.ctrl-btn-main:hover { transform: scale(1.08); background: #fff; }
+.progress-row { display: flex; align-items: center; gap: 10px; width: 320px; }
+.time-label { font-size: .7rem; color: var(--text2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.seek-bar {
+  flex: 1; height: 4px; background: var(--bg4); border-radius: 9px;
+  cursor: pointer; position: relative;
+}
+.seek-fill { height: 100%; background: var(--text); border-radius: 9px; pointer-events: none; }
+.seek-bar:hover .seek-fill { background: var(--accent2); }
+.seek-thumb {
+  position: absolute; top: 50%; right: 0; transform: translate(50%, -50%);
+  width: 12px; height: 12px; border-radius: 50%; background: var(--text);
+  display: none; pointer-events: none;
+}
+.seek-bar:hover .seek-thumb { display: block; }
+
+/* DJ Knobs panel */
+.dj-panel { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
+.knob-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.knob-label { font-size: .6rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text3); }
+.knob {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  position: relative;
+  cursor: ns-resize;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.knob-bg {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: var(--bg3);
+  border: 2px solid var(--bg4);
+}
+.knob-arc {
+  position: absolute; inset: -2px; border-radius: 50%;
+}
+.knob-dot {
+  position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+  width: 3px; height: 10px; background: var(--text2);
+  border-radius: 3px;
+  transform-origin: center -5px;
+  top: 50%; margin-top: -5px;
+  left: calc(50% - 1.5px);
+}
+.knob-val {
+  font-size: .6rem; color: var(--text2); font-variant-numeric: tabular-nums;
+  text-align: center; min-width: 28px;
+}
+
+/* Volume */
+.vol-wrap { display: flex; align-items: center; gap: 8px; }
+.vol-icon { font-size: .9rem; color: var(--text2); }
+.vol-slider {
+  -webkit-appearance: none; appearance: none;
+  width: 80px; height: 4px; border-radius: 9px;
+  background: var(--bg4); outline: none; cursor: pointer;
+}
+.vol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--text); cursor: pointer;
+}
+.vol-slider:hover { background: var(--bg3); }
+
+/* ── Animations ────────────────────────────────────────────────────────────── */
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.9)} }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+@keyframes spin { to{transform:rotate(360deg)} }
+@keyframes glow { 0%,100%{box-shadow:0 0 16px var(--accent-g)} 50%{box-shadow:0 0 32px rgba(124,58,237,.5)} }
+.fade-in { animation: fadeIn .3s ease both; }
+.spin { animation: spin 1s linear infinite; }
+
+/* ── Toast ─────────────────────────────────────────────────────────────────── */
+.toast-shelf {
+  position: fixed; bottom: calc(var(--player-h) + var(--viz-h) + 16px); right: 20px;
+  z-index: 999; display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+}
+.toast {
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 18px;
+  font-size: .82rem; max-width: 300px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  animation: fadeIn .3s ease;
+  pointer-events: auto;
+}
+.toast.success { border-color: var(--green); }
+.toast.error { border-color: var(--red); }
+.toast.info { border-color: var(--accent); }
+
+/* ── Modal overlay ─────────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  z-index: 200; display: flex; align-items: center; justify-content: center;
+  display: none;
+}
+.modal-overlay.show { display: flex; }
+.modal-box {
+  background: var(--bg2); border-radius: var(--radius);
+  padding: 28px; max-width: 420px; width: 90%;
+  border: 1px solid var(--border);
+  animation: fadeIn .2s ease;
+}
+.modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 6px; }
+.modal-sub { font-size: .82rem; color: var(--text2); margin-bottom: 20px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+/* ── Empty state ───────────────────────────────────────────────────────────── */
+.empty-state {
+  text-align: center; padding: 60px 20px; color: var(--text2);
+}
+.empty-icon { font-size: 3rem; margin-bottom: 16px; }
+.empty-title { font-size: 1.1rem; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.empty-sub { font-size: .85rem; max-width: 300px; margin: 0 auto 20px; }
+
+/* ── Loading skeleton ──────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, var(--bg3) 25%, var(--bg4) 50%, var(--bg3) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 8px;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+/* ── Responsive ────────────────────────────────────────────────────────────── */
+@media (max-width: 680px) {
+  :root { --sidebar-w: 0px; }
+  #sidebar { display: none; }
+  .remix-layout { grid-template-columns: 1fr; }
+  .remix-mid { flex-direction: row; }
+  .progress-row { width: 200px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ──────────────────────────────────────────────────────────────── -->
+<aside id="sidebar">
+  <div class="logo">
+    <div class="logo-icon">🎛️</div>
+    <span>RemixMate</span>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">Discover</div>
+    <div class="nav-item active" data-page="library">
+      <span class="nav-icon">🎵</span> Library
+      <span class="nav-badge" id="lib-count">0</span>
+    </div>
+    <div class="nav-item" data-page="download">
+      <span class="nav-icon">⬇️</span> Download
+    </div>
+  </div>
+
+  <div class="sidebar-divider"></div>
+
+  <div class="nav-section">
+    <div class="nav-label">DJ Tools</div>
+    <div class="nav-item" data-page="remix">
+      <span class="nav-icon">🎚️</span> DJ Remix
+    </div>
+    <div class="nav-item" data-page="chain">
+      <span class="nav-icon">🔗</span> DJ Chain
+    </div>
+    <div class="nav-item" data-page="stems">
+      <span class="nav-icon">✂️</span> Stem Split
+    </div>
+  </div>
+
+  <div class="sidebar-divider"></div>
+
+  <div class="sidebar-playing" id="sidebar-playing">
+    <div class="sp-label">▶ Now Playing</div>
+    <div class="sp-title" id="sp-title">—</div>
+    <div class="sp-sub" id="sp-sub"></div>
+    <div class="sp-bar"><div class="sp-fill" id="sp-fill" style="width:0%"></div></div>
+  </div>
+</aside>
+
+<!-- ── Main Content ─────────────────────────────────────────────────────────── -->
+<main id="main">
+
+  <!-- LIBRARY PAGE -->
+  <div id="page-library" class="page active">
+    <div class="page-header">
+      <div class="page-title">🎵 Your Library</div>
+      <div class="search-wrap" style="margin-left:auto">
+        <span>🔍</span>
+        <input id="lib-search" type="text" placeholder="Search songs…">
+      </div>
+      <button class="btn btn-outline" onclick="refreshLibrary()">↻ Refresh</button>
+    </div>
+    <div class="page-body">
+      <div id="lib-recently-played" style="margin-bottom:28px;display:none">
+        <div class="section-label">Recently Played</div>
+        <div class="cards-grid" id="recent-grid"></div>
+      </div>
+      <div class="section-label" id="lib-grid-label">All Songs</div>
+      <div class="cards-grid" id="lib-grid">
+        <div style="grid-column:1/-1"><div class="empty-state"><div class="empty-icon">🎧</div><div class="empty-title">Loading library…</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DOWNLOAD PAGE -->
+  <div id="page-download" class="page">
+    <div class="page-header">
+      <div class="page-title">⬇️ Download</div>
+    </div>
+    <div class="page-body">
+      <div class="dl-form">
+
+        <!-- Mode toggle -->
+        <div class="dl-mode-tabs">
+          <button class="dl-tab active" id="dl-tab-single" onclick="setDlMode('single')">🎵 Single Song</button>
+          <button class="dl-tab"        id="dl-tab-playlist" onclick="setDlMode('playlist')">📋 Playlist</button>
+        </div>
+
+        <!-- ── SINGLE SONG ─────────────────────────── -->
+        <div id="dl-single-panel">
+          <div style="font-size:.82rem;color:var(--text2);margin-bottom:14px">
+            Paste a YouTube / YouTube Music URL, or type an artist + song name.
+          </div>
+          <div class="dl-input-row">
+            <input id="dl-query" class="dl-input" type="text"
+              placeholder="e.g.  Tiësto – The Business  or  https://youtu.be/…">
+            <button class="btn btn-primary" onclick="startDownload()">⬇ Download</button>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--text2);cursor:pointer">
+            <input type="checkbox" id="dl-separate" style="accent-color:var(--accent)">
+            Separate stems with Demucs after download (slow, ~3 min per track)
+          </label>
+        </div>
+
+        <!-- ── PLAYLIST ───────────────────────────── -->
+        <div id="dl-playlist-panel" style="display:none">
+          <div style="font-size:.82rem;color:var(--text2);margin-bottom:14px">
+            Paste a YouTube or YouTube Music <strong style="color:var(--text1)">playlist URL</strong>.
+            All tracks will be queued and downloaded automatically.
+          </div>
+          <div class="dl-input-row">
+            <input id="dl-pl-url" class="dl-input" type="text"
+              placeholder="https://www.youtube.com/playlist?list=PL…  or  YT Music playlist URL">
+            <button class="btn btn-primary" onclick="startPlaylistDownload()">⬇ Download All</button>
+          </div>
+          <div class="dl-limit-row">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="dl-pl-separate" style="accent-color:var(--accent)">
+              Separate stems (Demucs) — slow
+            </label>
+            <span style="margin-left:auto">Max tracks:</span>
+            <input type="number" id="dl-pl-limit" placeholder="all" min="1" max="200">
+          </div>
+          <div style="font-size:.75rem;color:var(--text3)">
+            ⚠️ Downloaded audio is for personal use only. Respect YouTube's ToS.
+          </div>
+        </div>
+
+      </div>
+
+      <div class="dl-jobs" id="dl-jobs">
+        <div class="section-label" style="margin-top:24px">Active Jobs</div>
+        <div id="dl-job-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DJ REMIX PAGE -->
+  <div id="page-remix" class="page">
+    <div class="page-header">
+      <div class="page-title">🎚️ DJ Remix</div>
+    </div>
+    <div class="page-body">
+      <div class="remix-layout">
+        <!-- Song A -->
+        <div class="remix-col">
+          <div class="remix-label">Track A — Outgoing</div>
+          <div style="position:relative">
+            <div class="song-select-wrap" id="sel-a-wrap" onclick="toggleDropdown('a')">
+              <span class="song-select-text song-select-placeholder" id="sel-a-text">Choose a song…</span>
+              <span>▾</span>
+            </div>
+            <div class="select-dropdown" id="drop-a" style="display:none"></div>
+          </div>
+          <div class="song-chosen" id="chosen-a" style="display:none">
+            <div class="chosen-title" id="chosen-a-title"></div>
+            <div class="chosen-meta" id="chosen-a-meta"></div>
+          </div>
+        </div>
+
+        <!-- Middle controls -->
+        <div class="remix-mid">
+          <div class="vs-badge">VS</div>
+          <div style="width:100%">
+            <div class="ctrl-row">
+              <span class="ctrl-label">Bars</span>
+              <select class="ctrl-select" id="remix-bars">
+                <option value="8">8 bars</option>
+                <option value="16" selected>16 bars</option>
+                <option value="32">32 bars</option>
+              </select>
+            </div>
+            <div class="ctrl-row" style="margin-top:8px">
+              <span class="ctrl-label">Effect</span>
+              <select class="ctrl-select" id="remix-effect">
+                <option value="auto">Auto</option>
+                <option value="echo">Echo</option>
+                <option value="filter">Filter</option>
+                <option value="reverb">Reverb</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+            <div class="ctrl-row" style="margin-top:8px">
+              <span class="ctrl-label">Bridge</span>
+              <select class="ctrl-select" id="remix-bridge">
+                <option value="none">None</option>
+                <option value="auto">Auto Beat</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;animation:glow 2s infinite" onclick="startRemix()">
+            🎛️ Mix It
+          </button>
+        </div>
+
+        <!-- Song B -->
+        <div class="remix-col">
+          <div class="remix-label">Track B — Incoming</div>
+          <div style="position:relative">
+            <div class="song-select-wrap" id="sel-b-wrap" onclick="toggleDropdown('b')">
+              <span class="song-select-text song-select-placeholder" id="sel-b-text">Choose a song…</span>
+              <span>▾</span>
+            </div>
+            <div class="select-dropdown" id="drop-b" style="display:none"></div>
+          </div>
+          <div class="song-chosen" id="chosen-b" style="display:none">
+            <div class="chosen-title" id="chosen-b-title"></div>
+            <div class="chosen-meta" id="chosen-b-meta"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Job progress + result -->
+      <div id="remix-progress" style="display:none;margin-top:20px;max-width:600px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+          <span class="spin">🎛️</span>
+          <span id="remix-status-text" style="font-size:.85rem;color:var(--text2)">Starting…</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" id="remix-prog-fill" style="width:0%"></div></div>
+      </div>
+      <div class="result-player" id="remix-result">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="font-size:.9rem;font-weight:600">🎉 Mix Ready!</span>
+          <button class="btn btn-outline" id="remix-play-btn" onclick="playResult('remix')">▶ Play</button>
+        </div>
+        <div id="remix-result-meta" style="font-size:.72rem;color:var(--text2);margin-bottom:8px"></div>
+        <audio id="remix-audio" controls style="width:100%;height:36px"></audio>
+      </div>
+    </div>
+  </div>
+
+  <!-- DJ CHAIN PAGE -->
+  <div id="page-chain" class="page">
+    <div class="page-header">
+      <div class="page-title">🔗 DJ Chain</div>
+    </div>
+    <div class="page-body">
+      <div style="max-width:560px">
+        <div class="section-label">Song Order</div>
+        <div class="chain-list" id="chain-list"></div>
+        <div class="chain-add" onclick="chainAddSong()">
+          <span>＋</span> Add song to chain
+        </div>
+        <div style="margin-top:20px;display:flex;align-items:center;gap:12px">
+          <div>
+            <div class="ctrl-row" style="gap:12px">
+              <span class="ctrl-label">Bars per transition</span>
+              <select class="ctrl-select" id="chain-bars">
+                <option value="8">8</option>
+                <option value="16" selected>16</option>
+                <option value="32">32</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" style="margin-left:auto" onclick="startChain()">🔗 Chain Mix</button>
+        </div>
+        <div id="chain-progress" style="display:none;margin-top:16px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+            <span class="spin">🔗</span>
+            <span id="chain-status-text" style="font-size:.85rem;color:var(--text2)">Starting…</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="chain-prog-fill" style="width:0%"></div></div>
+        </div>
+        <div class="result-player" id="chain-result">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <span style="font-size:.9rem;font-weight:600">🎉 Chain Ready!</span>
+            <button class="btn btn-outline" onclick="playResult('chain')">▶ Play</button>
+          </div>
+          <div id="chain-result-meta" style="font-size:.72rem;color:var(--text2);margin-bottom:8px"></div>
+          <audio id="chain-audio" controls style="width:100%;height:36px"></audio>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEMS PAGE -->
+  <div id="page-stems" class="page">
+    <div class="page-header">
+      <div class="page-title">✂️ Stem Split</div>
+    </div>
+    <div class="page-body">
+
+      <!-- Mode tabs -->
+      <div class="dl-mode-tabs" style="max-width:560px">
+        <button class="dl-tab active" id="stem-tab-single" onclick="setStemMode('single')">🎵 Single Song</button>
+        <button class="dl-tab"        id="stem-tab-batch"  onclick="setStemMode('batch')">📋 Batch / All Library</button>
+      </div>
+
+      <!-- ── SINGLE ───────────────────────────────────────────────── -->
+      <div id="stem-single-panel" style="max-width:560px">
+        <div style="background:var(--bg2);border-radius:var(--radius);padding:22px">
+          <div style="font-size:.82rem;color:var(--text2);margin-bottom:16px">
+            Select a song from your library to enhance and separate into<br>
+            <strong style="color:var(--text1)">Vocals · Drums · Bass · Other</strong> stems using Demucs htdemucs.
+          </div>
+
+          <!-- Song picker -->
+          <div style="position:relative;margin-bottom:14px">
+            <div class="song-select-wrap" id="stem-sel-wrap" onclick="toggleDropdown('stem')">
+              <span class="song-select-text song-select-placeholder" id="stem-sel-text">Choose a song…</span>
+              <span>▾</span>
+            </div>
+            <div class="select-dropdown" id="drop-stem" style="display:none"></div>
+          </div>
+
+          <!-- Options -->
+          <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--text2);cursor:pointer">
+              <input type="checkbox" id="stem-enhance" checked style="accent-color:var(--accent)">
+              Enhance before split (HP filter · compression · air EQ · LUFS −14)
+            </label>
+          </div>
+          <div style="margin-bottom:16px">
+            <span style="font-size:.8rem;color:var(--text3)">Model: </span>
+            <select class="ctrl-select" id="stem-model" style="font-size:.8rem">
+              <option value="htdemucs" selected>htdemucs (default)</option>
+              <option value="htdemucs_ft">htdemucs_ft (fine-tuned, slower)</option>
+              <option value="mdx_extra">mdx_extra (high quality)</option>
+            </select>
+          </div>
+
+          <button class="btn btn-primary" style="width:100%" onclick="startStemSplit()">
+            ✂️ Split Song
+          </button>
+
+          <!-- Progress -->
+          <div id="stem-single-progress" style="display:none;margin-top:16px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <span class="spin" style="font-size:1.1rem">✂️</span>
+              <span id="stem-single-status" style="font-size:.83rem;color:var(--text2)">Starting…</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" id="stem-single-fill" style="width:0%"></div></div>
+          </div>
+
+          <!-- Result -->
+          <div id="stem-single-result" style="display:none;margin-top:18px">
+            <div class="section-label" style="margin-bottom:10px">Stems Ready ✓</div>
+            <div id="stem-single-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── BATCH ────────────────────────────────────────────────── -->
+      <div id="stem-batch-panel" style="display:none;max-width:620px">
+        <div style="background:var(--bg2);border-radius:var(--radius);padding:22px">
+          <div style="font-size:.82rem;color:var(--text2);margin-bottom:16px">
+            Run Demucs on multiple songs at once. Select specific songs or
+            <strong style="color:var(--text1)">split the entire library</strong>.
+            Songs that already have stems are skipped automatically.
+          </div>
+
+          <!-- Stats row -->
+          <div id="stem-batch-stats" style="display:flex;gap:16px;margin-bottom:18px;flex-wrap:wrap">
+            <div style="background:var(--bg3);border-radius:10px;padding:12px 18px;text-align:center;min-width:100px">
+              <div style="font-size:1.4rem;font-weight:700;color:var(--accent)" id="stat-total">—</div>
+              <div style="font-size:.72rem;color:var(--text3)">Total Songs</div>
+            </div>
+            <div style="background:var(--bg3);border-radius:10px;padding:12px 18px;text-align:center;min-width:100px">
+              <div style="font-size:1.4rem;font-weight:700;color:#1db954" id="stat-has-stems">—</div>
+              <div style="font-size:.72rem;color:var(--text3)">Has Stems</div>
+            </div>
+            <div style="background:var(--bg3);border-radius:10px;padding:12px 18px;text-align:center;min-width:100px">
+              <div style="font-size:1.4rem;font-weight:700;color:#e0a550" id="stat-needs-stems">—</div>
+              <div style="font-size:.72rem;color:var(--text3)">Needs Split</div>
+            </div>
+          </div>
+
+          <!-- Target selector -->
+          <div style="margin-bottom:14px">
+            <div style="font-size:.8rem;color:var(--text2);margin-bottom:8px">What to split:</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="dl-tab active" id="batch-tgt-all" onclick="setBatchTarget('all')" style="flex:0 0 auto;padding:7px 16px">
+                All Library
+              </button>
+              <button class="dl-tab" id="batch-tgt-missing" onclick="setBatchTarget('missing')" style="flex:0 0 auto;padding:7px 16px">
+                Missing Only
+              </button>
+              <button class="dl-tab" id="batch-tgt-custom" onclick="setBatchTarget('custom')" style="flex:0 0 auto;padding:7px 16px">
+                Custom Selection
+              </button>
+            </div>
+          </div>
+
+          <!-- Custom selection (shown when custom mode) -->
+          <div id="batch-custom-select" style="display:none;margin-bottom:14px">
+            <input id="batch-search" class="dl-input" type="text" placeholder="Search songs…"
+              oninput="filterBatchList()" style="margin-bottom:8px">
+            <div id="batch-song-list" style="max-height:200px;overflow-y:auto;background:var(--bg3);
+              border-radius:10px;padding:8px;font-size:.82rem"></div>
+            <div style="font-size:.74rem;color:var(--text3);margin-top:6px">
+              <span id="batch-sel-count">0</span> songs selected
+            </div>
+          </div>
+
+          <!-- Options -->
+          <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--text2);cursor:pointer">
+              <input type="checkbox" id="batch-enhance" checked style="accent-color:var(--accent)">
+              Enhance each song before split
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--text2);cursor:pointer">
+              <input type="checkbox" id="batch-skip-existing" checked style="accent-color:var(--accent)">
+              Skip songs with existing stems
+            </label>
+          </div>
+          <div style="margin-bottom:18px">
+            <span style="font-size:.8rem;color:var(--text3)">Model: </span>
+            <select class="ctrl-select" id="batch-model" style="font-size:.8rem">
+              <option value="htdemucs" selected>htdemucs (default)</option>
+              <option value="htdemucs_ft">htdemucs_ft (fine-tuned, slower)</option>
+              <option value="mdx_extra">mdx_extra (high quality)</option>
+            </select>
+          </div>
+
+          <button class="btn btn-primary" style="width:100%" onclick="startBatchSplit()">
+            ✂️ Start Batch Split
+          </button>
+
+          <!-- Batch Progress -->
+          <div id="stem-batch-progress" style="display:none;margin-top:16px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <span class="spin" style="font-size:1.1rem">✂️</span>
+              <span id="stem-batch-status" style="font-size:.83rem;color:var(--text2)">Starting…</span>
+            </div>
+            <div class="progress-bar" style="margin-bottom:10px">
+              <div class="progress-fill" id="stem-batch-fill" style="width:0%"></div>
+            </div>
+            <div id="stem-batch-rows" style="max-height:220px;overflow-y:auto;font-size:.76rem;
+              color:var(--text2);background:var(--bg3);border-radius:8px;padding:8px"></div>
+          </div>
+
+          <!-- Batch done summary -->
+          <div id="stem-batch-done" style="display:none;margin-top:16px;background:var(--bg3);
+            border-radius:10px;padding:16px">
+            <div style="font-size:.9rem;font-weight:600;margin-bottom:8px">✅ Batch Complete</div>
+            <div id="stem-batch-summary" style="font-size:.82rem;color:var(--text2)"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Player Bar ────────────────────────────────────────────────────────────── -->
+<footer id="player-bar">
+  <canvas id="viz-canvas"></canvas>
+
+  <div class="player-row">
+    <!-- Track info -->
+    <div class="track-info">
+      <div class="track-art" id="track-art">
+        <canvas class="art-canvas" id="art-canvas"></canvas>
+      </div>
+      <div class="track-text">
+        <div class="track-name" id="track-name">No track playing</div>
+        <div class="track-sub" id="track-sub">—</div>
+      </div>
+      <button class="track-like btn-icon" id="like-btn" onclick="toggleLike()" title="Like">♡</button>
+    </div>
+
+    <!-- Playback controls -->
+    <div class="playback-controls">
+      <div class="control-btns">
+        <button class="ctrl-btn" title="Shuffle" onclick="toggleShuffle()" id="shuffle-btn">⇌</button>
+        <button class="ctrl-btn" onclick="prevTrack()" title="Previous">⏮</button>
+        <button class="ctrl-btn-main" id="play-btn" onclick="togglePlay()">▶</button>
+        <button class="ctrl-btn" onclick="nextTrack()" title="Next">⏭</button>
+        <button class="ctrl-btn" onclick="toggleRepeat()" id="repeat-btn" title="Repeat">⇄</button>
+      </div>
+      <div class="progress-row">
+        <span class="time-label" id="time-cur">0:00</span>
+        <div class="seek-bar" id="seek-bar" onclick="seekTo(event)">
+          <div class="seek-fill" id="seek-fill" style="width:0%"></div>
+          <div class="seek-thumb" id="seek-thumb"></div>
+        </div>
+        <span class="time-label" id="time-total">0:00</span>
+      </div>
+    </div>
+
+    <!-- DJ Knobs + Volume -->
+    <div class="dj-panel">
+      <div class="knob-wrap">
+        <div class="knob-label">Bass</div>
+        <div class="knob" id="knob-bass" data-knob="bass" data-min="-12" data-max="12" data-val="0">
+          <div class="knob-bg"></div>
+          <canvas class="knob-arc" id="arc-bass" width="46" height="46"></canvas>
+          <div class="knob-dot" id="dot-bass"></div>
+        </div>
+        <div class="knob-val" id="val-bass">0</div>
+      </div>
+      <div class="knob-wrap">
+        <div class="knob-label">Mid</div>
+        <div class="knob" id="knob-mid" data-knob="mid" data-min="-12" data-max="12" data-val="0">
+          <div class="knob-bg"></div>
+          <canvas class="knob-arc" id="arc-mid" width="46" height="46"></canvas>
+          <div class="knob-dot" id="dot-mid"></div>
+        </div>
+        <div class="knob-val" id="val-mid">0</div>
+      </div>
+      <div class="knob-wrap">
+        <div class="knob-label">Treble</div>
+        <div class="knob" id="knob-treble" data-knob="treble" data-min="-12" data-max="12" data-val="0">
+          <div class="knob-bg"></div>
+          <canvas class="knob-arc" id="arc-treble" width="46" height="46"></canvas>
+          <div class="knob-dot" id="dot-treble"></div>
+        </div>
+        <div class="knob-val" id="val-treble">0</div>
+      </div>
+      <div class="knob-wrap" style="margin-left:8px">
+        <div class="knob-label">Vol</div>
+        <div class="vol-wrap">
+          <span class="vol-icon" id="vol-icon">🔊</span>
+          <input type="range" class="vol-slider" id="vol-slider" min="0" max="100" value="80" oninput="setVolume(this.value)">
+        </div>
+        <div class="knob-val" id="val-vol">80%</div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- Modal for chain song picker -->
+<div class="modal-overlay" id="chain-modal">
+  <div class="modal-box">
+    <div class="modal-title">Add to Chain</div>
+    <div class="modal-sub">Pick a song to add to the mix chain.</div>
+    <div id="chain-modal-list" style="max-height:260px;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeChainModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-shelf" id="toast-shelf"></div>
+
+<!-- Hidden audio element -->
+<audio id="main-audio" crossorigin="anonymous"></audio>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════════════════════════════ */
+const S = {
+  songs: [],
+  queue: [],
+  queueIdx: -1,
+  playing: false,
+  shuffle: false,
+  repeat: false,
+  liked: new Set(),
+  chainSongs: [],
+  remixJobId: null,
+  chainJobId: null,
+  dlJobs: {},
+  currentPage: 'library',
+  searchQ: '',
+  stemSong: null,
+  stemBatchSongs: [],
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUDIO ENGINE  (Web Audio API chain)
+═══════════════════════════════════════════════════════════════════════════ */
+let AC, SRC, analyser, bassF, midF, trebleF, gainN;
+
+function initAudio() {
+  if (AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  const audio = $('main-audio');
+  SRC     = AC.createMediaElementSource(audio);
+  bassF   = AC.createBiquadFilter(); bassF.type   = 'lowshelf';  bassF.frequency.value  = 100;
+  midF    = AC.createBiquadFilter(); midF.type    = 'peaking';   midF.frequency.value   = 1000; midF.Q.value = 1;
+  trebleF = AC.createBiquadFilter(); trebleF.type = 'highshelf'; trebleF.frequency.value = 8000;
+  gainN   = AC.createGain();         gainN.gain.value = 0.8;
+  analyser = AC.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.82;
+  SRC.connect(bassF).connect(midF).connect(trebleF).connect(gainN).connect(analyser).connect(AC.destination);
+}
+
+function setEQ(type, db) {
+  if (!AC) return;
+  const f = {bass: bassF, mid: midF, treble: trebleF}[type];
+  if (f) f.gain.value = db;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VISUALIZER
+═══════════════════════════════════════════════════════════════════════════ */
+const vizCanvas = document.getElementById('viz-canvas');
+const vizCtx = vizCanvas.getContext('2d');
+let vizRAF;
+
+function resizeViz() {
+  vizCanvas.width  = vizCanvas.offsetWidth  * window.devicePixelRatio;
+  vizCanvas.height = vizCanvas.offsetHeight * window.devicePixelRatio;
+}
+window.addEventListener('resize', resizeViz);
+resizeViz();
+
+function drawViz() {
+  vizRAF = requestAnimationFrame(drawViz);
+  const W = vizCanvas.width, H = vizCanvas.height;
+  vizCtx.clearRect(0, 0, W, H);
+
+  if (!analyser || !S.playing) {
+    // Idle — subtle breathing wave
+    vizCtx.save();
+    const now = Date.now() / 1000;
+    for (let x = 0; x < W; x += 2) {
+      const amp = 6 * Math.sin(x / W * Math.PI * 4 + now * 1.2) * (Math.sin(now * .4) * .4 + .6);
+      const y = H / 2 + amp;
+      vizCtx.fillStyle = `rgba(124,58,237,${0.08 + 0.04 * Math.sin(x/W*Math.PI)})`;
+      vizCtx.fillRect(x, y - 1, 2, 3);
+    }
+    vizCtx.restore();
+    return;
+  }
+
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+
+  const bars    = 80;
+  const barW    = W / bars * .7;
+  const gapW    = W / bars * .3;
+  const usable  = Math.floor(data.length * 0.6);
+  const step    = usable / bars;
+
+  // Gradient per bar — purple → cyan
+  for (let i = 0; i < bars; i++) {
+    let sum = 0;
+    const s = Math.floor(i * step), e = Math.min(Math.floor((i + 1) * step), data.length);
+    for (let j = s; j < e; j++) sum += data[j];
+    const avg  = sum / (e - s);
+    const norm = avg / 255;
+    const h    = Math.max(2, norm * H * 0.96);
+    const x    = i * (barW + gapW) + gapW / 2;
+
+    // Gradient
+    const grad = vizCtx.createLinearGradient(0, H - h, 0, H);
+    const t    = i / bars;
+    const r    = Math.round(124 - t * 80);
+    const g    = Math.round(58  + t * 160);
+    const b    = Math.round(237 - t * 40);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0.9)`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0.3)`);
+
+    vizCtx.fillStyle = grad;
+    vizCtx.shadowBlur   = norm > .5 ? 8 : 0;
+    vizCtx.shadowColor  = `rgba(${r},${g},${b},0.8)`;
+    vizCtx.beginPath();
+    vizCtx.roundRect(x, H - h, barW, h, [2, 2, 0, 0]);
+    vizCtx.fill();
+  }
+  vizCtx.shadowBlur = 0;
+}
+drawViz();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ALBUM-ART MINI CANVAS (per card + track art)
+═══════════════════════════════════════════════════════════════════════════ */
+const PALETTES = [
+  ['#7c3aed','#a855f7','#ec4899'],['#0ea5e9','#22d3ee','#4ade80'],
+  ['#f59e0b','#ef4444','#f97316'],['#10b981','#3b82f6','#8b5cf6'],
+  ['#e11d48','#f43f5e','#f97316'],['#0891b2','#0e7490','#7c3aed'],
+];
+
+function drawArt(canvas, name, size) {
+  if (!canvas) return;
+  canvas.width = canvas.height = size * (window.devicePixelRatio || 1);
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pal = PALETTES[Math.abs(hashStr(name)) % PALETTES.length];
+
+  // Base gradient
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, pal[0]); g.addColorStop(.5, pal[1]); g.addColorStop(1, pal[2]);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // Wave-like circles
+  ctx.globalAlpha = .18;
+  for (let i = 0; i < 3; i++) {
+    const cx = W * (.25 + i * .3), cy = H * (.5 + Math.sin(i * 2.1) * .2);
+    const r  = W * (.4 + i * .15);
+    const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    cg.addColorStop(0, '#fff'); cg.addColorStop(1, 'transparent');
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // First letter
+  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  ctx.font = `bold ${W * .4}px -apple-system, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowBlur = 4; ctx.shadowColor = 'rgba(0,0,0,.4)';
+  ctx.fillText((name[0] || '?').toUpperCase(), W / 2, H / 2);
+  ctx.shadowBlur = 0;
+}
+
+function hashStr(s) { let h=0; for(const c of s) h=Math.imul(31,h)+c.charCodeAt(0)|0; return h; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DJ KNOBS
+═══════════════════════════════════════════════════════════════════════════ */
+const KNOB_ARC_START = Math.PI * 0.75;   // 135°
+const KNOB_ARC_RANGE = Math.PI * 1.5;    // 270° sweep
+
+function drawKnobArc(canvasId, normVal) {
+  const c = document.getElementById(canvasId);
+  if (!c) return;
+  const dpr = window.devicePixelRatio || 1;
+  c.width = c.height = 46 * dpr;
+  const ctx = c.getContext('2d');
+  const W = c.width, cx = W / 2, cy = W / 2, R = cx - 4 * dpr;
+  ctx.clearRect(0, 0, W, W);
+
+  // Track
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, KNOB_ARC_START, KNOB_ARC_START + KNOB_ARC_RANGE);
+  ctx.strokeStyle = 'rgba(255,255,255,.1)';
+  ctx.lineWidth = 3 * dpr;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  if (normVal !== 0.5) {
+    // Value arc
+    const midAngle = KNOB_ARC_START + KNOB_ARC_RANGE / 2;
+    const valAngle = KNOB_ARC_START + normVal * KNOB_ARC_RANGE;
+    const [s, e] = normVal < .5 ? [valAngle, midAngle] : [midAngle, valAngle];
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, s, e);
+    const clr = normVal < .5 ? '#22d3ee' : '#a855f7';
+    ctx.strokeStyle = clr;
+    ctx.lineWidth = 3 * dpr;
+    ctx.lineCap = 'round';
+    ctx.shadowBlur = 6 * dpr; ctx.shadowColor = clr;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+}
+
+function updateKnobVisual(type, val, min, max) {
+  const norm = (val - min) / (max - min);
+  const angleDeg = -150 + norm * 300;
+  const dot = document.getElementById('dot-' + type);
+  if (dot) dot.style.transform = `rotate(${angleDeg}deg)`;
+  drawKnobArc('arc-' + type, norm);
+  const vEl = document.getElementById('val-' + type);
+  if (vEl) vEl.textContent = val > 0 ? '+' + val : val;
+}
+
+// Knob drag logic
+let knobDrag = null;
+
+document.querySelectorAll('.knob').forEach(knob => {
+  const startDrag = (clientY) => {
+    knobDrag = { el: knob, startY: clientY, startVal: parseFloat(knob.dataset.val) };
+  };
+  knob.addEventListener('mousedown', e => { e.preventDefault(); startDrag(e.clientY); });
+  knob.addEventListener('touchstart', e => { e.preventDefault(); startDrag(e.touches[0].clientY); }, {passive:false});
+});
+
+document.addEventListener('mousemove', e => {
+  if (!knobDrag) return;
+  applyKnobDrag(e.clientY);
+});
+document.addEventListener('touchmove', e => {
+  if (!knobDrag) return;
+  e.preventDefault();
+  applyKnobDrag(e.touches[0].clientY);
+}, {passive:false});
+
+function applyKnobDrag(clientY) {
+  if (!knobDrag) return;
+  const type = knobDrag.el.dataset.knob;
+  const min  = parseFloat(knobDrag.el.dataset.min);
+  const max  = parseFloat(knobDrag.el.dataset.max);
+  const dy   = knobDrag.startY - clientY; // up = increase
+  const range = max - min;
+  const sens  = range / 150;  // 150px for full range
+  let val = Math.round(Math.max(min, Math.min(max, knobDrag.startVal + dy * sens)));
+  knobDrag.el.dataset.val = val;
+  updateKnobVisual(type, val, min, max);
+  setEQ(type, val);
+}
+
+document.addEventListener('mouseup',  () => { knobDrag = null; });
+document.addEventListener('touchend', () => { knobDrag = null; });
+
+// Init all knobs
+['bass','mid','treble'].forEach(t => updateKnobVisual(t, 0, -12, 12));
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PLAYER CONTROLS
+═══════════════════════════════════════════════════════════════════════════ */
+const audio = $('main-audio');
+
+audio.addEventListener('timeupdate', () => {
+  if (!audio.duration) return;
+  const pct = (audio.currentTime / audio.duration) * 100;
+  $('seek-fill').style.width = pct + '%';
+  $('seek-thumb').style.left = pct + '%';
+  $('time-cur').textContent  = fmtTime(audio.currentTime);
+  $('sp-fill').style.width   = pct + '%';
+  updateMiniBar();
+});
+
+audio.addEventListener('loadedmetadata', () => {
+  $('time-total').textContent = fmtTime(audio.duration);
+});
+
+audio.addEventListener('ended', () => {
+  S.playing = false;
+  $('play-btn').textContent = '▶';
+  if (S.repeat) { audio.currentTime = 0; audio.play(); return; }
+  nextTrack();
+});
+
+audio.addEventListener('play', () => {
+  S.playing = true;
+  $('play-btn').textContent = '⏸';
+  if (AC && AC.state === 'suspended') AC.resume();
+  $('sidebar-playing').classList.add('show');
+});
+
+audio.addEventListener('pause', () => {
+  S.playing = false;
+  $('play-btn').textContent = '▶';
+});
+
+function togglePlay() {
+  initAudio();
+  if (audio.src) {
+    audio.paused ? audio.play() : audio.pause();
+  }
+}
+
+function seekTo(e) {
+  const rect = $('seek-bar').getBoundingClientRect();
+  const pct  = (e.clientX - rect.left) / rect.width;
+  if (audio.duration) audio.currentTime = pct * audio.duration;
+}
+
+function prevTrack() {
+  if (audio.currentTime > 4) { audio.currentTime = 0; return; }
+  if (S.queueIdx > 0) playQueueIdx(S.queueIdx - 1);
+}
+
+function nextTrack() {
+  if (S.shuffle) {
+    playQueueIdx(Math.floor(Math.random() * S.queue.length));
+  } else if (S.queueIdx < S.queue.length - 1) {
+    playQueueIdx(S.queueIdx + 1);
+  }
+}
+
+function toggleShuffle() {
+  S.shuffle = !S.shuffle;
+  $('shuffle-btn').style.color = S.shuffle ? 'var(--accent2)' : '';
+}
+
+function toggleRepeat() {
+  S.repeat = !S.repeat;
+  $('repeat-btn').style.color = S.repeat ? 'var(--accent2)' : '';
+}
+
+function setVolume(v) {
+  audio.volume = v / 100;
+  if (gainN) gainN.gain.value = v / 100;
+  $('val-vol').textContent = v + '%';
+  $('vol-icon').textContent = v == 0 ? '🔇' : v < 40 ? '🔉' : '🔊';
+}
+
+function toggleLike() {
+  const name = $('track-name').textContent;
+  const btn = $('like-btn');
+  if (S.liked.has(name)) { S.liked.delete(name); btn.textContent = '♡'; btn.classList.remove('liked'); }
+  else { S.liked.add(name); btn.textContent = '♥'; btn.classList.add('liked'); toast('❤️ Added to liked', 'success'); }
+}
+
+function fmtTime(s) {
+  if (!s || isNaN(s)) return '0:00';
+  const m = Math.floor(s / 60), ss = Math.floor(s % 60);
+  return `${m}:${ss.toString().padStart(2,'0')}`;
+}
+
+function updateMiniBar() {
+  const n = $('track-name').textContent;
+  $('sp-title').textContent = n;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   QUEUE / PLAYBACK
+═══════════════════════════════════════════════════════════════════════════ */
+function playTrack(name) {
+  initAudio();
+  const url = `/library/${encodeURIComponent(name)}/audio`;
+  audio.src = url;
+  audio.play();
+  $('track-name').textContent = name;
+  $('sp-title').textContent   = name;
+
+  // Album art
+  drawArt($('art-canvas'), name, 52);
+
+  // Find song in library for meta
+  const s = S.songs.find(x => x.name === name);
+  const meta = s ? [(s.bpm ? `♩ ${Math.round(s.bpm)} BPM` : ''), (s.stems?.length ? `✂ Stems` : '')].filter(Boolean).join('  ·  ') : '';
+  $('track-sub').textContent = meta;
+
+  // Build queue from library
+  S.queue    = S.songs.map(x => x.name);
+  S.queueIdx = S.queue.indexOf(name);
+  if (S.queueIdx < 0) { S.queue.unshift(name); S.queueIdx = 0; }
+
+  // Mark card as playing
+  document.querySelectorAll('.song-card').forEach(c => {
+    c.classList.toggle('playing', c.dataset.name === name);
+    const cp = c.querySelector('.card-play');
+    if (cp) cp.textContent = c.dataset.name === name ? '⏸' : '▶';
+  });
+}
+
+function playQueueIdx(idx) {
+  if (idx < 0 || idx >= S.queue.length) return;
+  S.queueIdx = idx;
+  playTrack(S.queue[idx]);
+}
+
+function playResult(type) {
+  initAudio();
+  const el = $(type + '-audio');
+  if (!el.src) return;
+  audio.src  = el.src;
+  audio.play();
+  const label = type === 'remix' ? '🎛️ DJ Mix' : '🔗 Chain Mix';
+  $('track-name').textContent = label;
+  $('track-sub').textContent  = 'Rendered mix';
+  drawArt($('art-canvas'), label, 52);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   API HELPERS
+═══════════════════════════════════════════════════════════════════════════ */
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+async function pollJob(jobId, onProgress, onDone, onFail) {
+  const iv = setInterval(async () => {
+    try {
+      const j = await api('GET', `/jobs/${jobId}`);
+      onProgress(j.progress, j.message, j);   // pass full job as 3rd arg
+      if (j.status === 'done') { clearInterval(iv); onDone(j.result); }
+      if (j.status === 'failed') { clearInterval(iv); onFail(j.error || 'Job failed'); }
+    } catch(e) { clearInterval(iv); onFail(e.message); }
+  }, 1200);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LIBRARY
+═══════════════════════════════════════════════════════════════════════════ */
+async function refreshLibrary() {
+  const grid = $('lib-grid');
+  grid.innerHTML = `<div style="grid-column:1/-1"><div class="empty-state"><div class="empty-icon spin">🎵</div><div class="empty-title">Loading…</div></div></div>`;
+  try {
+    const data = await api('GET', '/library?per_page=500');
+    S.songs = (data.songs || []).map(s => typeof s === 'object' ? s : {name:s});
+    $('lib-count').textContent = S.songs.length;
+    renderLibrary();
+  } catch(e) {
+    grid.innerHTML = `<div style="grid-column:1/-1"><div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Can't reach API</div><div class="empty-sub">${e.message}</div></div></div>`;
+  }
+}
+
+function renderLibrary() {
+  const q = S.searchQ.toLowerCase();
+  const filtered = q ? S.songs.filter(s => s.name.toLowerCase().includes(q)) : S.songs;
+  const grid = $('lib-grid');
+  $('lib-grid-label').textContent = `${filtered.length} Song${filtered.length !== 1 ? 's' : ''}`;
+
+  if (!filtered.length) {
+    grid.innerHTML = `<div style="grid-column:1/-1"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">No results</div><div class="empty-sub">Try a different search</div><button class="btn btn-outline" onclick="$('lib-search').value='';S.searchQ='';renderLibrary()">Clear</button></div></div>`;
+    return;
+  }
+
+  grid.innerHTML = '';
+  filtered.forEach((s, i) => {
+    const card = document.createElement('div');
+    card.className = 'song-card fade-in';
+    card.dataset.name = s.name;
+    card.style.animationDelay = `${Math.min(i * 0.03, 0.3)}s`;
+
+    const bpmBadge  = s.bpm    ? `<span class="badge accent">♩ ${Math.round(s.bpm)}</span>` : '';
+    const keyCamelot = s.camelot ? `<span class="badge green">${s.camelot}</span>` : '';
+    const stemBadge = (s.stems && s.stems.length) ? `<span class="badge pink">✂ ${s.stems.length}</span>` : '';
+
+    card.innerHTML = `
+      <div class="card-art">
+        <canvas data-art="${s.name}" width="160" height="160"></canvas>
+        <div class="card-play">▶</div>
+      </div>
+      <div class="card-title">${s.name}</div>
+      <div class="card-meta">${bpmBadge}${keyCamelot}${stemBadge}</div>
+    `;
+    card.onclick = () => playTrack(s.name);
+    grid.appendChild(card);
+
+    // Draw art asynchronously
+    requestAnimationFrame(() => {
+      const c = card.querySelector(`[data-art="${CSS.escape(s.name)}"]`);
+      drawArt(c, s.name, 160);
+    });
+  });
+
+  // Populate remix/chain dropdowns
+  populateDropdowns();
+}
+
+$('lib-search').addEventListener('input', function() {
+  S.searchQ = this.value;
+  renderLibrary();
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DROPDOWN SONG PICKERS (Remix)
+═══════════════════════════════════════════════════════════════════════════ */
+let dropA = null, dropB = null;
+
+function populateDropdowns() {
+  ['a','b','stem'].forEach(side => {
+    const drop = $('drop-' + side);
+    if (!drop) return;
+    drop.innerHTML = '';
+    S.songs.forEach(s => {
+      const el = document.createElement('div');
+      el.className = 'select-item';
+      const hasStem = s.stems && s.stems.length >= 4;
+      const badge   = hasStem ? ' <span style="color:#1db954;font-size:.72rem">✓</span>' : '';
+      el.innerHTML = `<span style="font-size:.9rem">${s.name[0].toUpperCase()}</span> ${s.name}${badge}`;
+      el.onclick = () => selectSong(side, s.name);
+      drop.appendChild(el);
+    });
+  });
+}
+
+function toggleDropdown(side) {
+  const drop = $('drop-' + side);
+  const isOpen = drop.style.display !== 'none';
+  // Close all dropdowns first
+  document.querySelectorAll('.select-dropdown').forEach(d => d.style.display = 'none');
+  document.querySelectorAll('.song-select-wrap').forEach(w => w.classList.remove('open'));
+  if (!isOpen) {
+    drop.style.display = 'block';
+    $('sel-' + side + '-wrap').classList.add('open');
+  }
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.song-select-wrap') && !e.target.closest('.select-dropdown')) {
+    document.querySelectorAll('.select-dropdown').forEach(d => d.style.display = 'none');
+    document.querySelectorAll('.song-select-wrap').forEach(w => w.classList.remove('open'));
+  }
+});
+
+function selectSong(side, name) {
+  const s = S.songs.find(x => x.name === name) || {name};
+  if (side === 'a') { dropA = name; }
+  else if (side === 'b') { dropB = name; }
+  else if (side === 'stem') { S.stemSong = name; }
+
+  $('sel-' + side + '-text').textContent = name;
+  $('sel-' + side + '-text').classList.remove('song-select-placeholder');
+
+  if (side === 'a' || side === 'b') {
+    $('chosen-' + side).style.display = 'block';
+    $('chosen-' + side + '-title').textContent = name;
+    const meta = [s.bpm ? `♩ ${Math.round(s.bpm)} BPM` : '', s.camelot ? `🎼 ${s.camelot}` : ''].filter(Boolean).join('  ·  ');
+    $('chosen-' + side + '-meta').innerHTML = meta || '&nbsp;';
+  }
+  toggleDropdown(side);  // close
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DJ REMIX
+═══════════════════════════════════════════════════════════════════════════ */
+async function startRemix() {
+  if (!dropA || !dropB) { toast('Pick both songs first', 'error'); return; }
+  if (dropA === dropB) { toast('Pick two different songs', 'error'); return; }
+
+  $('remix-progress').style.display = 'block';
+  $('remix-result').classList.remove('show');
+  $('remix-prog-fill').style.width = '0%';
+  $('remix-status-text').textContent = 'Queueing job…';
+
+  try {
+    const job = await api('POST', '/dj-remix', {
+      song_a: dropA, song_b: dropB,
+      transition_bars: parseInt($('remix-bars').value),
+      preset: 'auto',
+      bridge_beat_mode: $('remix-bridge').value,
+      bridge_beat_genre: 'auto',
+      bridge_beat_intensity: 0.38,
+      transition_effect: $('remix-effect').value,
+    });
+
+    pollJob(job.job_id,
+      (prog, msg) => {
+        $('remix-prog-fill').style.width = (prog * 100) + '%';
+        $('remix-status-text').textContent = msg || 'Working…';
+      },
+      (result) => {
+        $('remix-progress').style.display = 'none';
+        $('remix-result').classList.add('show');
+        const url = result.output ? `/outputs/${result.output.split('/outputs/')[1]}` : null;
+        if (url) $('remix-audio').src = url;
+        const meta = [
+          result.key_a  ? `🎼 ${result.key_a} → ${result.key_b}` : '',
+          result.harmonic_score != null ? `🎹 Harmony ${Math.round(result.harmonic_score * 100)}%` : '',
+          result.lufs   ? `📊 ${result.lufs} LUFS` : '',
+          result.ts_overall != null ? `🤖 Score ${Math.round(result.ts_overall * 100)}%` : '',
+        ].filter(Boolean).join('   ');
+        $('remix-result-meta').textContent = meta;
+        toast('Mix ready! 🎉', 'success');
+      },
+      (err) => {
+        $('remix-progress').style.display = 'none';
+        toast('Mix failed: ' + err, 'error');
+      }
+    );
+  } catch(e) {
+    $('remix-progress').style.display = 'none';
+    toast(e.message, 'error');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DJ CHAIN
+═══════════════════════════════════════════════════════════════════════════ */
+function renderChainList() {
+  const list = $('chain-list');
+  list.innerHTML = '';
+  if (!S.chainSongs.length) {
+    list.innerHTML = `<div style="color:var(--text3);font-size:.82rem;padding:16px 0">No songs added yet. Add at least 2 to chain.</div>`;
+    return;
+  }
+  S.chainSongs.forEach((name, i) => {
+    const el = document.createElement('div');
+    el.className = 'chain-item fade-in';
+    el.innerHTML = `<div class="chain-num">${i+1}</div><div class="chain-name">${name}</div><button class="chain-remove" onclick="removeChainSong(${i})">✕</button>`;
+    list.appendChild(el);
+  });
+}
+
+function chainAddSong() { $('chain-modal').classList.add('show'); renderChainModal(); }
+function closeChainModal() { $('chain-modal').classList.remove('show'); }
+
+function renderChainModal() {
+  const list = $('chain-modal-list');
+  list.innerHTML = '';
+  S.songs.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'select-item';
+    el.innerHTML = `<span style="font-size:1rem">${s.name[0].toUpperCase()}</span> ${s.name}`;
+    el.onclick = () => { S.chainSongs.push(s.name); renderChainList(); closeChainModal(); };
+    list.appendChild(el);
+  });
+}
+
+function removeChainSong(i) { S.chainSongs.splice(i, 1); renderChainList(); }
+
+async function startChain() {
+  if (S.chainSongs.length < 2) { toast('Add at least 2 songs to chain', 'error'); return; }
+
+  $('chain-progress').style.display = 'block';
+  $('chain-result').classList.remove('show');
+  $('chain-prog-fill').style.width = '0%';
+
+  try {
+    const job = await api('POST', '/dj-chain', {
+      songs: S.chainSongs,
+      transition_bars: parseInt($('chain-bars').value),
+      preset: 'auto',
+      bridge_beat_mode: 'none',
+      bridge_beat_intensity: 0.38,
+      transition_effect: 'auto',
+    });
+
+    pollJob(job.job_id,
+      (prog, msg) => {
+        $('chain-prog-fill').style.width = (prog * 100) + '%';
+        $('chain-status-text').textContent = msg || 'Working…';
+      },
+      (result) => {
+        $('chain-progress').style.display = 'none';
+        $('chain-result').classList.add('show');
+        const url = result.output ? `/outputs/${result.output.split('/outputs/')[1]}` : null;
+        if (url) $('chain-audio').src = url;
+        const meta = [result.duration_sec ? `⏱ ${Math.round(result.duration_sec)}s` : '', result.lufs ? `📊 ${result.lufs} LUFS` : ''].filter(Boolean).join('  ·  ');
+        $('chain-result-meta').textContent = meta;
+        toast(`Chain of ${S.chainSongs.length} songs ready! 🎉`, 'success');
+      },
+      (err) => { $('chain-progress').style.display = 'none'; toast('Chain failed: ' + err, 'error'); }
+    );
+  } catch(e) { $('chain-progress').style.display = 'none'; toast(e.message, 'error'); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DOWNLOAD — single + playlist
+═══════════════════════════════════════════════════════════════════════════ */
+function setDlMode(mode) {
+  const isSingle = mode === 'single';
+  $('dl-tab-single').classList.toggle('active', isSingle);
+  $('dl-tab-playlist').classList.toggle('active', !isSingle);
+  $('dl-single-panel').style.display   = isSingle ? '' : 'none';
+  $('dl-playlist-panel').style.display = isSingle ? 'none' : '';
+}
+
+/* ── Single song ──────────────────────────────────────────────────────── */
+async function startDownload() {
+  const query = $('dl-query').value.trim();
+  if (!query) { toast('Enter a song name or URL', 'error'); return; }
+  const separate = $('dl-separate').checked;
+  try {
+    const job = await api('POST', '/download', { query, separate });
+    addDlJob(job.job_id, { label: query, type: 'single' });
+    $('dl-query').value = '';
+    toast('Downloading: ' + query, 'info');
+    pollJob(job.job_id,
+      (prog, msg) => updateDlJob(job.job_id, 'running', msg, prog),
+      (result) => {
+        updateDlJob(job.job_id, 'done', result && result.name ? result.name : query, 1);
+        toast('Downloaded: ' + (result && result.name ? result.name : query) + ' \u2713', 'success');
+        refreshLibrary();
+      },
+      (err) => {
+        updateDlJob(job.job_id, 'failed', 'Download failed: ' + err, 0);
+        toast('Download failed: ' + err, 'error');
+      }
+    );
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+/* ── Playlist ─────────────────────────────────────────────────────────── */
+async function startPlaylistDownload() {
+  const url = $('dl-pl-url').value.trim();
+  if (!url) { toast('Enter a playlist URL', 'error'); return; }
+  if (!url.includes('list=') && !url.includes('/playlist')) {
+    toast("That doesn't look like a playlist URL — paste a YouTube playlist link", 'error');
+    return;
+  }
+  const separate = $('dl-pl-separate').checked;
+  const limitVal = parseInt($('dl-pl-limit').value);
+  const limit    = isNaN(limitVal) ? null : limitVal;
+
+  try {
+    const job = await api('POST', '/download-playlist', { url, separate, limit });
+    addDlJob(job.job_id, { label: '\ud83d\udccb Fetching playlist\u2026', type: 'playlist' });
+    $('dl-pl-url').value = '';
+    toast('Playlist queued \u2014 downloading tracks\u2026', 'info');
+
+    pollJob(job.job_id,
+      function(prog, msg, fullJob) {
+        var res = fullJob && fullJob.result ? fullJob.result : {};
+        updateDlJob(job.job_id, 'running', msg, prog, {
+          tracks: res.tracks || [], errors: res.errors || [],
+          total: res.total || 0, type: 'playlist',
+        });
+      },
+      function(result) {
+        var label = '\ud83d\udccb ' + (result && result.playlist_title ? result.playlist_title : 'Playlist')
+                  + ' \u2014 ' + (result ? result.downloaded : '?') + '/' + (result ? result.total : '?') + ' tracks';
+        updateDlJob(job.job_id, 'done', label, 1, {
+          tracks: result ? result.tracks : [], errors: result ? result.errors : [],
+          total: result ? result.total : 0, type: 'playlist',
+        });
+        toast('Playlist done: ' + (result ? result.downloaded : '?') + ' tracks saved \u2713', 'success');
+        refreshLibrary();
+      },
+      function(err) {
+        updateDlJob(job.job_id, 'failed', 'Playlist failed: ' + err, 0, { type: 'playlist' });
+        toast('Playlist failed: ' + err, 'error');
+      }
+    );
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+/* ── Job list helpers ─────────────────────────────────────────────────── */
+function addDlJob(id, meta) {
+  S.dlJobs[id] = { label: meta.label, type: meta.type || 'single',
+                   status: 'running', progress: 0,
+                   tracks: [], errors: [], total: 0 };
+  renderDlJobs();
+}
+
+function updateDlJob(id, status, msg, prog, extra) {
+  if (!S.dlJobs[id]) return;
+  var j = S.dlJobs[id];
+  j.status = status; j.label = msg; j.progress = prog;
+  if (extra) {
+    if (extra.tracks !== undefined) j.tracks = extra.tracks;
+    if (extra.errors !== undefined) j.errors = extra.errors;
+    if (extra.total  !== undefined) j.total  = extra.total;
+  }
+  renderDlJobs();
+}
+
+function renderDlJobs() {
+  var list = $('dl-job-list');
+  var ids = Object.keys(S.dlJobs);
+  if (!ids.length) {
+    list.innerHTML = '<div style="color:var(--text3);font-size:.82rem">No active downloads.</div>';
+    return;
+  }
+  list.innerHTML = ids.map(function(id) {
+    var j    = S.dlJobs[id];
+    var icon = {running:'\u23f3',done:'\u2705',failed:'\u274c',pending:'\u23f8'}[j.status] || '\u23f8';
+    var pct  = (j.progress > 0 && j.progress < 1) ? ' \u00b7 ' + Math.round(j.progress * 100) + '%' : '';
+
+    var extra = '';
+    if (j.type === 'playlist') {
+      var barW = Math.round(j.progress * 100);
+      extra += '<div style="background:var(--bg1);border-radius:4px;height:4px;margin-top:6px;overflow:hidden">'
+             + '<div style="height:100%;width:' + barW + '%;background:var(--accent);transition:width .4s"></div></div>';
+      if (j.tracks.length || j.errors.length) {
+        var rows = j.tracks.map(function(t) {
+          return '<div class="pl-track-row"><span class="pl-track-ok">\u2713</span><span>' + (t.name || '?') + '</span></div>';
+        }).join('') + j.errors.map(function(t) {
+          return '<div class="pl-track-row"><span class="pl-track-err">\u2717</span><span>' + (t.name || '?') + ' \u2014 ' + (t.error || '') + '</span></div>';
+        }).join('');
+        extra += '<div class="pl-track-list">' + rows + '</div>';
+      }
+    }
+
+    return '<div class="job-item" style="flex-direction:column;align-items:stretch">'
+      + '<div style="display:flex;align-items:center;gap:14px">'
+      + '<span class="job-icon">' + icon + '</span>'
+      + '<div class="job-info"><div class="job-name">' + j.label + '</div>'
+      + '<div class="job-status">' + j.status + pct + '</div></div>'
+      + '<div class="status-dot ' + j.status + '" style="margin-left:auto"></div>'
+      + '</div>' + extra + '</div>';
+  }).join('');
+}
+
+$('dl-query').addEventListener('keydown', function(e) { if (e.key === 'Enter') startDownload(); });
+$('dl-pl-url').addEventListener('keydown', function(e) { if (e.key === 'Enter') startPlaylistDownload(); });
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   STEM SPLIT
+═══════════════════════════════════════════════════════════════════════════ */
+
+// State for batch target selection
+var S_stemBatchTarget = 'all';        // 'all' | 'missing' | 'custom'
+var S_stemCustomSongs = new Set();    // for custom mode
+var S_batchJobRows    = {};           // jobId → {song, status, stems}
+
+function setStemMode(mode) {
+  var isSingle = mode === 'single';
+  $('stem-tab-single').classList.toggle('active', isSingle);
+  $('stem-tab-batch').classList.toggle('active', !isSingle);
+  $('stem-single-panel').style.display = isSingle ? '' : 'none';
+  $('stem-batch-panel').style.display  = isSingle ? 'none' : '';
+  if (!isSingle) loadStemBatchStats();
+}
+
+// ── Single split ──────────────────────────────────────────────────────────
+function startStemSplit() {
+  var song = S.stemSong;
+  if (!song) { toast('Pick a song first', 'error'); return; }
+  var enhance = $('stem-enhance').checked;
+  var model   = $('stem-model').value;
+
+  $('stem-single-progress').style.display = '';
+  $('stem-single-result').style.display   = 'none';
+  $('stem-single-fill').style.width       = '0%';
+  $('stem-single-status').textContent     = 'Queuing job…';
+
+  api('POST', '/stems/split', { song, enhance, model }).then(function(job) {
+    toast('Stem split started for: ' + song, 'info');
+    pollJob(job.job_id,
+      function(prog, msg) {
+        $('stem-single-fill').style.width = Math.round(prog * 100) + '%';
+        $('stem-single-status').textContent = msg;
+      },
+      function(result) {
+        $('stem-single-progress').style.display = 'none';
+        $('stem-single-result').style.display   = '';
+        renderStemResultCards(result, song);
+        toast('Stems ready for: ' + song + ' \u2713', 'success');
+        refreshLibrary();
+      },
+      function(err) {
+        $('stem-single-status').textContent = 'Failed: ' + err;
+        $('stem-single-fill').style.width = '0%';
+        toast('Stem split failed: ' + err, 'error');
+      }
+    );
+  }).catch(function(e) {
+    $('stem-single-progress').style.display = 'none';
+    toast(e.message, 'error');
+  });
+}
+
+function renderStemResultCards(result, song) {
+  var stems  = result && result.stems ? result.stems : {};
+  var COLORS = { vocals:'#9b59b6', drums:'#e74c3c', bass:'#2980b9', other:'#27ae60' };
+  var ICONS  = { vocals:'\uD83C\uDFA4', drums:'\uD83E\uDD41', bass:'\uD83C\uDFB8', other:'\uD83C\uDFB9' };
+
+  var html = '';
+  Object.keys(stems).forEach(function(sname) {
+    var color = COLORS[sname] || '#999';
+    var icon  = ICONS[sname]  || '\uD83C\uDFB5';
+    var rms   = stems[sname].rms_db !== undefined ? stems[sname].rms_db + ' dB' : '';
+    html += '<div style="background:var(--bg3);border-radius:10px;padding:14px;border-left:3px solid ' + color + '">'
+          + '<div style="font-size:1.2rem;margin-bottom:4px">' + icon + ' ' + sname + '</div>'
+          + '<div style="font-size:.76rem;color:var(--text3)">' + rms + '</div>'
+          + '<audio controls style="width:100%;height:28px;margin-top:8px" '
+          + 'src="/library/' + encodeURIComponent(song) + '/stems/' + sname + '"></audio>'
+          + '</div>';
+  });
+
+  if (!html) html = '<div style="color:var(--text3);font-size:.82rem">No stems returned.</div>';
+  $('stem-single-cards').innerHTML = html;
+
+  if (result && result.enhance_info) {
+    var ei = result.enhance_info;
+    if (ei.lufs_before !== undefined) {
+      $('stem-single-cards').innerHTML +=
+        '<div style="grid-column:1/-1;font-size:.72rem;color:var(--text3);margin-top:4px">'
+        + 'Enhancement: ' + ei.lufs_before + ' \u2192 ' + ei.lufs_after + ' LUFS  ·  gain: ' + ei.gain_db + ' dB'
+        + '</div>';
+    }
+  }
+}
+
+// ── Batch stats ───────────────────────────────────────────────────────────
+async function loadStemBatchStats() {
+  try {
+    var data  = await api('GET', '/library?per_page=1000');
+    var songs = data.songs || [];
+    var total = songs.length;
+    var hasSt = songs.filter(function(s) { return s.stems && s.stems.length >= 4; }).length;
+    $('stat-total').textContent     = total;
+    $('stat-has-stems').textContent = hasSt;
+    $('stat-needs-stems').textContent = total - hasSt;
+    S.stemBatchSongs = songs;
+
+    // Populate custom song list
+    renderBatchSongList(songs);
+  } catch(e) {
+    $('stat-total').textContent = '?';
+  }
+}
+
+function renderBatchSongList(songs) {
+  var q = ($('batch-search') ? $('batch-search').value : '').toLowerCase();
+  var filtered = q ? songs.filter(function(s) { return s.name.toLowerCase().includes(q); }) : songs;
+  $('batch-song-list').innerHTML = filtered.map(function(s) {
+    var checked  = S_stemCustomSongs.has(s.name) ? 'checked' : '';
+    var hasStem  = s.stems && s.stems.length >= 4;
+    var badge    = hasStem ? ' <span style="color:#1db954;font-size:.7rem">✓ stems</span>' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;padding:4px 2px;cursor:pointer">'
+         + '<input type="checkbox" ' + checked + ' style="accent-color:var(--accent)" '
+         + 'onchange="toggleBatchSong(\'' + s.name.replace(/'/g, "\\'") + '\')">'
+         + '<span>' + s.name + badge + '</span></label>';
+  }).join('');
+}
+
+function filterBatchList() {
+  if (S.stemBatchSongs) renderBatchSongList(S.stemBatchSongs);
+}
+
+function toggleBatchSong(name) {
+  if (S_stemCustomSongs.has(name)) S_stemCustomSongs.delete(name);
+  else S_stemCustomSongs.add(name);
+  $('batch-sel-count').textContent = S_stemCustomSongs.size;
+}
+
+function setBatchTarget(target) {
+  S_stemBatchTarget = target;
+  ['all','missing','custom'].forEach(function(t) {
+    $('batch-tgt-' + t).classList.toggle('active', t === target);
+  });
+  $('batch-custom-select').style.display = target === 'custom' ? '' : 'none';
+}
+
+// ── Start batch ──────────────────────────────────────────────────────────
+async function startBatchSplit() {
+  var enhance      = $('batch-enhance').checked;
+  var skipExisting = $('batch-skip-existing').checked;
+  var model        = $('batch-model').value;
+
+  var songs = null;   // null = all library
+  if (S_stemBatchTarget === 'missing') {
+    var allSongs = (S.stemBatchSongs || []);
+    songs = allSongs
+      .filter(function(s) { return !s.stems || s.stems.length < 4; })
+      .map(function(s) { return s.name; });
+    if (!songs.length) { toast('All songs already have stems!', 'info'); return; }
+  } else if (S_stemBatchTarget === 'custom') {
+    songs = Array.from(S_stemCustomSongs);
+    if (!songs.length) { toast('Select at least one song', 'error'); return; }
+  }
+
+  $('stem-batch-progress').style.display = '';
+  $('stem-batch-done').style.display     = 'none';
+  $('stem-batch-fill').style.width       = '0%';
+  $('stem-batch-rows').innerHTML         = '';
+  S_batchJobRows                         = {};
+
+  try {
+    var label = songs ? songs.length + ' songs' : 'entire library';
+    toast('Batch split started for ' + label + '\u2026', 'info');
+
+    var job = await api('POST', '/stems/split-batch', {
+      songs: songs, enhance: enhance, model: model, skip_existing: skipExisting
+    });
+
+    pollJob(job.job_id,
+      function(prog, msg, fullJob) {
+        $('stem-batch-fill').style.width = Math.round(prog * 100) + '%';
+        $('stem-batch-status').textContent = msg;
+        // Parse intermediate result for live row updates
+        var res = fullJob && fullJob.result ? fullJob.result : null;
+        if (res) updateBatchRows(res.results || [], res.errors || []);
+      },
+      function(result) {
+        $('stem-batch-fill').style.width = '100%';
+        $('stem-batch-progress').style.display = 'none';
+        $('stem-batch-done').style.display = '';
+        $('stem-batch-summary').innerHTML =
+          '<strong>' + (result ? result.processed : '?') + '</strong> split  ·  '
+          + '<strong>' + (result ? result.failed : '?') + '</strong> failed  ·  '
+          + '<strong>' + (result ? result.total : '?') + '</strong> total';
+        if (result) updateBatchRows(result.results || [], result.errors || []);
+        toast('Batch split done! ' + (result ? result.processed : '?') + ' songs processed \u2713', 'success');
+        refreshLibrary();
+        loadStemBatchStats();
+      },
+      function(err) {
+        $('stem-batch-status').textContent = 'Failed: ' + err;
+        toast('Batch failed: ' + err, 'error');
+      }
+    );
+  } catch(e) {
+    $('stem-batch-progress').style.display = 'none';
+    toast(e.message, 'error');
+  }
+}
+
+function updateBatchRows(results, errors) {
+  var html = results.map(function(r) {
+    if (r.skipped) return '<div class="pl-track-row"><span style="color:#888">\u23ed</span><span>' + r.song + ' \u2014 skipped (stems exist)</span></div>';
+    return '<div class="pl-track-row"><span class="pl-track-ok">\u2713</span><span>' + r.song + ' [' + (r.stems || []).join(', ') + ']</span></div>';
+  }).join('') + errors.map(function(r) {
+    return '<div class="pl-track-row"><span class="pl-track-err">\u2717</span><span>' + r.song + ' \u2014 ' + (r.error || '') + '</span></div>';
+  }).join('');
+  $('stem-batch-rows').innerHTML = html;
+  $('stem-batch-rows').scrollTop = $('stem-batch-rows').scrollHeight;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NAVIGATION
+═══════════════════════════════════════════════════════════════════════════ */
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    const page = item.dataset.page;
+    if (!page) return;
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    item.classList.add('active');
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    const pg = document.getElementById('page-' + page);
+    if (pg) pg.classList.add('active');
+    S.currentPage = page;
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOAST
+═══════════════════════════════════════════════════════════════════════════ */
+function toast(msg, type='info') {
+  const shelf = $('toast-shelf');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  shelf.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UTIL
+═══════════════════════════════════════════════════════════════════════════ */
+function $(id) { return document.getElementById(id); }
+
+// CSS.escape polyfill for older browsers
+if (!window.CSS || !CSS.escape) {
+  CSS = { escape: s => s.replace(/([^a-zA-Z0-9_-])/g, '\\$1') };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   INIT
+═══════════════════════════════════════════════════════════════════════════ */
+refreshLibrary();
+renderChainList();
+renderDlJobs();
+</script>
+</body>
+</html>

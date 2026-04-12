@@ -1,0 +1,62 @@
+name: "Request Repository Access"
+description: "Request access to review the AI RemixMate source code"
+title: "[Access Request] "
+labels: ["access-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for your interest in AI RemixMate! This is a private portfolio project.
+        Please fill out the form below and I'll grant you access within 24 hours.
+
+  - type: input
+    id: name
+    attributes:
+      label: Full Name
+      placeholder: "Jane Doe"
+    validations:
+      required: true
+
+  - type: input
+    id: company
+    attributes:
+      label: Company / Organization
+      placeholder: "Acme Corp"
+    validations:
+      required: true
+
+  - type: input
+    id: role
+    attributes:
+      label: Your Role
+      placeholder: "Engineering Manager / Recruiter / Technical Lead"
+    validations:
+      required: true
+
+  - type: input
+    id: email
+    attributes:
+      label: Contact Email
+      placeholder: "jane@acme.com"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: purpose
+    attributes:
+      label: Purpose of Access
+      options:
+        - Evaluating candidate for a role
+        - Technical review / code assessment
+        - Collaboration interest
+        - Other (please describe below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      placeholder: "Any additional details about why you'd like access..."
+    validations:
+      required: false

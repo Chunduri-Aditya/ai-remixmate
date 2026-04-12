@@ -1,24 +1,89 @@
-# Ignore all contents in these folders
-audio_input/*
-audio_output/*
-output/*
-separated/*
-stems/*
-lyrics/*
-models/*
+# ============================================================
+#  AI RemixMate — .gitignore
+# ============================================================
 
-# But keep the folder placeholder
-!audio_input/.gitkeep
-!audio_output/.gitkeep
-!output/.gitkeep
-!separated/.gitkeep
-!stems/.gitkeep
-!lyrics/.gitkeep
-!models/.gitkeep
+# ── Runtime data (large / user-specific, never commit) ──────
+library/
+outputs/
+separated/
+runs/
+data/
+audio_input/
+audio_output/
+output/
+stems/
+lyrics/
+models/
+Downloads/
 
-# Ignore other junk
+# ── Virtual environment ──────────────────────────────────────
 remix-env/
+.venv/
+venv/
+env/
+
+# ── Python cache ─────────────────────────────────────────────
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# ── Build / packaging ────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# ── Test cache ───────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+tests/test_report.json
+
+# ── Editor & OS ──────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# ── Secrets / local config ───────────────────────────────────
+.env
+.env.*
+config.local.yaml
+*.pem
+*.key
+*.crt
+certs/*.pem
+certs/*.key
+certs/*.crt
+
+# ── Audio files (too large for git) ──────────────────────────
+*.wav
+*.flac
+*.mp3
+*.ogg
+*.aiff
+*.m4a
+
+# ── Embeddings / index caches ────────────────────────────────
+embeddings.json
+*.faiss
+*.index
+*.npy
+
+# ── Misc ─────────────────────────────────────────────────────
 *.log
-*.DS_Store
+*.tmp
+pipeline.log
+github_files/
+.claude/

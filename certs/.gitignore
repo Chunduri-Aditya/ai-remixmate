@@ -1,0 +1,4 @@
+# Never commit private keys or certs
+*.pem
+*.key
+*.crt

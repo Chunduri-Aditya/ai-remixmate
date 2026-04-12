@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI RemixMate — Portfolio Card</title>
+<style>
+  /*
+   * Portfolio Project Card — AI RemixMate
+   * Drop this into any portfolio site or embed as an iframe.
+   * Self-contained: zero external dependencies.
+   *
+   * Integration options:
+   *   1. Copy the <div class="rmx-card"> and <style> into your portfolio HTML
+   *   2. Embed as iframe: <iframe src="portfolio-card.html" width="480" height="620"></iframe>
+   *   3. Import as React component (see portfolio-card.jsx)
+   */
+
+  :root {
+    --rmx-bg: #0a0a0e;
+    --rmx-card: #12121c;
+    --rmx-border: #1e1e2e;
+    --rmx-accent: #c084fc;
+    --rmx-accent2: #818cf8;
+    --rmx-text: #e8e8f0;
+    --rmx-muted: #9898a8;
+    --rmx-green: #4ade80;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--rmx-bg);
+    color: var(--rmx-text);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 2rem;
+  }
+
+  .rmx-card {
+    background: var(--rmx-card);
+    border: 1px solid var(--rmx-border);
+    border-radius: 16px;
+    max-width: 460px;
+    width: 100%;
+    overflow: hidden;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+  .rmx-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(192, 132, 252, 0.15);
+  }
+
+  .rmx-header {
+    background: linear-gradient(135deg, #1a1028 0%, #0f0f1a 100%);
+    padding: 1.5rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .rmx-header::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(192, 132, 252, 0.06) 0%, transparent 70%);
+    animation: rmx-pulse 4s ease-in-out infinite;
+  }
+  @keyframes rmx-pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+  }
+
+  .rmx-icon {
+    font-size: 2rem;
+    margin-bottom: 0.75rem;
+    position: relative;
+  }
+  .rmx-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    position: relative;
+    background: linear-gradient(90deg, var(--rmx-accent), var(--rmx-accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .rmx-subtitle {
+    color: var(--rmx-muted);
+    font-size: 0.85rem;
+    margin-top: 0.3rem;
+    position: relative;
+  }
+
+  .rmx-body { padding: 1.5rem; }
+
+  .rmx-desc {
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--rmx-muted);
+    margin-bottom: 1.25rem;
+  }
+
+  .rmx-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1.25rem;
+  }
+  .rmx-tag {
+    background: rgba(192, 132, 252, 0.1);
+    border: 1px solid rgba(192, 132, 252, 0.2);
+    color: var(--rmx-accent);
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+
+  .rmx-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+  .rmx-stat {
+    text-align: center;
+    padding: 0.6rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+  }
+  .rmx-stat-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--rmx-accent);
+  }
+  .rmx-stat-label {
+    font-size: 0.65rem;
+    color: var(--rmx-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 0.2rem;
+  }
+
+  .rmx-highlights {
+    list-style: none;
+    margin-bottom: 1.25rem;
+  }
+  .rmx-highlights li {
+    padding: 0.35rem 0;
+    font-size: 0.82rem;
+    color: var(--rmx-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .rmx-highlights li::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--rmx-green);
+    flex-shrink: 0;
+  }
+
+  .rmx-actions {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0 1.5rem 1.5rem;
+  }
+  .rmx-btn {
+    flex: 1;
+    padding: 0.65rem 1rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+  }
+  .rmx-btn-primary {
+    background: linear-gradient(135deg, var(--rmx-accent), var(--rmx-accent2));
+    color: #000;
+  }
+  .rmx-btn-primary:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+  }
+  .rmx-btn-secondary {
+    background: transparent;
+    border: 1px solid var(--rmx-border);
+    color: var(--rmx-text);
+  }
+  .rmx-btn-secondary:hover {
+    border-color: var(--rmx-accent);
+    color: var(--rmx-accent);
+  }
+
+  .rmx-footer {
+    border-top: 1px solid var(--rmx-border);
+    padding: 0.75rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .rmx-status {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    color: var(--rmx-green);
+  }
+  .rmx-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--rmx-green);
+    animation: rmx-blink 2s ease-in-out infinite;
+  }
+  @keyframes rmx-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .rmx-private {
+    font-size: 0.7rem;
+    color: var(--rmx-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+</style>
+</head>
+<body>
+
+<div class="rmx-card">
+  <div class="rmx-header">
+    <div class="rmx-icon">🎛️</div>
+    <div class="rmx-title">AI RemixMate</div>
+    <div class="rmx-subtitle">AI-Powered DJ Engine & Audio Intelligence Platform</div>
+  </div>
+
+  <div class="rmx-body">
+    <p class="rmx-desc">
+      Full-stack audio engineering system that analyzes tracks, plans DJ transitions at musical phrase boundaries,
+      renders stem-aware crossfades with dynamic EQ, and powers a RAG-based music discovery engine.
+      GPU-accelerated on Apple Silicon and NVIDIA.
+    </p>
+
+    <div class="rmx-tags">
+      <span class="rmx-tag">Python</span>
+      <span class="rmx-tag">FastAPI</span>
+      <span class="rmx-tag">PyTorch</span>
+      <span class="rmx-tag">Demucs</span>
+      <span class="rmx-tag">librosa</span>
+      <span class="rmx-tag">FAISS</span>
+      <span class="rmx-tag">RAG</span>
+      <span class="rmx-tag">DSP</span>
+      <span class="rmx-tag">Streamlit</span>
+    </div>
+
+    <div class="rmx-stats">
+      <div class="rmx-stat">
+        <div class="rmx-stat-value">14+</div>
+        <div class="rmx-stat-label">Core Modules</div>
+      </div>
+      <div class="rmx-stat">
+        <div class="rmx-stat-value">80+</div>
+        <div class="rmx-stat-label">Tests</div>
+      </div>
+      <div class="rmx-stat">
+        <div class="rmx-stat-value">20+</div>
+        <div class="rmx-stat-label">API Endpoints</div>
+      </div>
+    </div>
+
+    <ul class="rmx-highlights">
+      <li>Beat-grid locked transitions with sample-level precision</li>
+      <li>GPU-accelerated STFT, cosine similarity, time-stretching (MPS/CUDA)</li>
+      <li>ITU-R BS.1770-4 loudness mastering with true-peak limiting</li>
+      <li>RAG vector search for natural-language music discovery</li>
+      <li>Overnight batch pipeline with sleep prevention (681+ song library)</li>
+    </ul>
+  </div>
+
+  <div class="rmx-actions">
+    <!-- UPDATE THESE URLs with your actual GitHub repo and portfolio -->
+    <a href="https://github.com/Chunduri-Aditya/ai-remixmate/issues/new?template=access-request.yml" class="rmx-btn rmx-btn-primary" target="_blank">
+      Request Access
+    </a>
+    <a href="https://github.com/Chunduri-Aditya/ai-remixmate" class="rmx-btn rmx-btn-secondary" target="_blank">
+      View on GitHub
+    </a>
+  </div>
+
+  <div class="rmx-footer">
+    <div class="rmx-status">
+      <div class="rmx-status-dot"></div>
+      Actively maintained
+    </div>
+    <div class="rmx-private">
+      🔒 Private repo — request access
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

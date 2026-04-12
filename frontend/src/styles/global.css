@@ -1,0 +1,255 @@
+/* ============================================================
+   AI RemixMate — Global Styles
+   Imports tokens, sets document defaults, utility classes.
+   ============================================================ */
+
+@import './tokens.css';
+
+/* --- Reset & document base --- */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-normal);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-void);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;         /* shell handles all scrolling */
+}
+
+#root {
+  display: flex;
+  height: 100dvh;
+  width: 100dvw;
+  overflow: hidden;
+}
+
+/* --- Links --- */
+
+a {
+  color: var(--color-ice-400);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--color-ice-300);
+  text-decoration: underline;
+}
+
+/* --- Scrollbars --- */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-default);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+/* --- Selection --- */
+
+::selection {
+  background-color: var(--color-amber-glow-strong);
+  color: var(--color-text-primary);
+}
+
+/* --- Focus ring --- */
+
+:focus-visible {
+  outline: 2px solid var(--color-amber-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* --- Typography helpers --- */
+
+.font-display { font-family: var(--font-display); }
+.font-ui      { font-family: var(--font-ui); }
+.font-mono    { font-family: var(--font-mono); }
+
+.text-primary   { color: var(--color-text-primary); }
+.text-secondary { color: var(--color-text-secondary); }
+.text-muted     { color: var(--color-text-muted); }
+.text-amber     { color: var(--color-amber-500); }
+.text-ice       { color: var(--color-ice-400); }
+.text-green     { color: var(--color-green-500); }
+.text-crimson   { color: var(--color-crimson-500); }
+
+/* --- Layout helpers --- */
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.scroll-y {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* --- Animated pulse dot (status indicators) --- */
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
+}
+
+.pulse-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.pulse-dot--green   { background-color: var(--color-green-500); }
+.pulse-dot--amber   { background-color: var(--color-amber-500); }
+.pulse-dot--crimson { background-color: var(--color-crimson-500); }
+.pulse-dot--ice     { background-color: var(--color-ice-400); }
+.pulse-dot--muted   { background-color: var(--color-text-muted); animation: none; }
+
+/* --- Badge --- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.badge--running {
+  background: var(--color-amber-glow);
+  color: var(--color-amber-400);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.badge--success {
+  background: var(--color-green-glow);
+  color: var(--color-green-500);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.badge--error {
+  background: var(--color-crimson-glow);
+  color: var(--color-crimson-500);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+}
+
+.badge--pending {
+  background: rgba(113, 113, 122, 0.1);
+  color: var(--color-text-muted);
+  border: 1px solid rgba(113, 113, 122, 0.2);
+}
+
+.badge--ice {
+  background: var(--color-ice-glow);
+  color: var(--color-ice-400);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+/* --- Divider --- */
+
+.divider {
+  height: 1px;
+  background: var(--color-border-subtle);
+  width: 100%;
+}
+
+/* --- Surface card --- */
+
+.surface {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.surface--elevated {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border-default);
+}
+
+/* --- Skeleton loader --- */
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-elevated) 25%,
+    var(--color-bg-overlay)  50%,
+    var(--color-bg-elevated) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* --- Glow effects --- */
+
+.glow-amber { box-shadow: var(--shadow-amber); }
+.glow-ice   { box-shadow: var(--shadow-ice); }
+
+/* --- Transitions applied to interactive elements --- */
+
+button, a, [role="button"] {
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color            var(--duration-fast) var(--ease-out),
+    border-color     var(--duration-fast) var(--ease-out),
+    box-shadow       var(--duration-fast) var(--ease-out),
+    opacity          var(--duration-fast) var(--ease-out);
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}

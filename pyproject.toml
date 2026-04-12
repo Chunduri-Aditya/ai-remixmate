@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "remixmate"
+version = "0.2.0"
+description = "AI-powered music remix engine — download, separate, analyse and blend tracks"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+keywords = ["music", "remix", "audio", "ai", "demucs", "librosa"]
+
+dependencies = [
+    "librosa>=0.11",
+    "soundfile>=0.12",
+    "pydub>=0.25",
+    "demucs>=4.0",
+    "openai-whisper>=20250625",
+    "torch>=2.0",
+    "torchaudio>=2.0",
+    "scikit-learn>=1.7",
+    "sentence-transformers>=5.0",
+    "numpy>=2.0",
+    "scipy>=1.16",
+    "pandas>=2.0",
+    "PyYAML>=6.0",
+    "yt-dlp>=2025.1",
+    "ytmusicapi>=1.10",
+    "mutagen>=1.47",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.35",
+    "python-multipart>=0.0.20",
+    "tqdm>=4.67",
+    "click>=8.2",
+    "streamlit>=1.47",
+    "requests>=2.32",
+    "tenacity>=9.0",
+    "typing_extensions>=4.14",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4",
+    "pytest-asyncio>=0.25",
+    "black>=25.1",
+    "ruff>=0.12",
+    "mypy>=1.16",
+    "pre-commit>=4.2",
+]
+
+[project.scripts]
+# After `pip install -e .` these become shell commands
+remixmate = "scripts.remixmate_cli:main"
+
+[tool.setuptools.packages.find]
+# Auto-discover all sub-packages under the project root
+where = ["."]
+include = ["scripts*"]
+
+# ---------------------------------------------------------------------------
+# Developer tooling
+# ---------------------------------------------------------------------------
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I"]   # pycodestyle + pyflakes + isort
+ignore = ["E501"]                # line length handled by black
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true    # many audio libs lack stubs
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py", "e2e_test_suite.py"]

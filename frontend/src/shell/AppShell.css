@@ -1,0 +1,53 @@
+/* ============================================================
+   AppShell — 3-zone layout
+   ============================================================ */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--shell-rail-width) 1fr;
+  grid-template-rows: 1fr;
+  height: 100dvh;
+  width: 100dvw;
+  overflow: hidden;
+  background: var(--color-bg-void);
+}
+
+.app-shell--inspector-open {
+  grid-template-columns: var(--shell-rail-width) 1fr var(--shell-inspector-width);
+}
+
+.app-shell__canvas {
+  grid-column: 2;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-base);
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+/* Inspector occupies 3rd column when open */
+.app-shell--inspector-open .app-shell__canvas {
+  grid-column: 2;
+}
+
+/* Page loading fallback */
+.page-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+}
+
+.page-fallback__spinner {
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--color-border-default);
+  border-top-color: var(--color-amber-500);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

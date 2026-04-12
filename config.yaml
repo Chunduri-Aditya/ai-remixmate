@@ -1,0 +1,127 @@
+# =============================================================================
+# AI RemixMate — Base Configuration
+# =============================================================================
+#
+# Override any value by:
+#   1. Copying this file to config.local.yaml and editing it there (gitignored)
+#   2. Setting environment variables:  REMIXMATE_<SECTION>_<KEY>
+#      e.g.  REMIXMATE_AUDIO_SAMPLE_RATE=48000
+#            REMIXMATE_DOWNLOAD_JAMENDO_CLIENT_ID=your_key_here
+#
+# config.local.yaml takes priority over config.yaml.
+# Environment variables take priority over both.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+audio:
+  sample_rate: 44100          # Hz — 44100 or 48000
+  bit_depth: 24               # bits — 16 or 24
+  target_lufs: -14.0          # integrated loudness target (streaming standard)
+  channels: 1                 # 1 = mono processing, 2 = stereo
+
+# ---------------------------------------------------------------------------
+remix:
+  default_preset: radio       # radio | club | ambient
+  optimizer_iterations: 50    # random-search iterations per remix
+  max_pitch_shift_semitones: 2  # maximum allowed pitch correction
+  beat_alignment_tolerance_ms: 40  # max allowed beat phase error
+
+# ---------------------------------------------------------------------------
+separation:
+  model: htdemucs             # htdemucs | htdemucs_ft | mdx_extra
+  device: auto                # auto | cpu | cuda | mps (Apple Silicon)
+
+# ---------------------------------------------------------------------------
+download:
+  default_source: auto        # auto | youtube | jamendo | all
+  jamendo_client_id: b6747d04  # replace with your own for production
+                               # register free at https://devportal.jamendo.com
+  audio_format: wav            # output format after conversion
+  audio_quality: 0             # yt-dlp quality: 0 = best
+  no_playlist_by_default: true # prevent accidental full-playlist downloads
+
+# ---------------------------------------------------------------------------
+metadata:                       # Metadata API clients
+  getsongbpm_api_key: ""        # Get free key at https://getsongbpm.com/api
+  lastfm_api_key: ""            # Get free key at https://www.last.fm/api/account/create
+  cache_path: data/metadata.db  # SQLite cache file (relative to project root)
+  cache_ttl_days: 30            # Invalidate cached entries after 30 days
+
+# ---------------------------------------------------------------------------
+dj:                             # DJ-style transition engine
+  default_transition_bars: 16   # 8 | 16 | 32 — transition overlap length
+  hp_filter_start_hz: 400.0     # HP cutoff on incoming track at mix start
+  hp_filter_end_hz: 80.0        # HP cutoff at bass handover point
+  bass_crossover_hz: 150.0      # Bass/mid crossover for the bass swap
+
+# ---------------------------------------------------------------------------
+library:                        # Smart storage management
+  max_size_gb: 50.0             # Evict LRU full.wav files when exceeded
+  keep_raw_after_separation: false  # Delete full.wav once stems are produced
+  prune_on_download: true       # Auto-prune after each successful separation
+
+# ---------------------------------------------------------------------------
+database:
+  path: data/remixmate.db      # relative to project root
+  embeddings_path: data/song_embeddings.json
+
+# ---------------------------------------------------------------------------
+api:                           # FastAPI backend (Phase 1)
+  host: 0.0.0.0
+  port: 8000
+  workers: 1
+  reload: false                # set true in dev
+  cors_origins:
+    - "*"                      # tighten this in production
+
+# ---------------------------------------------------------------------------
+generative:                    # AI Studio — generative model configuration
+  # ── Memory budget ────────────────────────────────────────────────────────
+  max_vram_gb: 12.0            # MPS unified-memory budget for AI models
+                               # M1/M2 8GB → set to 6.0; M3/M4 24GB → set to 20.0
+  strategy: sequential         # sequential = offload all others before loading one
+                               # greedy    = keep as many loaded as fit in budget
+
+  # ── MusicGen (style transfer) ────────────────────────────────────────────
+  musicgen_model: facebook/musicgen-melody
+                               # Alternatives:
+                               #   facebook/musicgen-melody-large  (3.3 B params, ~16 GB)
+                               #   facebook/musicgen-small          (300 M params, ~2 GB)
+  musicgen_offload_after_use: true   # unload from GPU after each generation
+
+  # ── VampNet (inpainting) ──────────────────────────────────────────────────
+  vampnet_offload_after_use: true    # unload from GPU after each inpainting pass
+
+  # ── EnCodec (tokenizer) ──────────────────────────────────────────────────
+  encodec_model: facebook/encodec_24khz
+  encodec_bandwidth: 6.0       # kbps — 1.5 | 3.0 | 6.0 | 12.0 | 24.0
+
+  # ── DAC (Descript Audio Codec, VampNet's tokenizer) ──────────────────────
+  dac_model: 44khz             # 16khz | 24khz | 44khz
+                               # 44khz gives 9 codebooks at 86 Hz token rate
+
+  # ── Generation limits ────────────────────────────────────────────────────
+  max_generation_sec: 30.0     # Hard cap on MusicGen output length
+  default_guidance_scale: 3.0  # CFG strength (1 = ignore text, 10 = very constrained)
+  default_temperature: 1.0     # Sampling temperature (< 1 = conservative)
+
+# ---------------------------------------------------------------------------
+logging:
+  level: INFO                  # DEBUG | INFO | WARNING | ERROR
+  format: "%(asctime)s [%(levelname)s] %(name)s — %(message)s"
+  file: null                   # null = stdout only; or "logs/remixmate.log"
+
+# ---------------------------------------------------------------------------
+spotify:                        # Spotify Web API integration (free tier)
+  client_id: ""                 # Get free at https://developer.spotify.com/dashboard
+  client_secret: ""             # Same dashboard — copy Client Secret
+  redirect_uri: "http://127.0.0.1:8000/spotify/callback"
+  #
+  # What the free Spotify API gives you:
+  #   • Search the entire Spotify catalogue
+  #   • Audio features (BPM, key, energy) — available for apps created before Nov 2024
+  #   • Browse & import your playlists and top tracks
+  #   • Tracks download via yt-dlp (not from Spotify — against their ToS)
+  #
+  # Override in config.local.yaml (gitignored) or via env vars:
+  #   SPOTIFY_CLIENT_ID=xxx  SPOTIFY_CLIENT_SECRET=yyy  ./start.sh

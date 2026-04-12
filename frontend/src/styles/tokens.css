@@ -1,0 +1,148 @@
+/* ============================================================
+   AI RemixMate — Design Tokens
+   All primitive values live here as CSS custom properties.
+   Consume via var(--token-name) everywhere else.
+   ============================================================ */
+
+:root {
+
+  /* --- COLOR: Base surfaces --- */
+  --color-bg-void:      #05050a;   /* deepest background (body) */
+  --color-bg-base:      #09090b;   /* primary app background */
+  --color-bg-surface:   #111113;   /* cards, panels */
+  --color-bg-elevated:  #18181b;   /* modals, dropdowns */
+  --color-bg-overlay:   #1c1c20;   /* hover overlays */
+
+  /* --- COLOR: Borders --- */
+  --color-border-subtle:  #1c1c20;
+  --color-border-default: #27272a;
+  --color-border-strong:  #3f3f46;
+
+  /* --- COLOR: Text --- */
+  --color-text-primary:   #f4f4f5;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted:     #71717a;
+  --color-text-faint:     #3f3f46;
+  --color-text-inverse:   #09090b;
+
+  /* --- COLOR: Amber (primary accent — energy, actions) --- */
+  --color-amber-50:   #fffbeb;
+  --color-amber-100:  #fef3c7;
+  --color-amber-300:  #fcd34d;
+  --color-amber-400:  #fbbf24;
+  --color-amber-500:  #f59e0b;   /* primary amber */
+  --color-amber-600:  #d97706;
+  --color-amber-700:  #b45309;
+  --color-amber-glow: rgba(245, 158, 11, 0.15);
+  --color-amber-glow-strong: rgba(245, 158, 11, 0.25);
+
+  /* --- COLOR: Ice Blue (secondary accent — info, analysis, links) --- */
+  --color-ice-300:   #7dd3fc;
+  --color-ice-400:   #38bdf8;    /* primary ice */
+  --color-ice-500:   #0ea5e9;
+  --color-ice-glow:  rgba(56, 189, 248, 0.15);
+
+  /* --- COLOR: Green (success, active, healthy) --- */
+  --color-green-400: #4ade80;
+  --color-green-500: #34d399;    /* primary green */
+  --color-green-600: #059669;
+  --color-green-glow: rgba(52, 211, 153, 0.15);
+
+  /* --- COLOR: Crimson (errors, warnings, destructive) --- */
+  --color-crimson-400: #fb7185;
+  --color-crimson-500: #f87171;  /* primary crimson */
+  --color-crimson-600: #dc2626;
+  --color-crimson-glow: rgba(248, 113, 113, 0.15);
+
+  /* --- COLOR: Violet (stems, channels — subtle only) --- */
+  --color-violet-400: #a78bfa;
+  --color-violet-500: #8b5cf6;
+  --color-violet-glow: rgba(139, 92, 246, 0.12);
+
+  /* --- TYPOGRAPHY --- */
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-ui:      'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
+
+  --text-xs:   0.6875rem;   /* 11px */
+  --text-sm:   0.75rem;     /* 12px */
+  --text-base: 0.8125rem;   /* 13px */
+  --text-md:   0.875rem;    /* 14px */
+  --text-lg:   1rem;        /* 16px */
+  --text-xl:   1.125rem;    /* 18px */
+  --text-2xl:  1.25rem;     /* 20px */
+  --text-3xl:  1.5rem;      /* 24px */
+  --text-4xl:  1.875rem;    /* 30px */
+  --text-5xl:  2.25rem;     /* 36px */
+
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  --leading-tight:   1.2;
+  --leading-snug:    1.35;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.65;
+
+  --tracking-tight:  -0.02em;
+  --tracking-snug:   -0.01em;
+  --tracking-normal: 0em;
+  --tracking-wide:   0.04em;
+  --tracking-wider:  0.08em;
+
+  /* --- SPACING --- */
+  --space-1:  0.25rem;    /* 4px */
+  --space-2:  0.5rem;     /* 8px */
+  --space-3:  0.75rem;    /* 12px */
+  --space-4:  1rem;       /* 16px */
+  --space-5:  1.25rem;    /* 20px */
+  --space-6:  1.5rem;     /* 24px */
+  --space-8:  2rem;       /* 32px */
+  --space-10: 2.5rem;     /* 40px */
+  --space-12: 3rem;       /* 48px */
+  --space-16: 4rem;       /* 64px */
+  --space-20: 5rem;       /* 80px */
+
+  /* --- BORDER RADIUS --- */
+  --radius-sm:  0.25rem;   /* 4px */
+  --radius-md:  0.5rem;    /* 8px */
+  --radius-lg:  0.75rem;   /* 12px */
+  --radius-xl:  1rem;      /* 16px */
+  --radius-2xl: 1.5rem;    /* 24px */
+  --radius-full: 9999px;
+
+  /* --- LAYOUT: Shell dimensions --- */
+  --shell-rail-width:      64px;
+  --shell-inspector-width: 316px;
+  --shell-header-height:   0px;    /* no top bar — rail-first layout */
+  --shell-status-height:   28px;   /* bottom status bar */
+
+  /* --- SHADOWS --- */
+  --shadow-sm:  0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md:  0 4px 12px rgba(0,0,0,0.5);
+  --shadow-lg:  0 8px 32px rgba(0,0,0,0.6);
+  --shadow-xl:  0 16px 64px rgba(0,0,0,0.7);
+  --shadow-amber: 0 0 20px rgba(245, 158, 11, 0.2);
+  --shadow-ice:   0 0 20px rgba(56, 189, 248, 0.15);
+
+  /* --- TRANSITIONS --- */
+  --ease-out:   cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:    cubic-bezier(0.4, 0, 1, 1);
+  --ease-inout: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --duration-instant: 80ms;
+  --duration-fast:    150ms;
+  --duration-normal:  250ms;
+  --duration-slow:    400ms;
+  --duration-slower:  600ms;
+
+  /* --- Z-INDEX SCALE --- */
+  --z-base:    0;
+  --z-raised:  10;
+  --z-overlay: 100;
+  --z-modal:   200;
+  --z-toast:   300;
+  --z-top:     400;
+}

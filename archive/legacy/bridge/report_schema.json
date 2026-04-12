@@ -1,0 +1,120 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI RemixMate Report",
+  "description": "Report file for Logic Pro → Python feedback",
+  "type": "object",
+  "required": [
+    "version",
+    "session_id",
+    "files",
+    "metrics",
+    "constraints",
+    "constraints_satisfied"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^1\\.0$"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Session identifier matching manifest"
+    },
+    "files": {
+      "type": "object",
+      "required": ["bounce", "vocals", "instrumental"],
+      "properties": {
+        "bounce": {
+          "type": "string",
+          "description": "Path to bounced audio file"
+        },
+        "vocals": {
+          "type": "string",
+          "description": "Path to vocal track file"
+        },
+        "instrumental": {
+          "type": "string",
+          "description": "Path to instrumental track file"
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "lufs_integrated",
+        "true_peak_dbfs",
+        "clipping_ratio",
+        "beat_alignment_ms",
+        "key_compatible",
+        "vocal_intelligibility_proxy"
+      ],
+      "properties": {
+        "lufs_integrated": {
+          "type": "number",
+          "minimum": -30,
+          "maximum": 0,
+          "description": "Integrated LUFS measurement"
+        },
+        "true_peak_dbfs": {
+          "type": "number",
+          "minimum": -60,
+          "maximum": 0,
+          "description": "True peak level in dBFS"
+        },
+        "clipping_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Ratio of clipped samples"
+        },
+        "beat_alignment_ms": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000,
+          "description": "Beat alignment accuracy in milliseconds"
+        },
+        "key_compatible": {
+          "type": "boolean",
+          "description": "Whether keys are compatible"
+        },
+        "vocal_intelligibility_proxy": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Vocal intelligibility score (0-1)"
+        }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "required": [
+        "lufs_target",
+        "true_peak_max_dbfs",
+        "clipping_max_ratio",
+        "beat_align_max_ms"
+      ],
+      "properties": {
+        "lufs_target": {
+          "type": "string",
+          "description": "Target LUFS range (e.g., '-14 ±1')"
+        },
+        "true_peak_max_dbfs": {
+          "type": "number",
+          "description": "Maximum allowed true peak in dBFS"
+        },
+        "clipping_max_ratio": {
+          "type": "number",
+          "description": "Maximum allowed clipping ratio"
+        },
+        "beat_align_max_ms": {
+          "type": "number",
+          "description": "Maximum allowed beat alignment error in ms"
+        }
+      }
+    },
+    "constraints_satisfied": {
+      "type": "boolean",
+      "description": "Whether all constraints are satisfied"
+    }
+  }
+}

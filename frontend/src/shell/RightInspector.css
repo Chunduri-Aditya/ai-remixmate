@@ -1,0 +1,285 @@
+/* ============================================================
+   Right Inspector — live job / activity / system panel
+   ============================================================ */
+
+.right-inspector {
+  display: flex;
+  flex-direction: column;
+  width: var(--shell-inspector-width);
+  height: 100dvh;
+  background: var(--color-bg-void);
+  border-left: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* Header */
+.right-inspector__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+}
+
+.right-inspector__title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.right-inspector__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+}
+
+.right-inspector__close:hover {
+  background: var(--color-bg-overlay);
+  color: var(--color-text-secondary);
+}
+
+/* Tabs */
+.right-inspector__tabs {
+  display: flex;
+  gap: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+}
+
+.inspector-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.inspector-tab:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-overlay);
+}
+
+.inspector-tab--active {
+  color: var(--color-amber-400);
+  background: var(--color-amber-glow);
+  border-color: rgba(245, 158, 11, 0.15);
+}
+
+.inspector-tab__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-amber-500);
+  color: var(--color-text-inverse);
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  font-family: var(--font-mono);
+}
+
+/* Content area */
+.right-inspector__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Empty state */
+.inspector-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8) var(--space-4);
+  font-size: var(--text-sm);
+}
+
+/* Job cards */
+.inspector-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.inspector-job-card {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  position: relative;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.inspector-job-card--running {
+  border-color: rgba(245, 158, 11, 0.25);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.05);
+}
+
+.inspector-job-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.inspector-job-card__type {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.inspector-job-card__progress-bar {
+  height: 2px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-full);
+  margin-bottom: var(--space-2);
+  overflow: hidden;
+}
+
+.inspector-job-card__progress-fill {
+  height: 100%;
+  background: var(--color-amber-500);
+  border-radius: var(--radius-full);
+  transition: width var(--duration-slow) var(--ease-out);
+  box-shadow: 0 0 6px var(--color-amber-glow-strong);
+}
+
+.inspector-job-card__meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 16px;
+}
+
+.inspector-job-card__cancel {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  background: transparent;
+}
+
+.inspector-job-card__cancel:hover {
+  background: var(--color-crimson-glow);
+  color: var(--color-crimson-500);
+}
+
+/* Activity log */
+.inspector-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inspector-activity__clear {
+  align-self: flex-end;
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  margin-bottom: var(--space-2);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.inspector-activity__clear:hover {
+  background: var(--color-bg-overlay);
+  color: var(--color-text-secondary);
+}
+
+.activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.activity-row:hover {
+  background: var(--color-bg-surface);
+}
+
+.activity-row__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.activity-row__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.activity-row__message {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.activity-row__time {
+  font-size: 10px;
+  color: var(--color-text-faint);
+}
+
+/* System tab */
+.inspector-system {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-1);
+}
+
+.inspector-system__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  padding: var(--space-1) 0;
+}
+
+.inspector-system__divider {
+  height: 1px;
+  background: var(--color-border-subtle);
+  margin: var(--space-2) 0;
+}
