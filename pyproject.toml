@@ -48,6 +48,12 @@ dev = [
     "mypy>=1.16",
     "pre-commit>=4.2",
 ]
+# DAC tokenization + VampNet inpainting (conflicts with streamlit's protobuf
+# requirement — install in a separate environment or after the core install).
+# Usage: pip install -e ".[generative]"
+generative = [
+    "descript-audio-codec>=1.0.0",
+]
 
 [project.scripts]
 # After `pip install -e .` these become shell commands
