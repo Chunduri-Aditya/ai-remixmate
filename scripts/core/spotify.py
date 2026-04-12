@@ -376,6 +376,11 @@ class SpotifyClient:
 
     def _get(self, path: str, params: Dict = None, user: bool = False) -> Optional[Dict]:
         """GET wrapper with error logging and None-on-error."""
+        # Guard against path manipulation — path must be a clean relative path.
+        # Prevents partial SSRF if a caller ever passes untrusted input as path.
+        if not path.startswith("/") or ".." in path or "://" in path:
+            log.warning("Spotify _get: rejected unsafe path %r", path)
+            return None
         try:
             resp = requests.get(
                 f"{self.BASE_URL}{path}",
@@ -529,6 +534,11 @@ class SpotifyClient:
         loudness_db, camelot, key_name — or None if the endpoint is unavailable
         (Spotify restricted audio features for new apps after Nov 2024).
         """
+        # Spotify track IDs are base-62 (alphanumeric + no special chars).
+        # Validate before interpolating into the path.
+        if not track_id or not track_id.replace("-", "").isalnum():
+            log.warning("get_audio_features: invalid track_id %r", track_id)
+            return None
         data = self._get(f"/audio-features/{track_id}")
         if not data:
             return None
