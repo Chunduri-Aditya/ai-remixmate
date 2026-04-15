@@ -5,10 +5,16 @@ These utilities are used by multiple routers for common operations like
 song validation, stem file lookup, and rate limiting.
 """
 
+import re
 from pathlib import Path
 from typing import Optional
 
 from fastapi import HTTPException
+
+# Song names on disk are produced by sanitize_name() in youtube_music.py:
+# alphanumeric, spaces, hyphens, parens, brackets, ampersands — max 120 chars.
+# This pattern is used as an explicit CodeQL-recognized sanitizer in _require_song.
+_SAFE_SONG_NAME_RE = re.compile(r'^[\w\s\-\(\)\[\]&]{1,120}$')
 
 from scripts.api import jobs as job_store
 from scripts.api.schemas import SongInfo
@@ -59,13 +65,22 @@ def _song_info(song_dir: Path) -> SongInfo:
 
 
 def _require_song(name: str) -> Path:
-    """Return the song dir or raise 404.  Prevents path traversal."""
-    # Sanitize: strip path separators and parent references
-    safe = Path(name).name  # extracts final component, strips ../ etc.
-    if not safe or safe != name or ".." in name:
+    """Return the song dir or raise 404.  Prevents path traversal.
+
+    Three-layer sanitization (each layer alone would suffice for CodeQL):
+    1. Regex allowlist — rejects path separators, null bytes, shell chars.
+    2. Path().name — strips any leading directory components.
+    3. resolve() + prefix check — symlink-safe confinement to LIBRARY_DIR.
+    """
+    # Layer 1: allowlist regex — CodeQL's primary recognized sanitizer
+    if not name or not _SAFE_SONG_NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid song name")
+    # Layer 2: extract final component only (strips any ../ that slipped through)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="Invalid song name")
+    # Layer 3: resolve and confirm confinement
     d = (LIBRARY_DIR / safe).resolve()
-    # Ensure resolved path is still inside library
     if not str(d).startswith(str(LIBRARY_DIR.resolve())):
         raise HTTPException(status_code=400, detail="Invalid song name")
     if not d.exists():

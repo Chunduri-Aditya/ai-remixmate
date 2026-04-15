@@ -103,7 +103,14 @@ class ApiConfig:
     port: int              = 8000
     workers: int           = 1
     reload: bool           = False
-    cors_origins: List[str] = field(default_factory=lambda: ["*"])
+    # Explicit allowlist — no wildcard. Add origins in config.yaml if needed.
+    # Wildcard CORS is flagged by CodeQL (CWE-942 / partial CSRF exposure).
+    cors_origins: List[str] = field(default_factory=lambda: [
+        "http://localhost:8501",   # Streamlit UI (default port)
+        "http://127.0.0.1:8501",
+        "http://localhost:8000",   # API self-calls / Swagger UI
+        "http://127.0.0.1:8000",
+    ])
 
 
 @dataclass

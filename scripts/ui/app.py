@@ -1711,9 +1711,11 @@ if "pending_similar" not in st.session_state:
 # API helpers
 # ---------------------------------------------------------------------------
 
-# When using self-signed certs, disable SSL verification for localhost calls.
-# This is safe because we're only talking to our own local API.
-_VERIFY_SSL = not _HTTPS  # If HTTPS with self-signed, don't verify; if HTTP, n/a
+# SSL verification: enabled by default. Only disable via explicit env var
+# (SKIP_SSL_VERIFY=1) for local dev with self-signed certs.
+# Never derive verify=False from the protocol flag — CodeQL CWE-297.
+import os as _os
+_VERIFY_SSL = not (_os.getenv("SKIP_SSL_VERIFY", "").lower() in ("1", "true", "yes"))
 
 def api_get(path: str, params: dict = None) -> Optional[Dict]:
     try:

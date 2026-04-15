@@ -145,13 +145,18 @@ def stream_stem(name: str, stem: str):
 
 @router.get("/outputs/{session_id}/{filename}", tags=["outputs"])
 def stream_output(session_id: str, filename: str):
-    # Safety: reject path traversal attempts
-    if ".." in session_id or ".." in filename:
-        raise HTTPException(status_code=400, detail="Invalid path")
-    path = OUTPUTS_DIR / session_id / filename
+    # Strip to final path component — rejects ../, absolute paths, and
+    # embedded separators. CodeQL recognizes Path().name as a sanitizer.
+    safe_session  = Path(session_id).name
+    safe_filename = Path(filename).name
+    if not safe_session or not safe_filename or safe_session != session_id or safe_filename != filename:
+        raise HTTPException(status_code=400, detail="Invalid path component.")
+    path = (OUTPUTS_DIR / safe_session / safe_filename).resolve()
+    if not str(path).startswith(str(OUTPUTS_DIR.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid path component.")
     if not path.exists():
         raise HTTPException(status_code=404, detail="Output not found")
-    return FileResponse(str(path), media_type="audio/wav", filename=filename)
+    return FileResponse(str(path), media_type="audio/wav", filename=safe_filename)
 
 
 # ---------------------------------------------------------------------------

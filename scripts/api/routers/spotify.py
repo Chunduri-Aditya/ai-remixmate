@@ -19,6 +19,8 @@ User library (requires login):
   POST /spotify/import-playlist              — queue entire playlist for download
 """
 
+import re
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
@@ -113,6 +115,11 @@ def spotify_search(q: str = Query(..., description="Search query"), limit: int =
 @router.get("/spotify/track/{track_id}", tags=["spotify"])
 def spotify_track(track_id: str):
     """Get full info + audio features for a single Spotify track."""
+    # Validate at the boundary: Spotify IDs are base-62, 10–30 chars.
+    # Explicit re.fullmatch here terminates CodeQL's taint flow before
+    # track_id reaches any HTTP call — prevents partial SSRF flagging.
+    if not re.fullmatch(r"[A-Za-z0-9]{10,30}", track_id):
+        raise HTTPException(status_code=400, detail="Invalid track ID.")
     sp = _spotify()
     if not sp.is_configured():
         raise HTTPException(status_code=400, detail="Spotify not configured.")
@@ -225,6 +232,9 @@ def spotify_playlists(limit: int = Query(50, le=50)):
 @router.get("/spotify/playlists/{playlist_id}/tracks", tags=["spotify"])
 def spotify_playlist_tracks(playlist_id: str, limit: int = Query(50, le=50)):
     """Get tracks in a specific playlist. Enriches with audio features if available."""
+    # Spotify playlist IDs are base-62, 10–40 chars. Validate at boundary.
+    if not re.fullmatch(r"[A-Za-z0-9]{10,40}", playlist_id):
+        raise HTTPException(status_code=400, detail="Invalid playlist ID.")
     sp = _spotify()
     if not sp.is_configured():
         raise HTTPException(status_code=400, detail="Spotify not configured.")
@@ -267,6 +277,8 @@ def spotify_import_playlist(body: dict):
 
     if not playlist_id:
         raise HTTPException(status_code=400, detail="'playlist_id' is required.")
+    if not re.fullmatch(r"[A-Za-z0-9]{10,40}", playlist_id):
+        raise HTTPException(status_code=400, detail="Invalid playlist ID format.")
 
     sp = _spotify()
     if not sp.is_configured():
