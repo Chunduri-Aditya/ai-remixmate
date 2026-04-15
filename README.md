@@ -12,7 +12,9 @@ A real-time DJ engine that takes two songs and renders a beat-locked transition 
 
 Give it two tracks. It analyzes both for tempo, key, energy, and bar structure. Picks the right exit and entry cue points at musical phrase boundaries. Time-stretches Song B to match Song A's BPM through librosa's phase vocoder. Phase-locks Song B's downbeat onto Song A's bar grid at the sample level. Renders a stem-aware crossfade where drums, bass, and vocals fade independently — the way a real DJ would do it. Optionally synthesizes a bridge beat from scratch with numpy. Masters the output to ITU-R BS.1770-4 (-14 LUFS, true-peak limited).
 
-That's the engine. Wrapped around it: a FastAPI backend with an async job queue, SQLite persistence, structured JSON logging, an immutable audit trail, and a Streamlit web UI.
+That's the transition engine. Wrapped around it: a full setlist planner that takes a playlist (or an Exportify CSV export from your Spotify) and figures out the best play order — harmonic transitions scored against the Camelot wheel, BPM continuity, energy arc shaping (mountain, ramp, wave), and a Markov model trained on historical setlist patterns. There's also a wordplay layer that uses Genius API to find where one song's closing lyrics share phrases with the next song's opening — the move mixtape curators actually use.
+
+The infrastructure: FastAPI backend with an async job queue, SQLite persistence, structured JSON logging, an immutable audit trail, and a Streamlit web UI.
 
 ---
 
@@ -41,7 +43,7 @@ docker compose up
 
 ## The parts that are actually interesting
 
-Most "AI DJ" projects do a crossfade and call it done. The thing I cared about was making mixes that don't sound automated — and that meant getting four problems right.
+Most "AI DJ" projects do a crossfade and call it done. The thing I cared about was making mixes that don't sound automated — and that meant getting four core problems right, plus the setlist intelligence layer on top.
 
 **Beat-grid lock at the sample level.** A naive crossfade lines up two waveforms and hopes for the best. Real DJs land Song B's downbeat exactly on Song A's grid. The engine computes both bar-grid phases at the cue points and applies a sample-level correction (clamped to ±half a bar so it can't overshoot). After time-stretching, the entry sample index has to compensate for the stretch ratio:
 
@@ -57,6 +59,8 @@ Easy to get wrong. I got it wrong about six times before it locked.
 
 **Procedural bridge beats.** When the two songs need a connector, the engine synthesizes a drum loop from scratch in numpy — sine-envelope kick, filtered-noise snare, highpass hi-hats — across six genre presets (techno, house, hip-hop, trap, DnB, ambient). No sample files. The whole bridge volume follows a bell curve so it rises into the transition and falls out the other side. You can also export the pattern as Strudel code and tweak it live in the browser.
 
+**Setlist intelligence.** The harder problem turns out not to be the mix itself but the order. `setlist_planner.py` runs a weighted greedy optimizer (50% harmonic, 30% BPM, 20% energy arc) over a playlist, with optional Markov chain blending to add human-feel sequencing from historical DJ setlists. Camelot modulations are classified into nine named types — energy boost (+2 positions), diagonal (cross-ring ±1), relative shift (same number cross-ring), add four protocol, and so on — each with a psychoacoustic cost and a blend recommendation. The energy metric is computed locally with spectral flux + RMS rather than the Spotify audio features API, which deprecated in 2024.
+
 The mastering chain runs ITU-R BS.1770-4 LUFS measurement with K-weighting and a true-peak look-ahead limiter. -14 LUFS, broadcast standard. The output won't blow up your speakers if you crank it.
 
 ---
@@ -65,22 +69,25 @@ The mastering chain runs ITU-R BS.1770-4 LUFS measurement with K-weighting and a
 
 ```
 scripts/
-├── api/                    # FastAPI — 11 routers, 7 task modules, async job store
+├── api/                    # FastAPI — 12 routers, 7 task modules, async job store
 │   ├── main.py             # Lifespan, CORS, request-ID middleware
 │   ├── jobs.py             # SQLite job persistence, ETA, cancel/retry
 │   ├── routers/            # /library, /download, /stems, /analyze,
-│   │                       #  /dj-remix, /spotify, /jobs, /crates, ...
+│   │                       #  /dj-remix, /spotify, /jobs, /crates,
+│   │                       #  /setlist (optimize, import-csv, camelot, wordplay)
 │   └── task_modules/       # Long-running task functions
 │
-├── core/                   # Audio engine — 38 modules
+├── core/                   # Audio engine — 41 modules
 │   ├── dj_engine.py        # Transition renderer (the heart)
 │   ├── dj_analysis.py      # Beat / Section / SongStructure / TransitionPlan
 │   ├── stems.py            # Demucs separation + stem-aware mixer
 │   ├── beat_synth.py       # Procedural drum synthesis + Strudel export
 │   ├── mastering.py        # ITU-R BS.1770-4 LUFS + true-peak limiter
+│   ├── key_detection.py    # Krumhansl-Schmuckler + camelot_modulation()
+│   ├── setlist_planner.py  # Greedy optimizer, Markov model, Exportify CSV parser
+│   ├── wordplay.py         # Genius API lyrics + NLTK n-gram similarity
 │   ├── gpu.py              # MPS / CUDA / CPU auto-detection
 │   ├── music_index.py      # 35-dim numpy vector index for semantic search
-│   ├── key_detection.py    # Krumhansl-Schmuckler key profiling
 │   └── ...                 # genre, recommend, audit, paths, audio_enhance, ...
 │
 └── ui/
@@ -104,6 +111,8 @@ The runtime layout (gitignored): `library/` for downloaded songs, `outputs/` for
 | Stem separation | Demucs (Meta AI), PyTorch (MPS / CUDA / CPU) |
 | Mastering | ITU-R BS.1770-4 LUFS, true-peak limiter |
 | Semantic search | 35-dim numpy vector index, weighted cosine similarity, JSON-persisted |
+| Setlist planning | Greedy + Markov optimizer, Camelot wheel, spectral flux energy |
+| Lyric matching | lyricsgenius (Genius API), NLTK, scikit-learn TF-IDF |
 | Backend | FastAPI, Uvicorn, Pydantic v2 |
 | Persistence | SQLite (jobs, crates, tags, favorites) + JSONL audit log |
 | Download | yt-dlp, ytmusicapi, Spotify OAuth |
@@ -142,7 +151,22 @@ curl http://localhost:8000/jobs/{job_id}
 
 Want to audition the crossfade window without committing to a full render? Use `/dj-remix/preview` instead — it renders only the transition and returns BPM data, Camelot positions, harmonic score, and a stream URL.
 
-For everything else (compatibility scoring, smart search, crates and tags, Spotify import, the whole thing), the interactive Swagger UI lives at <http://localhost:8000/docs>.
+To optimize a playlist, export it from [exportify.net](https://exportify.net) and POST the CSV:
+
+```bash
+curl -X POST http://localhost:8000/setlist/import-csv \
+  -F "file=@my_playlist.csv" \
+  -F "arc=mountain"
+```
+
+Or check the harmonic compatibility of two Camelot keys instantly:
+
+```bash
+curl "http://localhost:8000/setlist/camelot/modulation?from_key=8A&to_key=9B"
+# → { "modulation_type": "energy_boost", "cost": 0.30, "safe_to_blend": true, ... }
+```
+
+For everything else — compatibility scoring, smart search, crates and tags, Spotify import, the whole thing — the interactive Swagger UI lives at <http://localhost:8000/docs>.
 
 ---
 
@@ -164,7 +188,7 @@ Active. Currently pushing on:
 - Splitting the Streamlit UI into modular pages
 - Building out the React frontend (`frontend/`) as the long-term UI
 - Tightening test coverage on the core engine
-- Better documentation of the DJ theory in [`docs/DJ_THEORY.md`](docs/DJ_THEORY.md)
+- Streamlit UI for the setlist planner (export, arc visualization, Camelot wheel view)
 
 The backend is stable. The mastering output passes the thresholds in `tests/test_report.json` (LUFS within ±1 dB, beat alignment under 40 ms). 681 tracks in my local library, no issues.
 
