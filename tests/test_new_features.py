@@ -314,10 +314,14 @@ class TestJobStore:
         """list_jobs should include all created jobs."""
         from scripts.api.jobs import create_job, list_jobs, _jobs
         from scripts.api.schemas import JobType
-        before = len(list_jobs())
+        # Query with a limit well above the store size so the count reflects
+        # actual growth — the default limit=50 caps the result and would mask
+        # new jobs once the persistent store already holds ≥50 entries.
+        big = len(_jobs) + 100
+        before = len(list_jobs(limit=big))
         create_job(JobType.DOWNLOAD)
         create_job(JobType.DOWNLOAD)
-        after = len(list_jobs())
+        after = len(list_jobs(limit=big))
         assert after >= before + 2
 
     def test_job_to_response_includes_eta_sec(self):
@@ -485,27 +489,26 @@ class TestDJEngineValidation:
 # ===========================================================================
 
 class TestRateLimiting:
-    """Unit tests for _check_job_cap in scripts/api/routes.py"""
+    """Unit tests for _check_job_cap in scripts/api/routers/_helpers.py"""
 
     def test_under_cap_passes(self):
         """With fewer running jobs than the cap, _check_job_cap should not raise."""
-        with patch("scripts.api.routes.job_store") as mock_store:
+        with patch("scripts.api.routers._helpers.job_store") as mock_store:
             mock_store.list_jobs.return_value = [
                 {"status": "running"} for _ in range(2)
             ]
-            from scripts.api.routes import _check_job_cap, _MAX_ACTIVE_JOBS
+            from scripts.api.routers._helpers import _check_job_cap
             # Should not raise (2 < cap of 4)
             _check_job_cap()
 
     def test_at_cap_raises_429(self):
         """At the job cap, _check_job_cap should raise HTTPException with 429."""
         from fastapi import HTTPException
-        with patch("scripts.api.routes.job_store") as mock_store:
-            from scripts.api.routes import _MAX_ACTIVE_JOBS
+        with patch("scripts.api.routers._helpers.job_store") as mock_store:
+            from scripts.api.routers._helpers import _check_job_cap, _MAX_ACTIVE_JOBS
             mock_store.list_jobs.return_value = [
                 {"status": "running"} for _ in range(_MAX_ACTIVE_JOBS)
             ]
-            from scripts.api.routes import _check_job_cap
             with pytest.raises(HTTPException) as exc_info:
                 _check_job_cap()
             assert exc_info.value.status_code == 429
@@ -513,25 +516,25 @@ class TestRateLimiting:
     def test_over_cap_raises_429(self):
         """With more running jobs than cap, _check_job_cap should raise 429."""
         from fastapi import HTTPException
-        with patch("scripts.api.routes.job_store") as mock_store:
+        with patch("scripts.api.routers._helpers.job_store") as mock_store:
             mock_store.list_jobs.return_value = [
                 {"status": "running"} for _ in range(10)
             ]
-            from scripts.api.routes import _check_job_cap
+            from scripts.api.routers._helpers import _check_job_cap
             with pytest.raises(HTTPException) as exc_info:
                 _check_job_cap()
             assert exc_info.value.status_code == 429
 
     def test_completed_jobs_dont_count(self):
         """Done/failed jobs should not count toward the cap."""
-        with patch("scripts.api.routes.job_store") as mock_store:
+        with patch("scripts.api.routers._helpers.job_store") as mock_store:
             mock_store.list_jobs.return_value = [
                 {"status": "done"},
                 {"status": "failed"},
                 {"status": "running"},
                 {"status": "done"},
             ]
-            from scripts.api.routes import _check_job_cap
+            from scripts.api.routers._helpers import _check_job_cap
             # Only 1 running — should not raise
             _check_job_cap()
 

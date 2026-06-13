@@ -36,6 +36,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import math
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -139,12 +140,46 @@ def _make_hp_ramp(total_samples: int, sr: int,
     return out
 
 
+# ---------------------------------------------------------------------------
+# Numeric guard helpers — single chokepoint for render-path inputs
+# ---------------------------------------------------------------------------
+
+# Stretch ratios outside this band are either mis-detected BPM or numeric
+# garbage.  librosa will happily waste minutes of CPU (or crash) on them.
+_MIN_STRETCH = 0.5   # B is at most 2× faster than A
+_MAX_STRETCH = 2.0   # B is at most 2× slower than A
+
+
+def _safe_ratio(ratio: float) -> float:
+    """Clamp a time-stretch ratio to a musically sane, finite band.
+
+    Guards against 0, negative, NaN, and inf — any of which corrupts the
+    render. Out-of-band values are clamped (not raised) so a single bad BPM
+    detection degrades gracefully to a 'close enough' mix instead of failing
+    the whole job.
+    """
+    if ratio is None or not math.isfinite(ratio) or ratio <= 0.0:
+        return 1.0
+    return float(min(max(ratio, _MIN_STRETCH), _MAX_STRETCH))
+
+
+def _safe_bpm(bpm: float, default: float = 120.0) -> float:
+    """Return a finite, positive BPM, falling back to `default`."""
+    if bpm is None or not math.isfinite(bpm) or bpm <= 0.0:
+        return default
+    return float(bpm)
+
+
 def _time_stretch(audio: np.ndarray, ratio: float) -> np.ndarray:
     """
     Time-stretch audio by ratio using librosa's phase vocoder.
     ratio > 1.0 → speed up (higher BPM); ratio < 1.0 → slow down.
     Returns input unchanged if ratio is within 2% of 1.0.
     """
+    raw = ratio
+    ratio = _safe_ratio(ratio)
+    if raw != ratio and raw is not None and math.isfinite(raw):
+        log.info("Clamped stretch ratio %.3f → %.3f", raw, ratio)
     if abs(ratio - 1.0) < 0.02:
         return audio
     try:
@@ -415,8 +450,7 @@ def _extract_rhythmic_loop(
     while the next song fades in — the outgoing drum loop keeps playing
     cleanly on the bar grid instead of stopping abruptly.
     """
-    if bpm <= 0:
-        bpm = 120.0
+    bpm = _safe_bpm(bpm)
     bar_samples  = int(round(sr * 60.0 / bpm * 4))
     loop_samples = bars * bar_samples
     if len(audio) < loop_samples:
@@ -505,7 +539,14 @@ class DJEngine:
         For "in" direction, bass enters first, highs bloom in (natural entry)
         This prevents the harsh bass clash that makes amateur mixes sound bad.
         """
-        import scipy.signal as sig
+        try:
+            import scipy.signal as sig
+        except ImportError:
+            # Degrade gracefully when scipy is absent — simple cosine envelope
+            t = np.linspace(0, np.pi / 2, len(audio), dtype=np.float32)
+            if direction == "out":
+                return (audio * np.cos(t)).astype(np.float32)
+            return (audio * np.sin(t)).astype(np.float32)
 
         if len(audio) < fade_samples or fade_samples < 256:
             # Too short for frequency splitting — fall back to simple envelope
@@ -651,8 +692,10 @@ class DJEngine:
 
         # entry_sample_b must index into *stretched* B, not original B.
         # time_stretch(rate=r) speeds up by r×, so t → t/r in stretched time.
-        safe_ratio     = max(plan.tempo_shift_ratio, 0.001)
+        safe_ratio     = _safe_ratio(plan.tempo_shift_ratio)
         entry_sample_b = int(plan.entry_time_b * sr / safe_ratio)
+        entry_sample_b = max(0, min(entry_sample_b, len(track_b_stretched) - 1))
+        exit_sample_a  = max(0, min(exit_sample_a,  len(track_a) - 1))
 
         # --- Beat-grid lock ---
         #
@@ -852,18 +895,22 @@ class DJEngine:
         if len(plans) != n - 1:
             raise ValueError(f"Expected {n-1} plans for {n} tracks, got {len(plans)}")
 
+        for i, track in enumerate(tracks):
+            if len(track) == 0:
+                raise ValueError(f"Empty audio for track {i + 1}")
+
         if bridge_beats is None:
             bridge_beats = [None] * (n - 1)
 
         # ── Pre-stretch: warp all songs to Song 1's BPM ──────────────────
         # tracks[0] is the reference; tracks[i>0] are stretched so their
         # time-stretch ratio = original_bpm_i / bpm_song1.
-        bpm1 = plans[0].bpm_a
+        bpm1 = _safe_bpm(plans[0].bpm_a)
         stretch_ratios: list = [1.0]
         stretched: list = [tracks[0]]
         for i in range(1, n):
             orig_bpm = plans[i - 1].bpm_b
-            ratio    = orig_bpm / max(bpm1, 1.0)   # speed-up factor (bpm_b/bpm_a)
+            ratio    = _safe_ratio(_safe_bpm(orig_bpm) / bpm1)
             stretch_ratios.append(ratio)
             stretched.append(_time_stretch(tracks[i], ratio))
             log.info(
@@ -875,11 +922,12 @@ class DJEngine:
             """Convert an original-time second offset to a sample index in stretched[idx]."""
             r = stretch_ratios[idx]
             # time_stretch(rate=r) maps t_orig → t_stretched = t_orig / r
-            return int(t_sec * sr / max(r, 0.001))
+            # r is always ≥ _MIN_STRETCH (0.5) after _safe_ratio — no max guard needed
+            return int(t_sec * sr / r)
 
         # Transition length in samples (always relative to bpm1 after pre-stretch)
         def _trans_samples(plan: "TransitionPlan") -> int:
-            return int(plan.transition_bars * 4 * (60.0 / max(bpm1, 1.0)) * sr)
+            return int(plan.transition_bars * 4 * (60.0 / bpm1) * sr)
 
         # Shared bar-grid parameters (all audio is now at bpm1)
         bar_samples = max(1, int(round(sr * 60.0 / bpm1 * 4)))
@@ -894,6 +942,8 @@ class DJEngine:
 
             exit_sample_a  = _orig_to_stretched(plan.exit_time_a, i)
             entry_sample_b = _orig_to_stretched(plan.entry_time_b, i + 1)
+            exit_sample_a  = max(0, min(exit_sample_a,  len(audio_a) - 1))
+            entry_sample_b = max(0, min(entry_sample_b, len(audio_b) - 1))
             trans_s        = _trans_samples(plan)
             mid            = trans_s // 2
 
@@ -1104,8 +1154,10 @@ class DJEngine:
         # ── Compute transition boundaries ─────────────────────────────────
         exit_sample_a = int(plan.exit_time_a * sr)
         trans_samples = int(plan.transition_seconds * sr)
-        safe_ratio    = max(plan.tempo_shift_ratio, 0.001)
+        safe_ratio    = _safe_ratio(plan.tempo_shift_ratio)
         entry_sample_b = int(plan.entry_time_b * sr / safe_ratio)
+        entry_sample_b = max(0, min(entry_sample_b, len(track_b_stretched) - 1))
+        exit_sample_a  = max(0, min(exit_sample_a,  len(track_a) - 1))
 
         # Beat-grid correction
         bar_samples = max(1, int(round(sr * 60.0 / plan.bpm_a * 4)))
