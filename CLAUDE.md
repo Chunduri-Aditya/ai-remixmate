@@ -59,6 +59,14 @@ frontend/src/
 
 ## Running locally
 
+**Always activate the venv first** — all Python tooling (pytest, uvicorn, scripts) lives inside `.venv/`:
+
+```bash
+source .venv/bin/activate    # activate once per terminal session
+```
+
+Then:
+
 ```bash
 ./start.sh               # install deps + start FastAPI (8000) + React (5173)
 ./start.sh --skip-setup  # skip pip/npm install on fast restarts
@@ -72,6 +80,8 @@ SSE stream:  http://localhost:8000/events/stream
 ```bash
 docker compose up        # containerized (GPU not forwarded by default)
 ```
+
+If the venv doesn't exist yet (first-time setup), run `./start.sh setup` — it creates `remix-env/` automatically.
 
 Config override: copy `config.yaml` → `config.local.yaml` and edit. Env vars override both: `REMIXMATE_<SECTION>_<KEY>`.
 
@@ -162,3 +172,196 @@ curl http://localhost:8000/jobs | python3 -m json.tool
 - `config.local.yaml` is gitignored. Never commit API keys to `config.yaml`.
 - The React Vite proxy rewrites `/api/*` → `http://localhost:8000/*` in dev. In production (GitHub Pages), set `VITE_API_BASE=http://localhost:8000`.
 - Job progress is 0–100 in SSE frames and in the normalized frontend `Job` type. The REST `/jobs` endpoint returns 0–1 — `normalizeJob()` in `api.ts` handles the conversion.
+
+---
+
+# Session Update: June 26, 2026 — Merge Complete ✅
+
+## What Happened
+
+**Three branches consolidated into main via safe audit & merge:**
+
+| Branch | Status | Result |
+|--------|--------|--------|
+| `batch7-render-client-hardening` | 4 commits ahead | ✅ Merged (136 files: UI + backend hardening) |
+| `claude/recursing-leakey` | Identical to main | 🗑 Deleted (no new work) |
+| `claude/elegant-williamson` | 2 commits behind | 🗑 Deleted (already ancestor) |
+
+**Verification:** 167 tests pass ✅ | Frontend builds clean ✅ | Zero conflicts ✅
+
+## Current State
+
+```
+Branch: main
+Merge commit: b8bab12
+Files changed: 136 (55 frontend, 17 backend, 64 tests/config/docs)
+API: Running, SSE streaming, job queue functional
+Tests: All green (pytest 167/167 pass)
+Ready: Yes, deployable
+```
+
+## Next Phase: Improvements Planning
+
+**Using Claude Sonnet for rapid analysis & implementation.**
+
+### Recommended Focus Areas (Priority Order)
+
+1. **Test Coverage** (High impact, quick win)
+   - Identify untested modules: `task_instrument_lab()`, error paths in routers
+   - Write tests for edge cases in stem crossfade
+   - Target: >90% coverage
+   - Effort: 4-6 hours
+
+2. **Performance Verification** (Medium impact, data-driven)
+   - Measure job throughput (target: >50 jobs/sec)
+   - Verify SSE latency (<100ms)
+   - Profile stem separation bottleneck
+   - Effort: 2-3 hours
+
+3. **Error Handling & UX** (Medium impact, user-facing)
+   - Better error messages in API responses
+   - User-friendly failure states in UI
+   - Guidance on common issues (missing library songs, etc.)
+   - Effort: 3-4 hours
+
+4. **Documentation** (Low impact, high value long-term)
+   - API endpoint guide (Swagger is auto-generated)
+   - Component storybook (React components)
+   - Deployment guide (Docker, environment setup)
+   - Effort: 6-8 hours
+
+5. **Type Safety** (Ongoing, prevent regression)
+   - Automated sync between Pydantic ↔ TypeScript schemas
+   - CI check for schema drift
+   - Effort: 3-4 hours
+
+### How to Use Sonnet
+
+**Brief Sonnet with this context:**
+```
+You're working on AI RemixMate (real-time DJ engine).
+
+CURRENT STATE:
+- Main branch: 136 files, all tests pass
+- 8-page React frontend + FastAPI backend (12 routers, job queue)
+- See ARCHITECTURE.md for system design
+
+YOUR TASK:
+1. Audit [area: test-coverage|performance|error-handling|docs|type-safety]
+2. Identify gaps with specific examples
+3. Propose concrete improvements
+4. Estimate effort (hours)
+5. Provide implementation steps
+
+See CLAUDE_CODE_TESTING_PROMPT.md Part 6 for gap analysis.
+Use ARCHITECTURE.md as reference.
+```
+
+**Sonnet is great for:**
+- Fast pattern recognition (finding untested code paths)
+- Writing focused, practical improvements (tests, error messages)
+- Refactoring with clarity (no overthinking, action-oriented)
+- Rapid prototyping (test coverage, performance profiling)
+
+## Supporting Documents
+
+**Root-level reference files:**
+
+1. **IMPROVEMENTS.md** ← **START HERE for new work**
+   - Gap analysis vs. Spotify/Apple Music (June 2026)
+   - Maps every gap to the exact file + function that needs to change
+   - Stage 1 (wiring), Stage 2 (new implementations), Stage 3 (publication)
+   - Prioritized checklist with effort estimates
+
+2. **ARCHITECTURE.md**
+   - Complete system map: 7 backend layers, 8 frontend layers
+   - Dependency graph, design patterns, end-to-end flows
+   - Use: Understand connections, trace data flow
+
+3. **CLAUDE_CODE_TESTING_PROMPT.md** (in `/outputs/`)
+   - 8 executable test sections
+   - Architecture verification, integration tests, smoke tests, e2e flows, coverage analysis, performance tests
+   - Use: Identify gaps, verify code quality
+
+4. **TESTING_GUIDE.md** (in `/outputs/`)
+   - How to run each test section
+   - Recommended test runs (5 min to 60 min)
+   - Cheat sheet of common commands
+   - Use: Quick reference for testing
+
+5. **MERGE_STRATEGY.md** (in `/outputs/`)
+   - Safe branch merging process
+   - Conflict resolution, automated merge script
+   - Use: Reference for future multi-branch merges
+
+## Quick Start Commands
+
+### Start Development
+```bash
+# Terminal 1: Backend
+python -m scripts.api.main
+
+# Terminal 2: Frontend
+cd frontend && npm run dev
+
+# Terminal 3: Tests (watch)
+pytest tests/ -v --looponfail
+```
+
+### Verify State
+```bash
+# Tests
+pytest tests/ -q  # 167 tests pass
+
+# Build
+cd frontend && npm run build
+
+# API health
+curl http://localhost:8000/health/live
+```
+
+### Create Improvement Branch
+```bash
+# New feature branch
+git checkout -b improvements/[name]
+
+# Work + commit
+git add . && git commit -m "Improve: [description]"
+
+# Merge back when done
+git checkout main
+git merge improvements/[name]
+```
+
+## Key Architectural Points (for Sonnet)
+
+**How things connect:**
+
+User click → Page calls API → FastAPI router validates + creates job (202 Accepted) → Job submitted to ThreadPoolExecutor → Task runs in background, updates job store → SSE broadcasts job updates → useSSE() hook syncs to Zustand appStore → Pages subscribed to appStore re-render → User sees progress in real-time → Task completes → SSE broadcasts job_completed → UI updates with result
+
+**Core patterns:**
+- Job queue (ThreadPoolExecutor + SQLite) decouples requests from execution
+- SSE + Zustand keep UI in sync without polling
+- Stem-aware crossfade + beat-grid lock make output sound intentional
+- 35-D embeddings enable fast similarity search (no external DB)
+- TypeScript types mirror Pydantic schemas (manual sync required)
+
+**Common pitfalls:**
+- Schema drift between Pydantic and TypeScript (must keep in sync)
+- Job queries not cached in memory (always O(1) via dict)
+- Concurrent updates → write-through SQLite prevents race conditions
+
+## Version Info
+
+```
+Last updated: June 26, 2026
+Merge status: Complete ✅ (3 branches consolidated)
+Test status: 167/167 pass ✅
+Build status: Clean (frontend + backend)
+API status: Running, SSE functional, job queue operational
+Next phase: Improvements planning (Sonnet-assisted)
+```
+
+---
+
+**Ready to proceed. Brief Claude Sonnet with this context for rapid improvements planning.**
