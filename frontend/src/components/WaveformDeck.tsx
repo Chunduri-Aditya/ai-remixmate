@@ -16,9 +16,13 @@ interface WaveformDeckProps {
   cueStart?: number
   /** Transition cue end in seconds (optional — from transition_plan). */
   cueEnd?: number
+  /** Whether global Mix Deck playback shortcuts should target this deck. */
+  shortcutTarget?: boolean
 }
 
-export function WaveformDeck({ src, color, cueStart, cueEnd }: WaveformDeckProps) {
+const MIX_DECK_TOGGLE_EVENT = 'remixmate:mixdeck-toggle-playback'
+
+export function WaveformDeck({ src, color, cueStart, cueEnd, shortcutTarget = false }: WaveformDeckProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const wsRef        = useRef<WaveSurfer | null>(null)
   const [playing,  setPlaying]  = useState(false)
@@ -69,6 +73,17 @@ export function WaveformDeck({ src, color, cueStart, cueEnd }: WaveformDeckProps
   }, [src, color])
 
   const toggle = useCallback(() => { wsRef.current?.playPause() }, [])
+
+  useEffect(() => {
+    if (!shortcutTarget) return
+
+    function handleMixDeckToggle() {
+      if (!loading && !errored) toggle()
+    }
+
+    window.addEventListener(MIX_DECK_TOGGLE_EVENT, handleMixDeckToggle)
+    return () => window.removeEventListener(MIX_DECK_TOGGLE_EVENT, handleMixDeckToggle)
+  }, [shortcutTarget, loading, errored, toggle])
 
   const showRegion =
     !loading &&

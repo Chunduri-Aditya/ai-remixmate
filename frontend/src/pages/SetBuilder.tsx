@@ -4,6 +4,7 @@
    ============================================================ */
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import {
   DndContext,
   closestCenter,
@@ -34,6 +35,7 @@ import {
   Shuffle,
   Settings,
   GripVertical,
+  ArrowRight,
 } from 'lucide-react'
 import { libraryApi, remixApi, setlistApi } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
@@ -153,6 +155,7 @@ function SetRow({ entry, index, onRemove }: SetRowProps) {
 }
 
 export default function SetBuilder() {
+  const navigate = useNavigate()
   const [set, setSet]           = useState<SetEntry[]>([])
   const [search, setSearch]     = useState('')
   const [chainJobId, setChainJobId]       = useState<string | null>(null)
@@ -332,8 +335,17 @@ export default function SetBuilder() {
           </div>
           <div className="sb-pool__list">
             {poolSongs.length === 0 ? (
-              <div className="sb-pool__empty text-muted">
-                {songs.length === 0 ? 'Library is empty' : 'All songs in set'}
+              <div className="sb-pool__empty">
+                <ListMusic size={22} strokeWidth={0.9} />
+                <span className="text-muted">
+                  {songs.length === 0 ? 'Library is empty — add songs first' : 'All available songs are already in the set'}
+                </span>
+                <button
+                  className="sb-empty-action sb-empty-action--small"
+                  onClick={() => navigate(songs.length === 0 ? '/operations' : '/library-atlas')}
+                >
+                  {songs.length === 0 ? 'Add songs in Operations' : 'Browse Library Atlas'} <ArrowRight size={12} />
+                </button>
               </div>
             ) : (
               poolSongs.map((song) => (
@@ -375,9 +387,10 @@ export default function SetBuilder() {
             <div className="sb-empty">
               <ListMusic size={36} strokeWidth={0.75} />
               <p className="font-display" style={{ fontSize: 'var(--text-xl)' }}>Your set is empty</p>
-              <p className="text-muted" style={{ fontSize: 'var(--text-sm)' }}>
-                Click tracks in the pool to add them to your set
-              </p>
+              <p className="text-muted" style={{ fontSize: 'var(--text-sm)' }}>Add tracks from the pool or browse the library first.</p>
+              <button className="sb-empty-action" onClick={() => navigate(songs.length === 0 ? '/operations' : '/library-atlas')}>
+                {songs.length === 0 ? 'Add songs in Operations' : 'Browse Library Atlas'} <ArrowRight size={13} />
+              </button>
             </div>
           ) : (
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

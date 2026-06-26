@@ -4,6 +4,7 @@
    Live queue driven by SSE job events (polling fallback).
    ============================================================ */
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Download,
   ListMusic,
@@ -15,6 +16,7 @@ import {
   AlertTriangle,
   Loader2,
   Clock,
+  ArrowRight,
 } from 'lucide-react'
 import { downloadApi, jobsApi } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
@@ -134,6 +136,7 @@ function DownloadJobCard({
 // --- Main page ---
 
 export default function Operations() {
+  const navigate = useNavigate()
   const [mode, setMode] = useState<Mode>('single')
   const [query, setQuery] = useState('')
   const [name, setName] = useState('')
@@ -347,7 +350,10 @@ export default function Operations() {
             {downloadJobs.length === 0 ? (
               <div className="ops-empty">
                 <Download size={28} strokeWidth={1} />
-                <span className="text-muted">No downloads yet — queue a track to get started</span>
+                <span className="text-muted">No download jobs yet — queue a track to get started</span>
+                <button className="ops-empty__action" onClick={() => navigate('/library-atlas')}>
+                  View Library Atlas <ArrowRight size={13} />
+                </button>
               </div>
             ) : (
               downloadJobs.map((job) => (

@@ -1,6 +1,9 @@
 import './ShortcutsModal.css'
 
 const SHORTCUTS = [
+  { keys: 'Space', desc: 'Play or pause the active Mix Deck track' },
+  { keys: '⌘/Ctrl K', desc: 'Focus Library Atlas search' },
+  { keys: '⌘/Ctrl 1–8', desc: 'Navigate primary pages' },
   { keys: 'g → m', desc: 'Mission Control' },
   { keys: 'g → l', desc: 'Library Atlas' },
   { keys: 'g → x', desc: 'Mix Deck' },
@@ -10,7 +13,7 @@ const SHORTCUTS = [
   { keys: 'g → v', desc: 'Mix Vault' },
   { keys: 'g → o', desc: 'Operations' },
   { keys: '?',     desc: 'Show this help' },
-  { keys: 'Esc',   desc: 'Close' },
+  { keys: 'Esc',   desc: 'Close modal or inspector' },
 ]
 
 export function ShortcutsModal({ onClose }: { onClose: () => void }) {

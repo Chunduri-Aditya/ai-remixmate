@@ -42,6 +42,7 @@ function DeckCard({
   audioUrl,
   cueStart,
   cueEnd,
+  shortcutTarget,
 }: {
   label: 'A' | 'B'
   song: string
@@ -51,6 +52,7 @@ function DeckCard({
   audioUrl?: string
   cueStart?: number
   cueEnd?: number
+  shortcutTarget?: boolean
 }) {
   const accentVar = label === 'A' ? 'var(--color-amber-500)' : 'var(--color-ice-400)'
   const glowVar   = label === 'A' ? 'var(--color-amber-glow)' : 'var(--color-ice-glow)'
@@ -119,6 +121,7 @@ function DeckCard({
           color={hexColor}
           cueStart={cueStart}
           cueEnd={cueEnd}
+          shortcutTarget={shortcutTarget}
         />
       )}
     </div>
@@ -302,6 +305,7 @@ export default function MixDeck() {
   const infoA      = useMemo(() => songs.find((s) => s.name === songA), [songs, songA])
   const infoB      = useMemo(() => songs.find((s) => s.name === songB), [songs, songB])
   const canCompare = songA && songB && songA !== songB
+  const shortcutDeck: 'A' | 'B' | null = songA ? 'A' : songB ? 'B' : null
 
   // Audio URLs for waveform display.
   const audioUrlA  = songA ? audioApi.streamUrl(songA) : undefined
@@ -396,6 +400,7 @@ export default function MixDeck() {
             audioUrl={audioUrlA}
             cueStart={cueStartA}
             cueEnd={cueEndA}
+            shortcutTarget={shortcutDeck === 'A'}
           />
 
           <div className="md-center">
@@ -419,6 +424,7 @@ export default function MixDeck() {
             audioUrl={audioUrlB}
             cueStart={cueStartB}
             cueEnd={cueEndB}
+            shortcutTarget={shortcutDeck === 'B'}
           />
         </div>
 

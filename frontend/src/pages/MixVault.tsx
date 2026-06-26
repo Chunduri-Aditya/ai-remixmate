@@ -4,6 +4,7 @@
    metadata (BPM, Camelot, harmonic score, LUFS).
    ============================================================ */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Archive,
   Play,
@@ -14,6 +15,7 @@ import {
   Volume2,
   Eye,
   EyeOff,
+  ArrowRight,
 } from 'lucide-react'
 import WaveSurfer from 'wavesurfer.js'
 import { jobsApi } from '@/lib/api'
@@ -205,6 +207,7 @@ function MixCard({ job }: MixCardProps) {
 }
 
 export default function MixVault() {
+  const navigate = useNavigate()
   const [showPreviews, setShowPreviews] = useState(false)
   const jobs     = useAppStore((s) => s.jobs)
   const upsertJob = useAppStore((s) => s.upsertJob)
@@ -271,9 +274,10 @@ export default function MixVault() {
           <div className="mv-empty">
             <Archive size={40} strokeWidth={0.75} />
             <p className="font-display" style={{ fontSize: 'var(--text-xl)' }}>Vault is empty</p>
-            <p className="text-muted" style={{ fontSize: 'var(--text-sm)' }}>
-              Completed mixes from this and previous sessions appear here.
-            </p>
+            <p className="text-muted" style={{ fontSize: 'var(--text-sm)' }}>Completed mixes appear here after rendering.</p>
+            <button className="mv-empty__action" onClick={() => navigate('/mix-deck')}>
+              Create a mix in Mix Deck <ArrowRight size={13} />
+            </button>
           </div>
         ) : (
           <div className="mv-list">

@@ -23,6 +23,7 @@ import {
   Loader2,
   BarChart2,
   Layers,
+  ArrowRight,
 } from 'lucide-react'
 import { libraryApi, analysisApi, stemsApi, favoritesApi, cratesApi } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
@@ -651,6 +652,8 @@ export default function LibraryAtlas() {
           <Search size={13} className="la-search-icon" />
           <input
             className="la-search"
+            data-library-search-input
+            aria-label="Search library"
             placeholder="Search by name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -715,12 +718,27 @@ export default function LibraryAtlas() {
           ) : songs.length === 0 ? (
             <div className="la-state">
               <Library size={32} strokeWidth={1} style={{ color: 'var(--color-text-faint)' }} />
-              <span className="text-muted">Library is empty — download some tracks first</span>
+              <span className="text-muted">Library is empty — add songs in Operations</span>
+              <button className="la-empty-action" onClick={() => navigate('/operations')}>
+                Add songs in Operations <ArrowRight size={13} />
+              </button>
             </div>
           ) : filtered.length === 0 ? (
             <div className="la-state">
               <Search size={28} strokeWidth={1} style={{ color: 'var(--color-text-faint)' }} />
               <span className="text-muted">No tracks match your filters</span>
+              <button
+                className="la-empty-action"
+                onClick={() => {
+                  setSearch('')
+                  setFilterStems(false)
+                  setFilterAnalyzed(false)
+                  setFilterFavs(false)
+                  setFilterHigh(false)
+                }}
+              >
+                Reset filters <ArrowRight size={13} />
+              </button>
             </div>
           ) : (
             <table className="la-table">
