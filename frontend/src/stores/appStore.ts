@@ -28,6 +28,10 @@ interface AppState {
   removeJob: (id: string) => void
   setJobs: (jobs: Job[]) => void
 
+  // --- Completion log (timestamps of COMPLETED jobs, last 60 min) ---
+  completionLog: number[]
+  logCompletion: () => void
+
   // --- Activity log (recent SSE events, human-readable) ---
   activityLog: ActivityEntry[]
   pushActivity: (entry: Omit<ActivityEntry, 'id' | 'ts'>) => void
@@ -52,7 +56,7 @@ export interface ActivityEntry {
 
 let _activitySeq = 0
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>((set) => ({
   // Navigation
   activeNav: 'mission-control',
   setActiveNav: (dest) => set({ activeNav: dest }),
@@ -69,8 +73,25 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Jobs
   jobs: {},
+  completionLog: [],
+  logCompletion: () =>
+    set((s) => {
+      const cutoff = Date.now() - 60 * 60 * 1000
+      return { completionLog: [...s.completionLog.filter((t) => t > cutoff), Date.now()] }
+    }),
   upsertJob: (job) =>
-    set((s) => ({ jobs: { ...s.jobs, [job.job_id]: job } })),
+    set((s) => {
+      const prev = s.jobs[job.job_id]
+      const justCompleted = job.status === 'COMPLETED' && prev?.status !== 'COMPLETED'
+      if (justCompleted) {
+        const cutoff = Date.now() - 60 * 60 * 1000
+        return {
+          jobs: { ...s.jobs, [job.job_id]: job },
+          completionLog: [...s.completionLog.filter((t) => t > cutoff), Date.now()],
+        }
+      }
+      return { jobs: { ...s.jobs, [job.job_id]: job } }
+    }),
   removeJob: (id) =>
     set((s) => {
       const next = { ...s.jobs }

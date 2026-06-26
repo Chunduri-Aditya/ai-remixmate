@@ -229,21 +229,29 @@ def separate_song_stems(
 
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            cmd = [
-                python_exe, "-m", "demucs",
-                "-n", model,
-                "-d", hw_device,
-                "-o", tmp,
-                str(demucs_input),
-            ]
-            log.info("[stems] Running: %s", " ".join(cmd))
-            _prog(0.22, "Demucs running… (vocals / drums / bass / other)")
+            def _run_demucs(dev: str) -> subprocess.CompletedProcess:
+                cmd = [
+                    python_exe, "-m", "demucs",
+                    "-n", model,
+                    "-d", dev,
+                    "-o", tmp,
+                    str(demucs_input),
+                ]
+                log.info("[stems] Running: %s", " ".join(cmd))
+                return subprocess.run(cmd, capture_output=True, text=True)
 
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-            )
+            _prog(0.22, "Demucs running… (vocals / drums / bass / other)")
+            proc = _run_demucs(hw_device)
+
+            # GPU backends (MPS/CUDA) can fail on some torch/driver combos —
+            # retry once on CPU before giving up.
+            if proc.returncode != 0 and hw_device != "cpu":
+                log.warning(
+                    "[stems] Demucs failed on %s (code %d) — retrying on CPU. stderr tail: %s",
+                    hw_device, proc.returncode, (proc.stderr or "")[-300:],
+                )
+                _prog(0.25, f"Demucs failed on {hw_device.upper()} — retrying on CPU (slower)…")
+                proc = _run_demucs("cpu")
 
             if proc.returncode != 0:
                 err_tail = (proc.stderr or "")[-500:]

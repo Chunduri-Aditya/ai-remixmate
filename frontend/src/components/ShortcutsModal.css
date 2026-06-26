@@ -1,0 +1,55 @@
+.shortcuts-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shortcuts-modal {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.shortcuts-modal__title {
+  font-size: var(--text-base);
+  margin: 0;
+}
+
+.shortcuts-modal__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.shortcuts-modal__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.shortcuts-modal__kbd {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-size: var(--text-xs);
+  min-width: 72px;
+  text-align: center;
+}
+
+.shortcuts-modal__close {
+  align-self: flex-end;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--text-sm);
+}

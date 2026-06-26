@@ -17,10 +17,11 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 class JobStatus(str, Enum):
-    PENDING  = "pending"
-    RUNNING  = "running"
-    DONE     = "done"
-    FAILED   = "failed"
+    PENDING   = "pending"
+    RUNNING   = "running"
+    DONE      = "done"
+    FAILED    = "failed"
+    CANCELLED = "cancelled"
 
 
 class JobType(str, Enum):
@@ -96,6 +97,17 @@ class DownloadRequest(BaseModel):
     separate: bool = Field(
         True,
         description="Run Demucs after download — always True by default (auto-stem pipeline)",
+    )
+
+
+class BatchDownloadRequest(BaseModel):
+    queries: List[str] = Field(
+        ..., min_length=1, max_length=100,
+        description="List of search queries or URLs — one track each",
+    )
+    separate: bool = Field(
+        True,
+        description="Run Demucs on every track after download (default: True)",
     )
 
 

@@ -14,7 +14,10 @@ import {
   Archive,
   Settings,
   Radio,
+  PictureInPicture2,
+  type LucideIcon,
 } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/stores/appStore'
 import type { NavDestination } from '@/types'
 import './LeftRail.css'
@@ -22,7 +25,7 @@ import './LeftRail.css'
 interface NavItem {
   id: NavDestination
   path: string
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>
+  icon: LucideIcon
   label: string
   shortLabel: string
 }
@@ -84,13 +87,22 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Operations',
     shortLabel: 'Ops',
   },
+  {
+    id: 'widget',
+    path: '/widget',
+    icon: PictureInPicture2,
+    label: 'DJ Widget (floating)',
+    shortLabel: 'Widget',
+  },
 ]
 
 function ConnectionDot() {
-  const { apiHealth, sseConnected } = useAppStore((s) => ({
-    apiHealth: s.apiHealth,
-    sseConnected: s.sseConnected,
-  }))
+  const { apiHealth, sseConnected } = useAppStore(
+    useShallow((s) => ({
+      apiHealth: s.apiHealth,
+      sseConnected: s.sseConnected,
+    })),
+  )
 
   const cls =
     apiHealth === 'ok' && sseConnected

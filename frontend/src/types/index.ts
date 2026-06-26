@@ -34,6 +34,7 @@ export interface SongInfo {
   genre?: string
   energy?: number           // 0–1
   embedding?: number[]
+  stems?: string[]          // e.g. ['vocals', 'drums', 'bass', 'other']
 }
 
 export interface LibraryStats {
@@ -45,23 +46,52 @@ export interface LibraryStats {
 
 // --- Analysis ---
 
+export interface TransitionPlan {
+  exit_bar_a: number
+  entry_bar_b: number
+  transition_bars: number
+  stretch_ratio: number
+  exit_time_a?: number      // seconds in Song A's timeline
+  entry_time_b?: number     // seconds in Song B's timeline
+  key_compatible?: boolean
+}
+
 export interface CompatibilityResult {
   song_a: string
   song_b: string
-  score: number             // 0–1
-  harmonic_score: number
-  tempo_ratio: number
+  compatible: boolean
+  overall: number           // 0–1 composite score
+  bpm_score: number         // 0–1
+  key_score: number         // 0–1
+  energy_score: number      // 0–1
+  bpm_a: number
+  bpm_b: number
   camelot_a?: string
   camelot_b?: string
-  bpm_a?: number
-  bpm_b?: number
-  verdict: string
+  genre_a?: string
+  genre_b?: string
+  transition_plan?: TransitionPlan
 }
 
 export interface Recommendation {
   name: string
-  score: number
+  bpm?: number
+  bpm_score?: number
+  overall?: number
+  score?: number
   reason?: string
+}
+
+/** Result row from /library/similar — 35-dim RAG vector match. */
+export interface SimilarTrack {
+  name: string
+  score: number
+  bpm?: number
+  key?: string
+  mode?: string
+  camelot?: string
+  genre?: string
+  breakdown?: Record<string, number>
 }
 
 // --- Remix ---
@@ -70,14 +100,22 @@ export interface DJRemixRequest {
   song_a: string
   song_b: string
   transition_duration?: number
+  transition_bars?: number
   effects?: string[]
   target_bpm?: number
+  preset?: string
+  transition_effect?: string
+  bridge_beat_mode?: string
+  bridge_beat_genre?: string
+  bridge_beat_intensity?: number
 }
 
 export interface DJPreviewRequest {
   song_a: string
   song_b: string
   transition_duration?: number
+  transition_bars?: number
+  preset?: string
 }
 
 // --- Crates ---
@@ -150,3 +188,4 @@ export type NavDestination =
   | 'ai-lab'
   | 'mix-vault'
   | 'operations'
+  | 'widget'

@@ -15,7 +15,7 @@ source remix-env/bin/activate    # Windows: remix-env\Scripts\activate
 pip install -e ".[dev]"
 
 # 4. Verify setup
-bash check.sh
+bash bin/check.sh
 
 # 5. Launch (both API + UI)
 ./start.sh
@@ -222,7 +222,7 @@ export REMIXMATE_API_PORT=9000           # Custom port
 
 ### Workflow 2: Overnight Library Processing
 ```bash
-./run_overnight.sh --model htdemucs_ft
+./bin/run_overnight.sh --model htdemucs_ft
 # Logs to pipeline.log
 # Prevents sleep (macOS)
 # Completion notification when done
@@ -391,7 +391,7 @@ docker compose up
 ## 📋 Checklist: Pre-Production Deployment
 
 - [ ] Install all dependencies: `pip install -r requirements.txt`
-- [ ] Run validation: `bash check.sh`
+- [ ] Run validation: `bash bin/check.sh`
 - [ ] Create `config.local.yaml` with production settings
 - [ ] Set up HTTPS: `./start.sh --https` (generates certs)
 - [ ] Configure CORS in `config.local.yaml` (tighten origins)
@@ -436,7 +436,7 @@ docker compose up
 
 3. **Bridge Beat**: Synthesized drum fills add energy during transitions. Try "auto" mode for best results.
 
-4. **Overnight Processing**: Use `./run_overnight.sh` on Mac to prevent sleep. On Linux, ensure no screensaver.
+4. **Overnight Processing**: Use `./bin/run_overnight.sh` on Mac to prevent sleep. On Linux, ensure no screensaver.
 
 5. **Job Polling**: For long jobs, check `/jobs/{job_id}` every 5–10 seconds. Don't hammer the server.
 
@@ -453,6 +453,6 @@ docker compose up
 For issues:
 1. Check `/health/ready` endpoint for dependency issues
 2. Review logs in `logs/remixmate.log` (if file logging enabled)
-3. Run `bash check.sh` to validate environment
+3. Run `bash bin/check.sh` to validate environment
 4. Check GitHub Issues: https://github.com/Chunduri-Aditya/ai-remixmate/issues
 

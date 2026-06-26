@@ -16,6 +16,7 @@ import soundfile as sf
 
 from scripts.api.jobs import update_job
 from scripts.core.audit import log_audit
+from scripts.core.audio_source import load_source_audio
 from scripts.core.dj_engine import _analyze_impl, plan_transition, DJEngine
 from scripts.core.genre import auto_preset
 from scripts.core.paths import OUTPUTS_DIR, song_dir
@@ -37,16 +38,11 @@ def task_dj_remix(
               metadata={"transition_bars": transition_bars, "preset": preset, "effect": transition_effect})
     update_job(job_id, progress=0.05, message="Loading audio…")
 
-    wav_a = song_dir(song_a) / "full.wav"
-    wav_b = song_dir(song_b) / "full.wav"
-    if not wav_a.exists():
-        raise FileNotFoundError(f"Song not in library: {song_a}")
-    if not wav_b.exists():
-        raise FileNotFoundError(f"Song not in library: {song_b}")
-
+    # Resolve source audio per song: full.wav → full_enhanced.wav → stem sum.
+    # Raises FileNotFoundError(song name) if the song has no usable audio.
     sr = 44100
-    audio_a, _ = librosa.load(str(wav_a), sr=sr, mono=True, duration=180.0)
-    audio_b, _ = librosa.load(str(wav_b), sr=sr, mono=True, duration=180.0)
+    audio_a, _ = load_source_audio(song_a, sr=sr, mono=True, duration=180.0)
+    audio_b, _ = load_source_audio(song_b, sr=sr, mono=True, duration=180.0)
 
     update_job(job_id, progress=0.25, message="Analysing structure…")
 
@@ -212,21 +208,14 @@ def task_dj_chain(
                         "preset": preset, "effect": transition_effect})
     update_job(job_id, progress=0.02, message=f"Loading {n} songs…")
 
-    # ── Validate all songs exist ──────────────────────────────────────────
-    wavs = []
-    for name in songs:
-        wav = song_dir(name) / "full.wav"
-        if not wav.exists():
-            raise FileNotFoundError(f"Song not in library: {name}")
-        wavs.append(wav)
-
-    # ── Load audio ───────────────────────────────────────────────────────
+    # ── Load audio (full.wav → full_enhanced.wav → stem sum per song) ──────
+    # load_source_audio raises FileNotFoundError(name) for any unusable song.
     sr = 44100
     audios = []
-    for idx, wav in enumerate(wavs):
+    for idx, name in enumerate(songs):
         prog = 0.02 + 0.18 * (idx / n)
         update_job(job_id, progress=prog, message=f"Loading {songs[idx][:30]}…")
-        audio, _ = librosa.load(str(wav), sr=sr, mono=True, duration=180.0)
+        audio, _ = load_source_audio(name, sr=sr, mono=True, duration=180.0)
         audios.append(audio)
 
     # ── Analyse structure ────────────────────────────────────────────────
@@ -360,16 +349,10 @@ def task_remix_preview(
               metadata={"transition_bars": transition_bars, "effect": transition_effect})
     update_job(job_id, progress=0.05, message="Loading audio for preview…")
 
-    wav_a = song_dir(song_a) / "full.wav"
-    wav_b = song_dir(song_b) / "full.wav"
-
-    for label, path in ((song_a, wav_a), (song_b, wav_b)):
-        if not path.exists():
-            raise FileNotFoundError(f"Audio file not found for '{label}': {path}")
-
     update_job(job_id, progress=0.15, message="Analysing tracks…")
-    audio_a, sr = librosa.load(str(wav_a), sr=None, mono=True)
-    audio_b, _  = librosa.load(str(wav_b), sr=sr,   mono=True)
+    # full.wav → full_enhanced.wav → stem sum; A sets the sample rate, B matches.
+    audio_a, sr = load_source_audio(song_a, sr=None, mono=True)
+    audio_b, _  = load_source_audio(song_b, sr=sr,  mono=True)
 
     audio_a = audio_a.astype(np.float32)
     audio_b = audio_b.astype(np.float32)

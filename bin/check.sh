@@ -1,13 +1,25 @@
 #!/usr/bin/env bash
 # check.sh — Validate AI RemixMate is ready to run.
 #
-# Usage:  bash check.sh
+# Usage:  bash bin/check.sh
 
 set -e
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PASS=0
 FAIL=0
 WARN=0
+
+# Prefer project venv (same as start.sh) over system Python
+if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then
+    PY="$VIRTUAL_ENV/bin/python"
+elif [ -x "$ROOT/remix-env/bin/python" ]; then
+    PY="$ROOT/remix-env/bin/python"
+elif command -v python3 &>/dev/null; then
+    PY=python3
+else
+    PY=""
+fi
 
 pass() { echo "  ✅  $1"; ((PASS++)); }
 fail() { echo "  ❌  $1"; ((FAIL++)); }
@@ -21,8 +33,8 @@ echo ""
 
 # ── 1. Python version ──────────────────────────────────────────────
 echo "📦  Python"
-if command -v python3 &>/dev/null; then
-    PY_VER=$(python3 --version 2>&1)
+if [ -n "$PY" ]; then
+    PY_VER=$($PY --version 2>&1)
     pass "$PY_VER"
 else
     fail "Python 3 not found"
@@ -32,7 +44,7 @@ fi
 echo ""
 echo "📦  Core Dependencies"
 for pkg in streamlit fastapi uvicorn librosa soundfile numpy scipy torch; do
-    if python3 -c "import $pkg" 2>/dev/null; then
+    if $PY -c "import $pkg" 2>/dev/null; then
         pass "$pkg"
     else
         fail "$pkg not installed"
@@ -42,15 +54,34 @@ done
 # ── 3. Optional packages ──────────────────────────────────────────
 echo ""
 echo "📦  Optional Dependencies"
-for pkg in demucs yt_dlp ytmusicapi sentence_transformers; do
-    if python3 -c "import $pkg" 2>/dev/null; then
+for pkg in demucs yt_dlp ytmusicapi; do
+    if $PY -c "import $pkg" 2>/dev/null; then
         pass "$pkg"
     else
         warn "$pkg not installed (some features may be unavailable)"
     fi
 done
 
-# ── 4. System tools ───────────────────────────────────────────────
+# ── 4. Node / frontend ───────────────────────────────────────────
+echo ""
+echo "⚛️   Frontend"
+if command -v node &>/dev/null; then
+    pass "node $(node --version)"
+else
+    fail "node not found (required for React UI)"
+fi
+if command -v npm &>/dev/null; then
+    pass "npm $(npm --version)"
+else
+    fail "npm not found"
+fi
+if [ -d "$ROOT/frontend/node_modules" ]; then
+    pass "frontend/node_modules"
+else
+    warn "frontend/node_modules missing — run ./start.sh setup"
+fi
+
+# ── 5. System tools ───────────────────────────────────────────────
 echo ""
 echo "🔧  System Tools"
 for tool in ffmpeg ffprobe; do
@@ -61,10 +92,10 @@ for tool in ffmpeg ffprobe; do
     fi
 done
 
-# ── 5. GPU detection ─────────────────────────────────────────────
+# ── 6. GPU detection ─────────────────────────────────────────────
 echo ""
 echo "🖥️   GPU Support"
-GPU=$(python3 -c "
+GPU=$($PY -c "
 import torch
 if torch.cuda.is_available():
     print('CUDA: ' + torch.cuda.get_device_name(0))
@@ -75,13 +106,13 @@ else:
 " 2>/dev/null || echo "unknown")
 pass "$GPU"
 
-# ── 6. Project structure ─────────────────────────────────────────
+# ── 7. Project structure ─────────────────────────────────────────
 echo ""
 echo "📁  Project Structure"
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-
 for f in scripts/api/main.py scripts/api/routes.py scripts/ui/app.py scripts/core/gpu.py \
-         scripts/core/dj_engine.py scripts/core/stems.py scripts/download.py start.sh; do
+         scripts/core/dj_engine.py scripts/core/stems.py scripts/download.py \
+         frontend/src/pages/Widget.tsx frontend/src/pages/Operations.tsx \
+         start.sh bin/check.sh PREREQUISITES.md; do
     if [ -f "$ROOT/$f" ]; then
         pass "$f"
     else
@@ -89,52 +120,49 @@ for f in scripts/api/main.py scripts/api/routes.py scripts/ui/app.py scripts/cor
     fi
 done
 
-# ── 7. Config ────────────────────────────────────────────────────
+# ── 8. Config ────────────────────────────────────────────────────
 echo ""
 echo "⚙️   Configuration"
 if [ -f "$ROOT/.streamlit/config.toml" ]; then
     pass ".streamlit/config.toml"
 else
-    fail ".streamlit/config.toml missing"
+    warn ".streamlit/config.toml missing (only needed for Streamlit UI)"
+fi
+if [ -f "$ROOT/config.yaml" ]; then
+    pass "config.yaml"
+else
+    fail "config.yaml missing"
 fi
 
-# ── 8. Library ────────────────────────────────────────────────────
+# ── 9. Library ────────────────────────────────────────────────────
 echo ""
 echo "🎵  Library"
 SONG_COUNT=$(find "$ROOT/library" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
-STEM_COUNT=$(find "$ROOT/library" -name "vocals.flac" -o -name "vocals.wav" 2>/dev/null | wc -l | tr -d ' ')
+STEM_COUNT=$(find "$ROOT/library" \( -name "vocals.flac" -o -name "vocals.wav" \) 2>/dev/null | wc -l | tr -d ' ')
 pass "$SONG_COUNT songs in library"
 pass "$STEM_COUNT songs with stems"
 
-# ── 9. Ports ─────────────────────────────────────────────────────
+# ── 10. Ports ─────────────────────────────────────────────────────
 echo ""
 echo "🌐  Ports"
-for port in 8000 8501; do
+for port in 8000 5173 8501; do
     if lsof -ti tcp:$port &>/dev/null; then
-        warn "Port $port is in use (stop existing processes first: ./start.sh stop)"
+        warn "Port $port is in use (stop existing processes: ./start.sh stop)"
     else
         pass "Port $port is free"
     fi
 done
 
-# ── 10. Syntax check ────────────────────────────────────────────
+# ── 11. Syntax check ────────────────────────────────────────────
 echo ""
 echo "🧪  Syntax Validation"
-if python3 -m py_compile "$ROOT/scripts/api/routes.py" 2>/dev/null; then
-    pass "routes.py"
-else
-    fail "routes.py has syntax errors"
-fi
-if python3 -m py_compile "$ROOT/scripts/ui/app.py" 2>/dev/null; then
-    pass "app.py"
-else
-    fail "app.py has syntax errors"
-fi
-if python3 -m py_compile "$ROOT/scripts/api/tasks.py" 2>/dev/null; then
-    pass "tasks.py"
-else
-    fail "tasks.py has syntax errors"
-fi
+for f in scripts/api/routes.py scripts/ui/app.py scripts/api/tasks.py; do
+    if $PY -m py_compile "$ROOT/$f" 2>/dev/null; then
+        pass "$(basename $f)"
+    else
+        fail "$f has syntax errors"
+    fi
+done
 
 # ── Summary ─────────────────────────────────────────────────────
 echo ""
@@ -148,7 +176,7 @@ if [ $FAIL -eq 0 ]; then
     echo ""
 else
     echo ""
-    echo "  ⛔  Fix the failures above before running."
+    echo "  ⛔  Fix the failures above, or run:  ./start.sh setup"
     echo ""
     exit 1
 fi

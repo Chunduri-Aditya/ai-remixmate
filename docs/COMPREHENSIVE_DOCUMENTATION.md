@@ -1307,11 +1307,11 @@ def api_call(
 **Usage**:
 
 ```bash
-./run_pipeline.sh                      # Default: htdemucs model
-./run_pipeline.sh --model htdemucs_ft  # Higher quality
-./run_pipeline.sh --no-compress        # Skip FLAC compression
-./run_pipeline.sh --no-enhance         # Skip audio enhancement
-./run_pipeline.sh --keep-wav           # Don't delete full.wav
+./bin/run_pipeline.sh                      # Default: htdemucs model
+./bin/run_pipeline.sh --model htdemucs_ft  # Higher quality
+./bin/run_pipeline.sh --no-compress        # Skip FLAC compression
+./bin/run_pipeline.sh --no-enhance         # Skip audio enhancement
+./bin/run_pipeline.sh --keep-wav           # Don't delete full.wav
 ```
 
 **Polling**:
@@ -1343,8 +1343,8 @@ tail -f pipeline.log    # Watch progress in real-time
 **Usage**:
 
 ```bash
-./run_overnight.sh
-./run_overnight.sh --model htdemucs_ft
+./bin/run_overnight.sh
+./bin/run_overnight.sh --model htdemucs_ft
 ```
 
 ---
@@ -1801,7 +1801,7 @@ GET /outputs/{session}/{file}   Stream rendered mix
 ### 10.2 Overnight Library Processing
 
 ```bash
-./run_overnight.sh --model htdemucs_ft
+./bin/run_overnight.sh --model htdemucs_ft
 ```
 
 This:
@@ -1974,7 +1974,7 @@ separation:
 Or process library in batches:
 
 ```bash
-./run_pipeline.sh --model htdemucs
+./bin/run_pipeline.sh --model htdemucs
 ```
 
 ---
@@ -2126,7 +2126,7 @@ bash check.sh                          # Readiness check
 ### Process Library Overnight
 
 ```bash
-./run_overnight.sh --model htdemucs_ft
+./bin/run_overnight.sh --model htdemucs_ft
 tail -f pipeline.log                   # Watch progress
 ```
 

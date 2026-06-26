@@ -1,29 +1,79 @@
 #!/usr/bin/env bash
-# start.sh — Start AI RemixMate (API + UI), killing any stale processes first.
+# start.sh — Install/update dependencies and start AI RemixMate.
 #
 # Usage:
-#   ./start.sh              # start both API and Streamlit UI (HTTP, legacy)
-#   ./start.sh frontend     # start API + React/Vite frontend (new primary UI)
-#   ./start.sh --https      # start both with HTTPS (generates certs if needed)
-#   ./start.sh api          # start API only
-#   ./start.sh ui           # start Streamlit UI only
+#   ./start.sh              # setup + React UI + API (default)
+#   ./start.sh frontend     # same as default
+#   ./start.sh setup        # install/update packages only
+#   ./start.sh api          # API only
+#   ./start.sh ui           # legacy Streamlit UI + API
 #   ./start.sh stop         # kill everything
+#   ./start.sh --skip-setup # start without reinstalling packages
 
 set -e
 
+ROOT="$(cd "$(dirname "$0")" && pwd)"
 API_PORT=8000
 UI_PORT=8501
-FRONTEND_PORT=5173          # Vite dev server (React frontend)
-CERT_DIR="$(cd "$(dirname "$0")" && pwd)/certs"
+FRONTEND_PORT=5173
+CERT_DIR="$ROOT/certs"
 CERT_FILE="$CERT_DIR/cert.pem"
 KEY_FILE="$CERT_DIR/key.pem"
 
-# HTTP by default — use ./start.sh --https to enable HTTPS
 HTTPS_MODE=false
+SKIP_SETUP=false
+PY=""   # absolute path — set by ensure_python_env()
+VENV_DIR="$ROOT/remix-env"
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# Resolve the Python interpreter RemixMate should use.
+# Homebrew/macOS Python 3.12+ is PEP-668 "externally managed" — pip install
+# only works inside a venv. We auto-create remix-env/ when needed.
+ensure_python_env() {
+  if [ -n "$PY" ] && [ -x "$PY" ]; then
+    return
+  fi
+
+  # 1. Already inside an activated venv
+  if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then
+    PY="$VIRTUAL_ENV/bin/python"
+    echo "  Using active venv: $PY ($($PY --version 2>&1))"
+    return
+  fi
+
+  # 2. Project venv from a previous run
+  if [ -x "$VENV_DIR/bin/python" ]; then
+    PY="$VENV_DIR/bin/python"
+    echo "  Using project venv: $PY ($($PY --version 2>&1))"
+    return
+  fi
+
+  # 3. Create remix-env/ — prefer 3.11/3.12 over Homebrew 3.14 (torch compat)
+  local BASE=""
+  for candidate in python3.12 python3.11 python3.10 python3; do
+    if command -v "$candidate" &>/dev/null; then
+      BASE="$(command -v "$candidate")"
+      break
+    fi
+  done
+  if [ -z "$BASE" ]; then
+    echo "❌  Python 3 not found. Install Python 3.10–3.12 and retry."
+    echo "    macOS:  brew install python@3.12"
+    echo "    See PREREQUISITES.md"
+    exit 1
+  fi
+
+  echo "  Creating virtual environment remix-env/ (PEP 668 safe)…"
+  echo "  Base interpreter: $BASE ($($BASE --version 2>&1))"
+  "$BASE" -m venv "$VENV_DIR"
+  PY="$VENV_DIR/bin/python"
+  echo "  ✅  Created $PY ($($PY --version 2>&1))"
+  echo ""
+  echo "  Tip: next time run  source remix-env/bin/activate  before ./start.sh"
+}
 
 kill_port() {
   local port=$1
@@ -63,9 +113,74 @@ ensure_certs() {
   fi
 }
 
-# ---------------------------------------------------------------------------
-# Commands
-# ---------------------------------------------------------------------------
+setup_deps() {
+  echo "📦  Installing / updating dependencies..."
+  echo ""
+
+  ensure_python_env
+  echo ""
+
+  # Warn if Python is very new (torch/demucs may lack wheels yet)
+  local PY_MAJOR PY_MINOR
+  read -r PY_MAJOR PY_MINOR < <($PY -c 'import sys; print(sys.version_info.major, sys.version_info.minor)')
+  if [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -ge 13 ]; then
+    echo "  ⚠️   Python $PY_MAJOR.$PY_MINOR detected — some ML packages need 3.10–3.12."
+    echo "      If pip fails, run:  brew install python@3.12 && rm -rf remix-env && ./start.sh"
+    echo ""
+  fi
+
+  # ── System tools ──────────────────────────────────────────────────────
+  echo "🔧  System tools"
+  if ! command -v ffmpeg &>/dev/null; then
+    echo "❌  ffmpeg not found — required for audio processing."
+    echo "    macOS:  brew install ffmpeg"
+    echo "    Linux:  sudo apt install ffmpeg"
+    exit 1
+  fi
+  echo "  ✅  ffmpeg"
+
+  if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
+    echo "❌  Node.js / npm not found — required for the React frontend."
+    echo "    macOS:  brew install node"
+    echo "    Linux:  sudo apt install nodejs npm"
+    exit 1
+  fi
+  echo "  ✅  node $(node --version) / npm $(npm --version)"
+  echo ""
+
+  # ── Python packages ───────────────────────────────────────────────────
+  echo "🐍  Python packages"
+  cd "$ROOT"
+  $PY -m pip install --upgrade pip setuptools wheel -q
+  $PY -m pip install -r requirements.txt -q
+  $PY -m pip install -e ".[dev]" -q
+  $PY -m pip install -U yt-dlp -q
+  echo "  ✅  requirements.txt + editable install + yt-dlp"
+  echo ""
+
+  # ── Frontend packages ─────────────────────────────────────────────────
+  echo "⚛️   Frontend packages"
+  cd "$ROOT/frontend"
+  if [ -f package-lock.json ]; then
+    npm ci --silent 2>/dev/null || npm install --silent
+  else
+    npm install --silent
+  fi
+  echo "  ✅  npm packages installed"
+  echo ""
+
+  cd "$ROOT"
+  echo "✅  Dependency setup complete."
+  echo ""
+}
+
+run_check() {
+  if [ -f "$ROOT/bin/check.sh" ]; then
+    echo "🧪  Running readiness check..."
+    bash "$ROOT/bin/check.sh" || true
+    echo ""
+  fi
+}
 
 stop_all() {
   echo "⏹  Stopping all RemixMate processes..."
@@ -80,16 +195,9 @@ start_frontend() {
   kill_port $FRONTEND_PORT
   LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
 
-  FRONTEND_DIR="$(cd "$(dirname "$0")" && pwd)/frontend"
-  if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
-    echo "📦  Installing frontend dependencies (first run)..."
-    (cd "$FRONTEND_DIR" && npm install)
-    echo ""
-  fi
-
   echo "🚀  Starting React frontend at http://localhost:$FRONTEND_PORT"
   [ -n "$LAN_IP" ] && echo "    LAN URL: http://$LAN_IP:$FRONTEND_PORT"
-  (cd "$FRONTEND_DIR" && npm run dev) &
+  (cd "$ROOT/frontend" && npm run dev) &
   FRONTEND_PID=$!
   echo "    PID: $FRONTEND_PID"
 }
@@ -98,15 +206,17 @@ start_api() {
   echo "🔧  Clearing port $API_PORT..."
   kill_port $API_PORT
 
+  ensure_python_env
+
   if $HTTPS_MODE; then
     echo "🚀  Starting API at https://0.0.0.0:$API_PORT (HTTPS)"
     echo "    Docs: https://localhost:$API_PORT/docs"
-    uvicorn scripts.api.main:app --reload --host 0.0.0.0 --port $API_PORT \
+    $PY -m uvicorn scripts.api.main:app --reload --host 0.0.0.0 --port $API_PORT \
       --ssl-certfile "$CERT_FILE" --ssl-keyfile "$KEY_FILE" &
   else
     echo "🚀  Starting API at http://0.0.0.0:$API_PORT"
     echo "    Docs: http://localhost:$API_PORT/docs"
-    uvicorn scripts.api.main:app --reload --host 0.0.0.0 --port $API_PORT &
+    (cd "$ROOT" && $PY -m uvicorn scripts.api.main:app --reload --host 0.0.0.0 --port $API_PORT) &
   fi
   API_PID=$!
   echo "    PID: $API_PID"
@@ -115,11 +225,9 @@ start_api() {
 start_ui() {
   echo "🎨  Clearing port $UI_PORT..."
   kill_port $UI_PORT
-  # Detect LAN IP for the network link hint
   LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
 
   if $HTTPS_MODE; then
-    local PROTO="https"
     echo "🚀  Starting UI at https://localhost:$UI_PORT (HTTPS)"
     [ -n "$LAN_IP" ] && echo "    Phone URL: https://$LAN_IP:$UI_PORT"
     streamlit run scripts/ui/app.py \
@@ -134,23 +242,38 @@ start_ui() {
   else
     echo "🚀  Starting UI at http://localhost:$UI_PORT"
     [ -n "$LAN_IP" ] && echo "    Phone URL: http://$LAN_IP:$UI_PORT"
-    streamlit run scripts/ui/app.py \
+    (cd "$ROOT" && streamlit run scripts/ui/app.py \
       --server.port $UI_PORT \
       --server.address 0.0.0.0 \
       --server.headless true \
       --server.enableCORS false \
       --server.enableXsrfProtection false \
-      --server.maxUploadSize 200 &
+      --server.maxUploadSize 200) &
   fi
   UI_PID=$!
   echo "    PID: $UI_PID"
+}
+
+print_frontend_urls() {
+  LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
+  echo ""
+  echo "✅  RemixMate running (React frontend):"
+  echo ""
+  echo "  ⚛️   React UI             →  http://localhost:$FRONTEND_PORT"
+  echo "  🎧  DJ Widget (float)    →  http://localhost:$FRONTEND_PORT/widget"
+  echo "  ⬇️   Downloads            →  http://localhost:$FRONTEND_PORT/operations"
+  [ -n "$LAN_IP" ] && echo "  📱  Phone / LAN          →  http://$LAN_IP:$FRONTEND_PORT"
+  echo "  📖  API Docs             →  http://localhost:$API_PORT/docs"
+  echo "  📡  SSE stream           →  http://localhost:$API_PORT/events/stream"
+  echo ""
+  echo "Press Ctrl+C to stop."
 }
 
 # ---------------------------------------------------------------------------
 # Parse flags
 # ---------------------------------------------------------------------------
 
-MODE="both"
+MODE="frontend"   # default: React UI + API
 for arg in "$@"; do
   case "$arg" in
     --https|-s|--secure)
@@ -159,12 +282,15 @@ for arg in "$@"; do
     --no-https|--http)
       HTTPS_MODE=false
       ;;
-    stop|api|ui|both|frontend)
+    --skip-setup)
+      SKIP_SETUP=true
+      ;;
+    stop|api|ui|both|frontend|setup)
       MODE="$arg"
       ;;
     *)
       echo "Unknown argument: $arg"
-      echo "Usage: $0 [api|ui|frontend|stop|both] [--https|--no-https]"
+      echo "Usage: $0 [setup|frontend|api|ui|both|stop] [--https|--skip-setup]"
       exit 1
       ;;
   esac
@@ -176,19 +302,32 @@ done
 
 banner
 
-# Generate certs if HTTPS mode
-if $HTTPS_MODE; then
-  ensure_certs
-fi
-
-PROTO="http"
-$HTTPS_MODE && PROTO="https"
-
 case "$MODE" in
   stop)
     stop_all
     exit 0
     ;;
+  setup)
+    ensure_python_env
+    setup_deps
+    run_check
+    exit 0
+    ;;
+esac
+
+# Always resolve Python (creates remix-env/ on first run)
+ensure_python_env
+
+if ! $SKIP_SETUP; then
+  setup_deps
+  run_check
+fi
+
+if $HTTPS_MODE; then
+  ensure_certs
+fi
+
+case "$MODE" in
   api)
     start_api
     echo ""
@@ -196,31 +335,37 @@ case "$MODE" in
     wait $API_PID
     ;;
   ui)
-    start_ui
-    echo ""
-    echo "✅  UI running. Press Ctrl+C to stop."
-    wait $UI_PID
-    ;;
-  frontend)
-    # New primary UI: React + Vite on :5173 alongside FastAPI on :8000
     start_api
     sleep 2
-    start_frontend
+    start_ui
     LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
     echo ""
-    echo "✅  RemixMate running (React frontend mode):"
+    echo "✅  RemixMate running (Streamlit legacy UI):"
     echo ""
-    echo "  ⚛️   React UI (primary)     →  http://localhost:$FRONTEND_PORT"
-    [ -n "$LAN_IP" ] && echo "  📱  Phone / LAN          →  http://$LAN_IP:$FRONTEND_PORT"
-    echo "  📖  API Docs             →  http://localhost:$API_PORT/docs"
-    echo "  📡  SSE stream           →  http://localhost:$API_PORT/events/stream"
+    if $HTTPS_MODE; then
+      echo "  🔒  Streamlit UI         →  https://localhost:$UI_PORT"
+      [ -n "$LAN_IP" ] && echo "  📱  Phone / LAN          →  https://$LAN_IP:$UI_PORT"
+      echo "  📖  API Docs             →  https://localhost:$API_PORT/docs"
+    else
+      echo "  🎵  Streamlit UI         →  http://localhost:$UI_PORT"
+      [ -n "$LAN_IP" ] && echo "  📱  Phone / LAN          →  http://$LAN_IP:$UI_PORT"
+      echo "  📖  API Docs             →  http://localhost:$API_PORT/docs"
+    fi
     echo ""
+    echo "Tip: run './start.sh' for the new React UI + DJ widget."
     echo "Press Ctrl+C to stop."
     wait
     ;;
-  both|"")
+  frontend|"")
     start_api
-    sleep 2   # give API a moment to bind before UI tries to connect
+    sleep 2
+    start_frontend
+    print_frontend_urls
+    wait
+    ;;
+  both)
+    start_api
+    sleep 2
     start_ui
     LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
     echo ""
@@ -236,13 +381,12 @@ case "$MODE" in
       echo "  📖  API Docs             →  http://localhost:$API_PORT/docs"
     fi
     echo ""
-    echo "Tip: run './start.sh frontend' to use the new React UI."
+    echo "Tip: run './start.sh' for the new React UI + DJ widget."
     echo "Press Ctrl+C to stop."
-    # Wait for either process to exit
     wait
     ;;
   *)
-    echo "Usage: $0 [api|ui|frontend|stop|both] [--https]"
+    echo "Usage: $0 [setup|frontend|api|ui|both|stop] [--https|--skip-setup]"
     exit 1
     ;;
 esac

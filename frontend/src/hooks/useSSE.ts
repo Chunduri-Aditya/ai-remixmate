@@ -6,9 +6,10 @@
 
 import { useEffect, useRef } from 'react'
 import { useAppStore } from '@/stores/appStore'
-import type { SSEEvent, HeartbeatData, Job } from '@/types'
+import { normalizeJob, EVENTS_URL } from '@/lib/api'
+import type { SSEEvent, HeartbeatData } from '@/types'
 
-const SSE_URL = '/events/stream'
+const SSE_URL = EVENTS_URL
 const MIN_RECONNECT_MS = 1_000
 const MAX_RECONNECT_MS = 30_000
 
@@ -78,13 +79,13 @@ export function useSSE() {
 
       case 'job_created':
       case 'job_updated': {
-        const job = event.data as Job
+        const job = normalizeJob(event.data as Record<string, unknown>)
         upsertJob(job)
         break
       }
 
       case 'job_completed': {
-        const job = event.data as Job
+        const job = normalizeJob(event.data as Record<string, unknown>)
         upsertJob(job)
         pushActivity({
           level: 'success',
@@ -95,7 +96,7 @@ export function useSSE() {
       }
 
       case 'job_failed': {
-        const job = event.data as Job
+        const job = normalizeJob(event.data as Record<string, unknown>)
         upsertJob(job)
         pushActivity({
           level: 'error',
@@ -106,7 +107,7 @@ export function useSSE() {
       }
 
       case 'job_cancelled': {
-        const job = event.data as Job
+        const job = normalizeJob(event.data as Record<string, unknown>)
         upsertJob(job)
         pushActivity({
           level: 'warn',

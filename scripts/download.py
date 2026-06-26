@@ -41,7 +41,10 @@ import sys
 log = logging.getLogger(__name__)
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import Callable, List, Optional, Dict
+
+# Progress callback signature: (fraction_0_to_1, human_readable_message)
+ProgressCb = Callable[[float, str], None]
 
 from scripts.core.paths import (
     LIBRARY_DIR,
@@ -330,13 +333,25 @@ def _resolve_url(spec: TrackSpec) -> tuple[str, str]:
     return f"ytsearch1:{query}", spec.name or _sanitize(query)
 
 
-def download_track(spec: TrackSpec) -> DownloadResult:
+def download_track(spec: TrackSpec, progress_cb: Optional[ProgressCb] = None) -> DownloadResult:
     """
     Download a single track and (optionally) split into stems.
     Output lives in library/<name>/ .
+
+    progress_cb, if given, receives (fraction 0.0–1.0, message) covering the
+    whole pipeline: resolve → yt-dlp download → WAV convert → stems → register.
     """
     ensure_directories()
 
+    def _emit(frac: float, msg: str) -> None:
+        if progress_cb is None:
+            return
+        try:
+            progress_cb(min(max(frac, 0.0), 1.0), msg)
+        except Exception:
+            pass
+
+    _emit(0.01, "Resolving track…")
     url, name = _resolve_url(spec)
     dest_dir  = song_dir(name)
     wav_dest  = dest_dir / "full.wav"
@@ -344,6 +359,7 @@ def download_track(spec: TrackSpec) -> DownloadResult:
     # --- Skip if already downloaded ---
     if wav_dest.exists():
         print(f"⏩  Skipping (already in library): {name}")
+        _emit(1.0, f"Already in library: {name}")
         result = DownloadResult(name=name, success=True, wav=wav_dest)
         if spec.separate:
             result.stems = _collect_stems(name)
@@ -369,10 +385,25 @@ def download_track(spec: TrackSpec) -> DownloadResult:
 
     # --- Download via yt-dlp ---
     print(f"⬇️   Downloading: {name}")
+    _emit(0.03, f"Downloading: {name}")
+
+    def _ydl_hook(d: Dict) -> None:
+        status = d.get("status")
+        if status == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            done = d.get("downloaded_bytes") or 0
+            if total:
+                frac = done / total
+                # yt-dlp download occupies the 3%–40% window of the pipeline
+                _emit(0.03 + 0.37 * frac, f"Downloading audio… {int(frac * 100)}%")
+        elif status == "finished":
+            _emit(0.40, "Converting to WAV…")
+
     try:
         import yt_dlp  # type: ignore
         tmp_tmpl = str(dest_dir / "full.%(ext)s")
         ydl_opts = {
+            "progress_hooks": [_ydl_hook],
             "format": "bestaudio[acodec=opus]/bestaudio[acodec=aac][abr>128]/bestaudio/best",
             "outtmpl": tmp_tmpl,
             "postprocessors": [{
@@ -398,6 +429,7 @@ def download_track(spec: TrackSpec) -> DownloadResult:
                               error="WAV not produced after download.")
 
     print(f"✅  Saved: {wav_dest}")
+    _emit(0.45, "Saving licence metadata…")
 
     # --- Classify and save licence ---
     lic_info = _extract_and_save_license(name, dest_dir, url)
@@ -417,7 +449,11 @@ def download_track(spec: TrackSpec) -> DownloadResult:
     # --- Optional stem separation ---
     stems: Dict[str, Path] = {}
     if spec.separate:
-        stems = _separate_stems(name, wav_dest)
+        # Demucs occupies the 50%–95% window of the pipeline
+        stems = _separate_stems(
+            name, wav_dest,
+            progress_cb=(lambda p, m: _emit(0.50 + 0.45 * p, m)) if progress_cb else None,
+        )
 
     # --- Smart storage: prune raw WAV if stems were produced ---
     if stems and _PRUNE_ON_DL:
@@ -428,6 +464,7 @@ def download_track(spec: TrackSpec) -> DownloadResult:
             pass
 
     # --- Register in library index + store fingerprint ---
+    _emit(0.96, "Registering in library…")
     try:
         mgr = get_library_manager()
         mgr.register(name, source=_source_from_url(url))
@@ -444,6 +481,7 @@ def download_track(spec: TrackSpec) -> DownloadResult:
         if warn_str:
             print(warn_str)
 
+    _emit(1.0, f"Done: {name}")
     return DownloadResult(
         name=name,
         success=True,
@@ -583,7 +621,11 @@ def _extract_and_save_license(
 # Stem separation
 # ---------------------------------------------------------------------------
 
-def _separate_stems(song_name: str, wav_path: Path) -> Dict[str, Path]:
+def _separate_stems(
+    song_name: str,
+    wav_path: Path,
+    progress_cb: Optional[ProgressCb] = None,
+) -> Dict[str, Path]:
     """
     Run Demucs on wav_path; place stems directly in library/<song_name>/.
 
@@ -591,12 +633,21 @@ def _separate_stems(song_name: str, wav_path: Path) -> Dict[str, Path]:
     venv Python is always used and logic is never duplicated.
     """
     print(f"🎛️   Separating stems for: {song_name}")
+
+    def _report(p: float, m: str) -> None:
+        print(f"   [{int(p*100):3d}%] {m}")
+        if progress_cb:
+            try:
+                progress_cb(p, m)
+            except Exception:
+                pass
+
     try:
         from scripts.core.stems import separate_song_stems
         result = separate_song_stems(
             song_name,
             enhance=False,       # download pipeline: skip enhance, just split
-            progress_cb=lambda p, m: print(f"   [{int(p*100):3d}%] {m}"),
+            progress_cb=_report,
         )
         if result.success:
             for stem in result.stems:

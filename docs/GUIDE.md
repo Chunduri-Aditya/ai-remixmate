@@ -9,7 +9,7 @@
 
 ```bash
 # 1. Verify everything is ready
-bash check.sh
+bash bin/check.sh
 
 # 2. Launch (starts both API + UI)
 ./start.sh
@@ -266,7 +266,7 @@ All endpoints are documented at `http://localhost:8000/docs` (Swagger UI) when t
 ```
 ai-remixmate/
 ├── start.sh                    # Launch script (API + UI)
-├── check.sh                    # Readiness checker
+├── bin/check.sh                # Readiness checker
 ├── Dockerfile                  # Docker deployment
 ├── requirements.txt            # Python dependencies
 │
@@ -396,7 +396,7 @@ Override with: `REMIXMATE_DEVICE=cpu ./start.sh`
 → Run stem separation first: go to the song in Library → click "Split Stems". Or use the batch endpoint.
 
 **Demucs is slow**
-→ Expected: 2–5 minutes per song on CPU, ~1 minute on GPU. Make sure GPU is detected (`bash check.sh` shows GPU status).
+→ Expected: 2–5 minutes per song on CPU, ~1 minute on GPU. Make sure GPU is detected (`bash bin/check.sh` shows GPU status).
 
 **Port already in use**
 → Run `./start.sh stop` first, then `./start.sh` again.

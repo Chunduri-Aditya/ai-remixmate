@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from scripts.api import jobs as job_store
 from scripts.api.routers._helpers import _require_song, _song_info, _stem_file, _check_job_cap
@@ -120,11 +120,29 @@ def delete_song(name: str):
 
 @router.get("/library/{name}/audio", tags=["library"])
 def stream_audio(name: str):
-    d = _require_song(name)
-    wav = d / "full.wav"
-    if not wav.exists():
-        raise HTTPException(status_code=404, detail=f"full.wav not found for {name!r}")
-    return FileResponse(str(wav), media_type="audio/wav", filename=f"{name}.wav")
+    _require_song(name)
+    from scripts.core.audio_source import resolve_source_file, load_source_audio
+
+    # Prefer streaming an existing file (full.wav → full_enhanced.wav) directly.
+    src = resolve_source_file(name)
+    if src is not None:
+        return FileResponse(str(src), media_type="audio/wav", filename=f"{name}.wav")
+
+    # No single-file source — reconstruct from Demucs stems on the fly and
+    # stream the summed mix from memory (no library mutation).
+    try:
+        import io
+        import soundfile as sf
+        audio, sr = load_source_audio(name, sr=44100, mono=True)
+        buf = io.BytesIO()
+        sf.write(buf, audio, sr, format="WAV")
+        return Response(
+            content=buf.getvalue(),
+            media_type="audio/wav",
+            headers={"Content-Disposition": f'inline; filename="{name}.wav"'},
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"No source audio for {name!r}")
 
 
 @router.get("/library/{name}/stems/{stem}", tags=["library"])

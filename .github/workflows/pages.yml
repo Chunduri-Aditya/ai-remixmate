@@ -1,0 +1,67 @@
+# Deploy the React frontend to GitHub Pages.
+#
+# The Pages build is a static frontend that talks to YOUR locally running
+# backend (http://localhost:8000). To use it:
+#   1. Enable Pages: repo Settings → Pages → Source: "GitHub Actions"
+#   2. Start the API locally:  ./start.sh api
+#   3. Open https://chunduri-aditya.github.io/ai-remixmate/
+name: Deploy frontend to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        env:
+          VITE_BASE: /ai-remixmate/
+          VITE_API_BASE: http://localhost:8000
+          VITE_EVENTS_URL: http://localhost:8000/events/stream
+        run: npm run build
+
+      # SPA fallback so deep links like /ai-remixmate/widget resolve
+      - name: Add 404 fallback
+        run: cp frontend/dist/index.html frontend/dist/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

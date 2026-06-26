@@ -17,7 +17,7 @@ Internal reference material. The main project README lives at the [repo root](..
 ## What's outside this folder
 
 - [`../README.md`](../README.md) — project front door
-- [`../GUIDE.md`](../GUIDE.md) — how to run, configure, troubleshoot
+- [`GUIDE.md`](GUIDE.md) — how to run, configure, troubleshoot
 - [`../CHANGELOG.md`](../CHANGELOG.md) — version history
 - [`../config.yaml`](../config.yaml) — every tuneable parameter
 

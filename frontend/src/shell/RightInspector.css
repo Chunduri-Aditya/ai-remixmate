@@ -283,3 +283,21 @@
   background: var(--color-border-subtle);
   margin: var(--space-2) 0;
 }
+
+/* Retry button */
+.inspector-job-card__retry {
+  margin-top: var(--space-1);
+  padding: 2px 8px;
+  border: 1px solid var(--color-amber-500);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-amber-500);
+  font-size: var(--text-xs);
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.inspector-job-card__retry:hover {
+  background: var(--color-amber-glow);
+}

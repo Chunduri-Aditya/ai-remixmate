@@ -8,28 +8,41 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:ui": "vitest --ui"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@tanstack/react-query": "^5.56.2",
+    "@tanstack/react-query-devtools": "^5.56.2",
+    "@tanstack/react-virtual": "^3.14.2",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.447.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
-    "@tanstack/react-query": "^5.56.2",
-    "@tanstack/react-query-devtools": "^5.56.2",
-    "zustand": "^5.0.0",
-    "lucide-react": "^0.447.0",
-    "clsx": "^2.1.1"
+    "wavesurfer.js": "^7.12.7",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^18.3.7",
     "@types/react-dom": "^18.3.0",
     "@typescript-eslint/eslint-plugin": "^8.7.0",
     "@typescript-eslint/parser": "^8.7.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "@vitest/ui": "^3.2.6",
     "eslint": "^9.11.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.12",
+    "jsdom": "^27.0.1",
     "typescript": "^5.5.3",
-    "vite": "^5.4.7"
+    "vite": "^5.4.7",
+    "vitest": "^3.2.6"
   }
 }

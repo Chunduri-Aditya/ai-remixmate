@@ -5,7 +5,10 @@
    ============================================================ */
 
 import { X, Activity, ListOrdered, Cpu } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore, selectRecentJobs, type ActivityEntry } from '@/stores/appStore'
+import { useJobTimer } from '@/hooks/useJobTimer'
+import { remixApi } from '@/lib/api'
 import type { Job } from '@/types'
 import './RightInspector.css'
 
@@ -31,8 +34,39 @@ function formatDuration(createdAt: string, updatedAt: string): string {
   return `${m}m ${s % 60}s`
 }
 
+function RunningTimer({ job }: { job: Job }) {
+  const { elapsed, eta } = useJobTimer(job)
+  return (
+    <span className="text-muted font-mono inspector-job-card__timer" style={{ fontSize: 'var(--text-xs)' }}>
+      ⏱ {elapsed}s elapsed{eta !== null ? ` · ~${eta}s left` : ''}
+    </span>
+  )
+}
+
 function JobCard({ job }: { job: Job }) {
   const cancelJob = useAppStore((s) => s.removeJob)
+
+  async function handleRetry() {
+    const meta = (job.meta as Record<string, unknown>) ?? {}
+    const upsertJob = useAppStore.getState().upsertJob
+    try {
+      let res: { job_id: string }
+      if (job.type === 'dj_remix' && meta.song_a && meta.song_b) {
+        res = await remixApi.create({ song_a: meta.song_a as string, song_b: meta.song_b as string })
+      } else if (job.type === 'dj_chain' && Array.isArray(meta.songs)) {
+        res = await remixApi.chain(meta.songs as string[])
+      } else {
+        return
+      }
+      upsertJob({
+        job_id: res.job_id, status: 'PENDING', type: job.type,
+        progress: 0, message: 'Retrying…',
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      })
+    } catch {
+      // silently ignore — user sees the existing error card
+    }
+  }
 
   return (
     <div className={`inspector-job-card ${job.status === 'RUNNING' ? 'inspector-job-card--running' : ''}`}>
@@ -59,6 +93,7 @@ function JobCard({ job }: { job: Job }) {
         <span className="text-muted font-mono" style={{ fontSize: 'var(--text-xs)' }}>
           {job.message || '—'}
         </span>
+        {job.status === 'RUNNING' && <RunningTimer job={job} />}
         {job.status !== 'PENDING' && job.status !== 'RUNNING' && (
           <span className="text-muted font-mono" style={{ fontSize: 'var(--text-xs)' }}>
             {formatDuration(job.created_at, job.updated_at)}
@@ -74,6 +109,12 @@ function JobCard({ job }: { job: Job }) {
           aria-label="Cancel job"
         >
           <X size={10} />
+        </button>
+      )}
+
+      {job.status === 'FAILED' && (job.type === 'dj_remix' || job.type === 'dj_chain') && (
+        <button className="inspector-job-card__retry" onClick={handleRetry}>
+          ↺ Retry
         </button>
       )}
     </div>
@@ -110,12 +151,14 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
 // --- System tab ---
 
 function SystemTab() {
-  const { apiHealth, sseConnected, uptimeSeconds, machineProfile } = useAppStore((s) => ({
-    apiHealth:      s.apiHealth,
-    sseConnected:   s.sseConnected,
-    uptimeSeconds:  s.uptimeSeconds,
-    machineProfile: s.machineProfile,
-  }))
+  const { apiHealth, sseConnected, uptimeSeconds, machineProfile } = useAppStore(
+    useShallow((s) => ({
+      apiHealth:      s.apiHealth,
+      sseConnected:   s.sseConnected,
+      uptimeSeconds:  s.uptimeSeconds,
+      machineProfile: s.machineProfile,
+    })),
+  )
 
   function formatUptime(s: number): string {
     const h = Math.floor(s / 3600)
@@ -178,15 +221,17 @@ function SystemTab() {
 
 export function RightInspector() {
   const { inspectorTab, setInspectorTab, toggleInspector, activityLog, clearActivity } =
-    useAppStore((s) => ({
-      inspectorTab:    s.inspectorTab,
-      setInspectorTab: s.setInspectorTab,
-      toggleInspector: s.toggleInspector,
-      activityLog:     s.activityLog,
-      clearActivity:   s.clearActivity,
-    }))
+    useAppStore(
+      useShallow((s) => ({
+        inspectorTab:    s.inspectorTab,
+        setInspectorTab: s.setInspectorTab,
+        toggleInspector: s.toggleInspector,
+        activityLog:     s.activityLog,
+        clearActivity:   s.clearActivity,
+      })),
+    )
 
-  const recentJobs = useAppStore(selectRecentJobs)
+  const recentJobs = useAppStore(useShallow(selectRecentJobs))
   const activeJobCount = recentJobs.filter(
     (j) => j.status === 'RUNNING' || j.status === 'PENDING',
   ).length

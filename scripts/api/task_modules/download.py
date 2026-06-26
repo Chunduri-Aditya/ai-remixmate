@@ -33,17 +33,22 @@ def task_download(
     from scripts.download import download_track, TrackSpec
 
     log_audit("download_start", resource=query, job_id=job_id, metadata={"separate": separate})
-    update_job(job_id, progress=0.05, message="Starting download…")
+    update_job(job_id, progress=0.01, message="Starting download…")
+
+    def _progress(frac: float, msg: str) -> None:
+        # download_track covers 0–1 of its own pipeline; reserve the final
+        # few percent of the job for music-index upsert below.
+        update_job(job_id, progress=round(0.01 + 0.92 * frac, 3), message=msg)
 
     # Force separate=True — every download gets Demucs automatically
     spec = TrackSpec(query=query, name=name, separate=True)
-    result = download_track(spec)
+    result = download_track(spec, progress_cb=_progress)
 
     if not result.success:
         log_audit("download_failed", resource=query, job_id=job_id, metadata={"error": result.error})
         raise RuntimeError(result.error or "Download failed")
 
-    update_job(job_id, progress=0.75, message="Stems ready — indexing song…")
+    update_job(job_id, progress=0.94, message="Stems ready — indexing song…")
 
     # ── Upsert into music index (non-blocking) ─────────────────────────────
     _index_upsert(result.name)
@@ -117,15 +122,23 @@ def task_playlist_download(
             or f"https://www.youtube.com/watch?v={vid}"
         )
 
-        progress = 0.05 + 0.93 * (i / total)
+        base = 0.05 + 0.93 * (i / total)
+        span = 0.93 / total
         update_job(
             job_id,
-            progress=round(progress, 3),
+            progress=round(base, 3),
             message=f"[{i+1}/{total}] Downloading: {title[:40]}…",
         )
 
+        def _track_progress(frac: float, msg: str) -> None:
+            update_job(
+                job_id,
+                progress=round(base + span * frac, 3),
+                message=f"[{i+1}/{total}] {title[:40]}: {msg}",
+            )
+
         spec   = TrackSpec(query=track_url, name=title, separate=separate)
-        result = download_track(spec)
+        result = download_track(spec, progress_cb=_track_progress)
 
         if result.success:
             results.append({

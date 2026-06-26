@@ -4,7 +4,9 @@
    library stats, recent activity. Updates via Zustand + SSE.
    ============================================================ */
 
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useShallow } from 'zustand/react/shallow'
 import {
   Activity,
   Cpu,
@@ -14,10 +16,11 @@ import {
   Clock,
   RefreshCw,
   ChevronRight,
+  type LucideIcon,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore, selectActiveJobs, selectRecentJobs } from '@/stores/appStore'
-import { healthApi, libraryApi, jobsApi } from '@/lib/api'
+import { healthApi, jobsApi, libraryApi } from '@/lib/api'
 import type { Job } from '@/types'
 import './MissionControl.css'
 
@@ -28,7 +31,7 @@ interface StatCardProps {
   value: string | number
   sub?: string
   accent?: 'amber' | 'ice' | 'green' | 'crimson' | 'default'
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>
+  icon: LucideIcon
   loading?: boolean
   onClick?: () => void
 }
@@ -111,7 +114,7 @@ function JobRow({ job }: { job: Job }) {
 interface QuickActionProps {
   label: string
   description: string
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>
+  icon: LucideIcon
   accent?: 'amber' | 'ice' | 'green'
   onClick: () => void
 }
@@ -148,14 +151,53 @@ function QuickAction({ label, description, icon: Icon, accent = 'amber', onClick
   )
 }
 
+// --- Completion sparkline ---
+
+const SPARKLINE_BUCKETS = 12
+const BUCKET_MS = 5 * 60 * 1000   // 5-minute buckets → 60-min window
+
+function Sparkline({ timestamps }: { timestamps: number[] }) {
+  const now = Date.now()
+  const buckets = Array.from({ length: SPARKLINE_BUCKETS }, (_, i) => {
+    const bucketStart = now - (SPARKLINE_BUCKETS - i) * BUCKET_MS
+    const bucketEnd   = bucketStart + BUCKET_MS
+    return timestamps.filter((t) => t >= bucketStart && t < bucketEnd).length
+  })
+  const max = Math.max(...buckets, 1)
+  const W = 120
+  const H = 32
+  const barW = Math.floor(W / SPARKLINE_BUCKETS) - 1
+  return (
+    <svg width={W} height={H} style={{ display: 'block', overflow: 'visible' }}>
+      {buckets.map((count, i) => {
+        const barH = Math.max(2, Math.round((count / max) * (H - 4)))
+        return (
+          <rect
+            key={i}
+            x={i * (barW + 1)}
+            y={H - barH}
+            width={barW}
+            height={barH}
+            fill={count > 0 ? 'var(--color-green-500)' : 'var(--color-bg-overlay)'}
+            rx={1}
+            opacity={count > 0 ? 1 : 0.5}
+          />
+        )
+      })}
+    </svg>
+  )
+}
+
 // --- Heartbeat widget ---
 
 function HeartbeatWidget() {
-  const { apiHealth, sseConnected, uptimeSeconds } = useAppStore((s) => ({
-    apiHealth: s.apiHealth,
-    sseConnected: s.sseConnected,
-    uptimeSeconds: s.uptimeSeconds,
-  }))
+  const { apiHealth, sseConnected, uptimeSeconds } = useAppStore(
+    useShallow((s) => ({
+      apiHealth: s.apiHealth,
+      sseConnected: s.sseConnected,
+      uptimeSeconds: s.uptimeSeconds,
+    })),
+  )
 
   function formatUptime(s: number): string {
     if (s === 0) return 'unknown'
@@ -189,8 +231,9 @@ function HeartbeatWidget() {
 
 export default function MissionControl() {
   const navigate = useNavigate()
-  const activeJobs  = useAppStore(selectActiveJobs)
-  const recentJobs  = useAppStore(selectRecentJobs)
+  const activeJobs      = useAppStore(useShallow(selectActiveJobs))
+  const recentJobs      = useAppStore(useShallow(selectRecentJobs))
+  const completionLog   = useAppStore((s) => s.completionLog)
 
   const { data: health, isLoading: healthLoading } = useQuery({
     queryKey: ['health'],
@@ -198,9 +241,9 @@ export default function MissionControl() {
     refetchInterval: 10_000,
   })
 
-  const { data: libraryStats, isLoading: statsLoading } = useQuery({
+  const { data: librarySongs, isLoading: statsLoading } = useQuery({
     queryKey: ['library-stats'],
-    queryFn: () => fetch('/api/library').then((r) => r.json()) as Promise<unknown[]>,
+    queryFn: libraryApi.list,
     refetchInterval: 30_000,
   })
 
@@ -211,11 +254,13 @@ export default function MissionControl() {
     staleTime: 0,
   })
 
-  // Hydrate jobs into store on first load
+  // Hydrate jobs into store on first load (effect — never set state during render)
   const setJobs = useAppStore((s) => s.setJobs)
-  if (jobs) setJobs(jobs)
+  useEffect(() => {
+    if (jobs) setJobs(jobs)
+  }, [jobs, setJobs])
 
-  const songCount = Array.isArray(libraryStats) ? libraryStats.length : 0
+  const songCount = librarySongs?.length ?? 0
 
   return (
     <div className="mc-page">
@@ -259,13 +304,22 @@ export default function MissionControl() {
               icon={Cpu}
               loading={healthLoading}
             />
-            <StatCard
-              label="Completed"
-              value={recentJobs.filter((j) => j.status === 'COMPLETED').length}
-              sub="this session"
-              accent="default"
-              icon={GitBranch}
-            />
+            {/* Sparkline card — replaces plain "Completed" StatCard */}
+            <div className="mc-stat-card">
+              <div className="mc-stat-card__icon">
+                <GitBranch size={14} strokeWidth={1.5} />
+              </div>
+              <div className="mc-stat-card__body">
+                <span className="mc-stat-card__label">Completions</span>
+                <span className="mc-stat-card__value font-display" style={{ fontSize: 'var(--text-lg)' }}>
+                  {completionLog.length}
+                </span>
+                <span className="mc-stat-card__sub">last 60 min</span>
+                <div style={{ marginTop: 'var(--space-1)' }}>
+                  <Sparkline timestamps={completionLog} />
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
