@@ -119,8 +119,8 @@ def _upsert_row(conn: sqlite3.Connection, job: Dict[str, Any]) -> None:
         """,
         {
             "job_id":      job["job_id"],
-            "status":      str(job["status"]),
-            "job_type":    str(job["job_type"]),
+            "status":      _status_value(job["status"]),
+            "job_type":    _type_value(job["job_type"]),
             "created_at":  job["created_at"],
             "started_at":  job.get("started_at"),
             "finished_at": job.get("finished_at"),
@@ -164,6 +164,31 @@ def _emit(event_type: str, job: Dict[str, Any]) -> None:
             pass
 
 
+def _status_value(value: Any) -> str:
+    """Normalize a status (enum, 'JobStatus.X', or plain string) to its enum value, e.g. 'done'."""
+    if isinstance(value, JobStatus):
+        return value.value
+    return str(value or "pending").split(".")[-1].lower()
+
+
+def _type_value(value: Any) -> str:
+    """Normalize a job type (enum, 'JobType.X', or plain string) to its enum value, e.g. 'download'."""
+    if isinstance(value, JobType):
+        return value.value
+    return str(value or "").split(".")[-1].lower()
+
+
+def _norm_status(value: Any) -> str:
+    """Normalize a status to the frontend contract (uppercase, DONE → COMPLETED)."""
+    s = _status_value(value).upper()
+    return "COMPLETED" if s == "DONE" else s
+
+
+def _norm_type(value: Any) -> str:
+    """Normalize a job type (enum, 'JobType.X', or plain string) to lowercase."""
+    return _type_value(value)
+
+
 def _job_to_response_dict(job: Dict[str, Any]) -> Dict[str, Any]:
     """Serialize a job dict to a frontend-friendly payload."""
     import datetime as _dt
@@ -174,8 +199,8 @@ def _job_to_response_dict(job: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "job_id":     job["job_id"],
-        "status":     str(job.get("status", "PENDING")),
-        "type":       str(job.get("job_type", "")),
+        "status":     _norm_status(job.get("status")),
+        "type":       _norm_type(job.get("job_type")),
         "progress":   round((job.get("progress", 0.0) or 0.0) * 100),  # 0–100 for frontend
         "message":    job.get("message", ""),
         "created_at": _iso(job.get("created_at")),
@@ -200,9 +225,14 @@ def _load_from_db() -> None:
         for row in rows:
             job = _row_to_dict(row)
 
-            # Roll back orphaned RUNNING jobs — process restart means they died
-            if job["status"] == str(JobStatus.RUNNING):
-                job["status"]  = str(JobStatus.FAILED)
+            # Normalize legacy rows that stored 'JobStatus.X' / 'JobType.X' strings
+            job["status"]   = _status_value(job["status"])
+            job["job_type"] = _type_value(job["job_type"])
+
+            # Roll back orphaned RUNNING/PENDING jobs — the executor queue
+            # died with the previous process, so they can never complete.
+            if job["status"] in (JobStatus.RUNNING.value, JobStatus.PENDING.value):
+                job["status"]  = JobStatus.FAILED.value
                 job["error"]   = "Process restarted before job could finish"
                 job["message"] = "Failed: process restarted"
                 with _get_conn() as conn:
@@ -303,14 +333,14 @@ def update_job(
             logger.warning("Could not persist job update to SQLite: %s", exc)
 
         # Emit SSE after update (still under lock to get consistent snapshot)
-        current_status = str(job.get("status", ""))
+        current_status = _status_value(job.get("status"))
         job_snapshot = dict(job)
 
     # Determine SSE event type from the new status
     status_to_event = {
-        str(JobStatus.DONE):    "job_completed",
-        str(JobStatus.FAILED):  "job_failed",
-        "cancelled":            "job_cancelled",
+        "done":      "job_completed",
+        "failed":    "job_failed",
+        "cancelled": "job_cancelled",
     }
     sse_type = status_to_event.get(current_status, "job_updated")
     _emit(sse_type, job_snapshot)
@@ -334,11 +364,11 @@ def cancel_job(job_id: str) -> bool:
         job = _jobs.get(job_id)
         if job is None:
             return False
-        if job["status"] in (JobStatus.DONE, JobStatus.FAILED, "cancelled"):
+        if _status_value(job["status"]) in ("done", "failed", "cancelled"):
             return False
 
         _cancelled.add(job_id)
-        job["status"]      = "cancelled"
+        job["status"]      = JobStatus.CANCELLED
         job["message"]     = "Cancelled by user"
         job["finished_at"] = time.time()
 
@@ -366,7 +396,7 @@ def retry_job(job_id: str, fn: Callable, **kwargs) -> Optional[str]:
     original = _jobs.get(job_id)
     if original is None:
         return None
-    if original["status"] not in (JobStatus.FAILED, "cancelled", str(JobStatus.FAILED)):
+    if _status_value(original["status"]) not in ("failed", "cancelled"):
         return None
 
     new_id = create_job(original["job_type"], {**original.get("meta", {}), "retried_from": job_id})
@@ -461,8 +491,8 @@ def job_to_response(job: Dict) -> JobResponse:
     """Convert the raw job dict to a Pydantic response model."""
     return JobResponse(
         job_id      = job["job_id"],
-        status      = job["status"],
-        job_type    = job["job_type"],
+        status      = _status_value(job["status"]),
+        job_type    = _type_value(job["job_type"]),
         created_at  = job["created_at"],
         started_at  = job.get("started_at"),
         finished_at = job.get("finished_at"),

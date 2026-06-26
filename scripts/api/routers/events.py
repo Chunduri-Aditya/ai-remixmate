@@ -117,7 +117,10 @@ async def _heartbeat_loop() -> None:
             from scripts.system.detect_machine import detect, to_dict  # type: ignore[import]
 
             jobs = list_jobs()
-            active = sum(1 for j in jobs if j["status"] in ("PENDING", "RUNNING"))
+            active = sum(
+                1 for j in jobs
+                if str(j["status"]).split(".")[-1].upper() in ("PENDING", "RUNNING")
+            )
 
             # Include machine profile — cached after first call
             if not hasattr(_heartbeat_loop, "_profile_cache"):

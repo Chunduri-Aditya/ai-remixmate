@@ -1,0 +1,408 @@
+/* ============================================================
+   Floating DJ Widget
+   Compact, dark, readable at small sizes (PiP window ~380px).
+   ============================================================ */
+
+.wgt-host {
+  height: 100vh;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: var(--color-bg-base);
+}
+
+/* Body class applied inside the PiP window */
+.wgt-pip-body {
+  margin: 0;
+  background: var(--color-bg-base);
+  font-family: var(--font-ui);
+  color: var(--color-text-primary);
+}
+
+.wgt-floating-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  color: var(--color-text-faint);
+}
+
+.wgt-floating-note p {
+  font-size: var(--text-base);
+}
+
+/* --- Panel --- */
+
+.wgt {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 420px;
+  height: 100%;
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+  overflow: hidden;
+}
+
+.wgt--pip {
+  max-width: none;
+  height: 100vh;
+}
+
+.wgt-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+}
+
+.wgt-head__logo {
+  color: var(--color-amber-500);
+}
+
+.wgt-head__title {
+  flex: 1;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-snug);
+}
+
+.wgt-head__pip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.wgt-head__pip:hover {
+  border-color: var(--color-amber-500);
+  color: var(--color-amber-500);
+  box-shadow: 0 0 12px var(--color-amber-glow);
+}
+
+/* --- Search --- */
+
+.wgt-search {
+  position: relative;
+  margin: var(--space-3) var(--space-4) 0;
+  flex-shrink: 0;
+}
+
+.wgt-search__icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-faint);
+  pointer-events: none;
+}
+
+.wgt-search__input {
+  width: 100%;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-2) var(--space-2) 30px;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+  outline: none;
+}
+
+.wgt-search__input:focus {
+  border-color: var(--color-amber-500);
+}
+
+.wgt-search__input::placeholder {
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wgt-search__results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-overlay);
+}
+
+.wgt-search__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wgt-search__item:hover {
+  background: var(--color-bg-overlay);
+  color: var(--color-text-primary);
+}
+
+/* --- Now playing --- */
+
+.wgt-now {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--space-3) var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-amber-glow);
+  border-left: 2px solid var(--color-amber-500);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.wgt-now__label {
+  font-size: 0.625rem;
+  letter-spacing: var(--tracking-wider);
+}
+
+.wgt-now__name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Sections --- */
+
+.wgt-section {
+  display: flex;
+  flex-direction: column;
+  margin: var(--space-3) var(--space-4) 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.wgt-section--setlist {
+  flex: 0 0 auto;
+  max-height: 32%;
+  margin-bottom: var(--space-3);
+}
+
+.wgt-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+  flex-shrink: 0;
+}
+
+.wgt-section__label {
+  font-size: 0.625rem;
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.wgt-clear {
+  border: none;
+  background: none;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.wgt-clear:hover {
+  color: var(--color-crimson-500);
+}
+
+/* --- Recommendations --- */
+
+.wgt-recs {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+}
+
+.wgt-rec {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: default;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.wgt-rec:hover {
+  border-color: var(--color-border-strong);
+}
+
+.wgt-rec__camelot {
+  width: 26px;
+  text-align: center;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  flex-shrink: 0;
+}
+
+.wgt-rec__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wgt-rec__name {
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wgt-rec__meta {
+  font-size: 0.625rem;
+}
+
+.wgt-rec__bpm {
+  font-size: var(--text-xs);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.wgt-rec__score {
+  font-size: var(--text-xs);
+  color: var(--color-green-500);
+  flex-shrink: 0;
+}
+
+/* --- Camelot wheel (now playing key display) --- */
+
+.wgt-wheel-wrap {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-2) 0;
+  flex-shrink: 0;
+}
+
+.wgt-rec__add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.wgt-rec__add:hover {
+  border-color: var(--color-amber-500);
+  color: var(--color-amber-500);
+}
+
+/* --- Set list --- */
+
+.wgt-setlist {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+}
+
+.wgt-setlist__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.wgt-setlist__item:hover {
+  background: var(--color-bg-surface);
+}
+
+.wgt-setlist__num {
+  width: 16px;
+  font-size: var(--text-xs);
+  color: var(--color-amber-500);
+  flex-shrink: 0;
+}
+
+.wgt-setlist__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wgt-setlist__rm {
+  display: flex;
+  border: none;
+  background: none;
+  color: var(--color-text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.wgt-setlist__rm:hover {
+  color: var(--color-crimson-500);
+}
+
+/* --- Misc --- */
+
+.wgt-empty {
+  font-size: var(--text-xs);
+  padding: var(--space-3);
+  text-align: center;
+}
+
+.wgt-error {
+  font-size: var(--text-xs);
+  color: var(--color-crimson-500);
+  background: var(--color-crimson-glow);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.wgt-spin {
+  animation: wgt-rotate 1s linear infinite;
+  color: var(--color-amber-500);
+}
+
+@keyframes wgt-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

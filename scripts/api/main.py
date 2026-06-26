@@ -129,6 +129,8 @@ _default_origins = [
     "https://localhost:5173",
     "http://127.0.0.1:5173",
     "https://127.0.0.1:5173",
+
+    "https://chunduri-aditya.github.io",   # GitHub Pages build (static frontend → local API)
 ]
 app.add_middleware(
     CORSMiddleware,
@@ -138,6 +140,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def _allow_private_network(request: Request, call_next):
+    """
+    Chrome Private Network Access: an HTTPS page (GitHub Pages) calling a
+    local server sends a preflight with Access-Control-Request-Private-Network.
+    Approve it so the static frontend can reach the local API.
+    """
+    response = await call_next(request)
+    if (
+        request.method == "OPTIONS"
+        and request.headers.get("access-control-request-private-network", "").lower() == "true"
+    ):
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -146,7 +164,7 @@ app.include_router(router)
 
 # ---------------------------------------------------------------------------
 # Serve static HTML UI at root (INTERNAL/EXPERIMENTAL — not the primary UI)
-# Primary UI: Streamlit on port 8501 — see GUIDE.md
+# Primary UI: Streamlit on port 8501 — see docs/GUIDE.md
 # ---------------------------------------------------------------------------
 
 

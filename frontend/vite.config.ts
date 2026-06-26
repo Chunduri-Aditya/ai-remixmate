@@ -4,6 +4,13 @@ import path from 'path'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test-setup.ts'],
+  },
+  // For GitHub Pages project sites set VITE_BASE=/ai-remixmate/ at build time
+  base: process.env.VITE_BASE || '/',
   plugins: [react()],
   resolve: {
     alias: {

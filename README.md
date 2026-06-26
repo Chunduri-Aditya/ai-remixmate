@@ -20,24 +20,51 @@ The infrastructure: FastAPI backend with an async job queue, SQLite persistence,
 
 ## Quick start
 
+See [PREREQUISITES.md](PREREQUISITES.md) for full system requirements (Python 3.10+, Node 18+, ffmpeg).
+
 ```bash
 git clone https://github.com/Chunduri-Aditya/ai-remixmate.git
 cd ai-remixmate
-python -m venv remix-env && source remix-env/bin/activate
-pip install -e ".[dev]"
-./start.sh
+python -m venv remix-env && source remix-env/bin/activate   # optional but recommended
+./start.sh          # installs/updates packages + starts API + React UI
 ```
 
-You'll need `ffmpeg` (`brew install ffmpeg` on macOS, `apt install ffmpeg` on Debian/Ubuntu).
+Faster restarts (skip package reinstall):
+
+```bash
+./start.sh --skip-setup
+```
 
 Then open:
-- **Web UI** → <http://localhost:8501>
+- **React UI** → <http://localhost:5173>
+- **DJ Widget (floating)** → <http://localhost:5173/widget>
+- **Downloads** → <http://localhost:5173/operations>
 - **API docs** → <http://localhost:8000/docs>
+- **Legacy Streamlit UI** → `./start.sh ui` → <http://localhost:8501>
 
 Docker also works:
 ```bash
 docker compose up
 ```
+
+### Floating DJ widget (GitHub Pages + local API)
+
+The React frontend deploys to GitHub Pages and talks to your **locally
+running** backend — the 60 GB library never leaves your machine.
+
+```bash
+./start.sh api          # start only the API on http://localhost:8000
+```
+
+Then open <https://chunduri-aditya.github.io/ai-remixmate/widget> in
+Chrome/Edge and hit the pop-out button — the widget becomes a small
+**always-on-top floating window** (Document Picture-in-Picture) that shows
+harmonic/BPM-matched next-track recommendations while you mix. Queue tracks
+into the set list and suggestions always follow the last queued song.
+
+One-time setup: repo **Settings → Pages → Source: "GitHub Actions"**. The
+[`pages.yml`](.github/workflows/pages.yml) workflow builds and deploys the
+frontend on every push to `main`.
 
 ---
 

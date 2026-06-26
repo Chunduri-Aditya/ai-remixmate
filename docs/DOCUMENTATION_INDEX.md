@@ -109,7 +109,7 @@ API: `POST /dj-remix` endpoint
 
 ### How do I process my entire library overnight?
 See: `REMIXMATE_QUICK_REFERENCE.md` → "Getting Started"
-Command: `./run_overnight.sh`
+Command: `./bin/run_overnight.sh`
 
 ### What's the difference between different Demucs models?
 See: `AI_REMIXMATE_COMPREHENSIVE_DOCUMENTATION.md` → "Performance Tuning" → "Stem Separation Models"
@@ -131,7 +131,7 @@ See: `AI_REMIXMATE_COMPREHENSIVE_DOCUMENTATION.md` → "gpu.py" section
 Supported: Apple Silicon MPS, NVIDIA CUDA, CPU fallback
 
 ### How do I check if everything is installed correctly?
-Command: `bash check.sh`
+Command: `bash bin/check.sh`
 This validates Python, dependencies, system tools, GPU, project structure, config, library, ports, and syntax.
 
 ---
@@ -393,7 +393,7 @@ Streamlit UI (app.py)
 - **Dependencies**: See `requirements.txt` and `pyproject.toml`
 
 ### Validation Tools
-- **Readiness Check**: `bash check.sh` validates entire environment
+- **Readiness Check**: `bash bin/check.sh` validates entire environment
 - **Health Endpoints**: `/health`, `/health/live`, `/health/ready`
 - **API Testing**: `curl` examples in quick reference
 

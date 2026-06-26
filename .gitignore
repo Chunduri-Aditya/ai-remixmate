@@ -36,6 +36,10 @@ build/
 *.egg
 .eggs/
 
+# ── JavaScript dependencies ──────────────────────────────────
+node_modules/
+frontend/node_modules/
+
 # ── Test cache ───────────────────────────────────────────────
 .pytest_cache/
 .coverage

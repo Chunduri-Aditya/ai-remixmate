@@ -1,0 +1,88 @@
+/* ============================================================
+   StemsPlayerRow — inline stem playback strip inside Library Atlas.
+   ============================================================ */
+
+.spr-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+
+.spr-stem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.spr-stem__label {
+  width: 52px;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  text-transform: lowercase;
+}
+
+/* Minimal audio progress bar */
+.spr-stem__audio-wrap {
+  flex: 1;
+  position: relative;
+  height: 28px;
+  background: var(--color-bg-overlay);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.spr-stem__progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+  transition: width 0.1s linear;
+}
+
+.spr-stem__time {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+  pointer-events: none;
+}
+
+/* Mute toggle button */
+.spr-mute-btn {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.spr-mute-btn:hover { border-color: var(--color-text-muted); color: var(--color-text-primary); }
+
+.spr-mute-btn--muted {
+  background: var(--color-crimson-glow);
+  border-color: var(--color-crimson-500);
+  color: var(--color-crimson-500);
+}
+
+/* Stem color dots */
+.spr-stem__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
