@@ -658,3 +658,253 @@ class TestDJRenderer:
         full = engine.render(a, b, plan, full_output=True)
         trans_only = engine.render(a, b, plan, full_output=False)
         assert len(trans_only) < len(full)
+
+
+# ---------------------------------------------------------------------------
+# Shared helper for Gap 1A/1B tests — mirrors TestDJRenderer._make_structure
+# but lives at module scope so both test classes can use it without inheriting
+# the @pytest.mark.dj_analysis marker unnecessarily.
+# ---------------------------------------------------------------------------
+
+def _make_structure_for_render(bpm: float, total_bars: int = 32):
+    """Build a minimal SongStructure with labelled sections for render tests."""
+    from scripts.core.dj_engine import SongStructure, Section
+    bar_sec = 60.0 / bpm * 4
+    bars = [(i * bar_sec, (i + 1) * bar_sec) for i in range(total_bars)]
+    sections = [
+        Section("intro",  0,  8,  bars[0][0],   bars[7][1],  0.3, 0.3),
+        Section("verse",  8,  16, bars[8][0],   bars[15][1], 0.6, 0.5),
+        Section("chorus", 16, 24, bars[16][0],  bars[23][1], 0.9, 0.7),
+        Section("outro",  24, 32, bars[24][0],  bars[31][1], 0.3, 0.3),
+    ]
+    return SongStructure(bpm=bpm, duration=total_bars * bar_sec,
+                         bars=bars, sections=sections)
+
+
+def _write_wav(path, audio: np.ndarray, sr: int) -> None:
+    """Write a mono float32 array as a WAV file."""
+    import soundfile as sf
+    sf.write(str(path), audio, sr, subtype="FLOAT")
+
+
+# ---------------------------------------------------------------------------
+# Gap 1A — Per-stem LUFS normalization
+# ---------------------------------------------------------------------------
+
+@pytest.mark.dj_analysis
+class TestStemLufsNormalization:
+    """
+    Tests for Gap 1A: normalize_stems_to_target() is called before
+    the crossfade loop in render_stem_blend(), preventing loud stems
+    from overpowering softer ones.
+    """
+
+    def _make_stem_dirs(self, tmp_path, sr: int, bpm: float, dur: float,
+                        gain_a: float = 1.0, gain_b: float = 1.0):
+        """
+        Create two stem directories (song A and song B) with synthetic audio.
+
+        gain_a / gain_b let us inject a deliberate level imbalance to verify
+        that normalization corrects it.  All four stems share the same content
+        so their similarity score will be high (> 0.75), forcing the extended
+        blend path which exercises the most code.
+        """
+        dir_a = tmp_path / "stems_a"
+        dir_b = tmp_path / "stems_b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+
+        base = _make_audio(duration=dur, bpm=bpm, sr=sr)
+        for stem in ("vocals", "drums", "bass", "other"):
+            _write_wav(dir_a / f"{stem}.wav", base * gain_a, sr)
+            _write_wav(dir_b / f"{stem}.wav", base * gain_b, sr)
+
+        return dir_a, dir_b
+
+    def test_normalization_prevents_clipping_with_loud_stems(self, tmp_path):
+        """
+        Stems at gain=0.9 (just below 0 dBFS) should not clip after mixing
+        four of them together. Without per-stem LUFS normalization the sum of
+        four near-full-scale stems would clip hard.
+        """
+        from scripts.core.dj_engine import DJEngine
+        from scripts.core.dj_analysis import plan_transition
+
+        sr, bpm, dur = 22050, 120.0, 20.0
+        dir_a, dir_b = self._make_stem_dirs(tmp_path, sr, bpm, dur,
+                                             gain_a=0.9, gain_b=0.9)
+        track_a = _make_audio(duration=dur, bpm=bpm, sr=sr)
+        track_b = _make_audio(duration=dur, bpm=bpm, sr=sr)
+        struct_a = _make_structure_for_render(bpm)
+        struct_b = _make_structure_for_render(bpm)
+        plan = plan_transition(struct_a, struct_b, transition_bars=8)
+
+        engine = DJEngine(sr=sr)
+        mix = engine.render_stem_blend(
+            track_a, track_b, plan,
+            stems_dir_a=dir_a, stems_dir_b=dir_b,
+            full_output=False,
+        )
+
+        assert mix.dtype == np.float32
+        assert not np.isnan(mix).any(), "Output contains NaN"
+        assert not np.isinf(mix).any(), "Output contains Inf"
+        assert np.abs(mix).max() <= 1.0 + 1e-4, \
+            f"Output clips: max abs = {np.abs(mix).max():.4f}"
+
+    def test_level_imbalance_is_corrected(self, tmp_path):
+        """
+        A Song B stem that is 10× louder than Song A should produce a mix
+        whose first and second halves are within 12 dB of each other —
+        rather than the raw +20 dB jump that would happen without normalization.
+        """
+        from scripts.core.dj_engine import DJEngine
+        from scripts.core.dj_analysis import plan_transition
+
+        sr, bpm, dur = 22050, 120.0, 20.0
+        dir_a, dir_b = self._make_stem_dirs(tmp_path, sr, bpm, dur,
+                                             gain_a=0.1, gain_b=1.0)
+        track_a = _make_audio(duration=dur, bpm=bpm, sr=sr)
+        track_b = _make_audio(duration=dur, bpm=bpm, sr=sr)
+        struct_a = _make_structure_for_render(bpm)
+        struct_b = _make_structure_for_render(bpm)
+        plan = plan_transition(struct_a, struct_b, transition_bars=8)
+
+        engine = DJEngine(sr=sr)
+        mix = engine.render_stem_blend(
+            track_a, track_b, plan,
+            stems_dir_a=dir_a, stems_dir_b=dir_b,
+            full_output=False,
+        )
+
+        n = len(mix)
+        rms_first  = float(np.sqrt(np.mean(mix[:n // 2] ** 2)) + 1e-10)
+        rms_second = float(np.sqrt(np.mean(mix[n // 2:] ** 2)) + 1e-10)
+        level_diff_db = 20 * np.log10(rms_second / rms_first)
+
+        assert abs(level_diff_db) <= 12.0, (
+            f"Level jump too large after normalization: {level_diff_db:+.1f} dB "
+            f"(first half RMS {rms_first:.4f}, second half RMS {rms_second:.4f}). "
+            f"Per-stem LUFS normalization may not be applied."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Gap 1B — Bass stem swap-point handoff
+# ---------------------------------------------------------------------------
+
+@pytest.mark.dj_analysis
+class TestBassSwap:
+    """
+    Tests for Gap 1B: the bass stem uses a hard swap-point envelope instead
+    of the generic similarity-based crossfade. Song A's bass exits by the
+    swap sample; Song B's bass enters clean from that same point.
+    """
+
+    def test_bass_exits_before_midpoint(self, tmp_path):
+        """
+        With only a bass stem populated (all other stems silent), Song A's
+        contribution should be near-zero in the second half of the transition
+        window, confirming that the swap envelope cuts A's bass early.
+        """
+        from scripts.core.dj_engine import DJEngine
+        from scripts.core.dj_analysis import plan_transition
+
+        sr, bpm, dur = 22050, 120.0, 20.0
+        dir_a = tmp_path / "stems_a"
+        dir_b = tmp_path / "stems_b"
+        dir_a.mkdir(); dir_b.mkdir()
+
+        silence = np.zeros(int(sr * dur), dtype=np.float32)
+
+        # Song A: only bass has content; everything else is silence
+        bass_a = _make_audio(duration=dur, bpm=bpm, freq=80.0, sr=sr) * 0.5
+        _write_wav(dir_a / "bass.wav",   bass_a,  sr)
+        _write_wav(dir_a / "vocals.wav", silence, sr)
+        _write_wav(dir_a / "drums.wav",  silence, sr)
+        _write_wav(dir_a / "other.wav",  silence, sr)
+
+        # Song B: all stems silent (so B's fade-in contributes nothing)
+        _write_wav(dir_b / "bass.wav",   silence, sr)
+        _write_wav(dir_b / "vocals.wav", silence, sr)
+        _write_wav(dir_b / "drums.wav",  silence, sr)
+        _write_wav(dir_b / "other.wav",  silence, sr)
+
+        track_a = bass_a.copy()
+        track_b = silence.copy()
+
+        struct_a = _make_structure_for_render(bpm)
+        struct_b = _make_structure_for_render(bpm)
+        plan = plan_transition(struct_a, struct_b, transition_bars=8)
+
+        engine = DJEngine(sr=sr)
+        mix = engine.render_stem_blend(
+            track_a, track_b, plan,
+            stems_dir_a=dir_a, stems_dir_b=dir_b,
+            full_output=False,
+        )
+
+        n = len(mix)
+        # First quarter should have energy (A's bass is playing)
+        rms_first_quarter = float(np.sqrt(np.mean(mix[:n // 4] ** 2)))
+        # Final quarter should be near-silent (A's bass has been swapped out)
+        rms_last_quarter  = float(np.sqrt(np.mean(mix[3 * n // 4:] ** 2)))
+
+        assert rms_first_quarter > 1e-4, \
+            "Expected Song A bass energy in the first quarter of the transition"
+        assert rms_last_quarter < rms_first_quarter * 0.1, (
+            f"Song A bass should be near-silent in the final quarter after swap. "
+            f"First-quarter RMS: {rms_first_quarter:.5f}, "
+            f"last-quarter RMS: {rms_last_quarter:.5f}"
+        )
+
+
+@pytest.mark.dj_analysis
+class TestPitchShift:
+    """Tests for pitch_shift_audio() and TransitionPlan.suggested_pitch_shift."""
+
+    def test_pitch_shift_audio_semitone_up(self):
+        """Shifting a 440 Hz sine by +12 semitones should peak near 880 Hz."""
+        from scripts.core.key_detection import pitch_shift_audio
+
+        sr = 22050
+        duration = 1.0
+        freq = 440.0
+        t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+        audio = np.sin(2 * np.pi * freq * t).astype(np.float32)
+
+        shifted = pitch_shift_audio(audio, sr, semitones=12.0)
+
+        freqs = np.fft.rfftfreq(len(shifted), d=1.0 / sr)
+        magnitudes = np.abs(np.fft.rfft(shifted))
+        peak_freq = freqs[np.argmax(magnitudes)]
+
+        assert abs(peak_freq - 880.0) < 20.0, (
+            f"Expected peak near 880 Hz after +12 semitones, got {peak_freq:.1f} Hz"
+        )
+
+    def test_transition_plan_has_pitch_shift(self):
+        """plan_transition() should populate suggested_pitch_shift as a float."""
+        from scripts.core.dj_analysis import plan_transition
+
+        struct_a = _make_structure_for_render(120.0)
+        struct_b = _make_structure_for_render(120.0)
+        struct_a.camelot = "8B"   # C major
+        struct_b.camelot = "10B"  # D major
+
+        plan = plan_transition(struct_a, struct_b, transition_bars=8)
+
+        assert isinstance(plan.suggested_pitch_shift, float)
+
+    def test_pitch_shift_zero_when_same_key(self):
+        """Same Camelot key for both songs should produce suggested_pitch_shift == 0.0."""
+        from scripts.core.dj_analysis import plan_transition
+
+        struct_a = _make_structure_for_render(120.0)
+        struct_b = _make_structure_for_render(120.0)
+        struct_a.camelot = "8B"
+        struct_b.camelot = "8B"
+
+        plan = plan_transition(struct_a, struct_b, transition_bars=8)
+
+        assert plan.suggested_pitch_shift == 0.0

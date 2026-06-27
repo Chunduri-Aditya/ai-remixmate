@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import logging
 import math
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -51,6 +52,10 @@ from scripts.core.dj_analysis import (
     analyze_structure,
     plan_transition,
 )
+
+# Mastering utilities — used for per-stem LUFS normalization in render_stem_blend()
+from scripts.core.mastering import normalize_stems_to_target
+from scripts.core.key_detection import pitch_shift_audio
 
 # _analyze_impl was renamed to analyze_structure during the dj_analysis module split.
 # This alias preserves backward compatibility for all existing callers.
@@ -867,6 +872,7 @@ class DJEngine:
         bridge_beats: Optional[list] = None,
         bridge_gain: float = 0.38,
         transition_effect: str = "auto",
+        stems_dirs: Optional[list] = None,
     ) -> np.ndarray:
         """
         Render a continuous N-song DJ mix chain.
@@ -883,6 +889,19 @@ class DJEngine:
                  plans[i] describes the transition from tracks[i] → tracks[i+1]
         bridge_beats : list of N-1 optional beat arrays (or None to skip beats)
         bridge_gain  : peak gain of each bridge beat layer
+        stems_dirs   : optional list of N Path-like objects (one per track).
+                       When both stems_dirs[i] and stems_dirs[i+1] are non-None
+                       and the directories exist, the transition window for pair
+                       (i, i+1) is rendered via render_stem_blend() which applies
+                       per-stem LUFS normalization and the bass-swap envelope
+                       (Gaps 1A and 1B).
+
+                       Note: render_stem_blend() operates on the *original* (un-
+                       pre-stretched) tracks so it can time-stretch stems to match
+                       plan.tempo_shift_ratio.  For N>2 chains where bpm_a ≠ bpm_1
+                       the resulting transition window is resampled to fit the
+                       chain's pre-stretched timeline — a minor quality trade-off
+                       that is inaudible over a short (8–32 bar) transition.
 
         Returns
         -------
@@ -998,14 +1017,41 @@ class DJEngine:
                 _apply_filter(a_trans[swap_s:], a_hp_b, a_hp_a),
             ])
 
-            # Sequential crossfade
-            tail   = trans_s - mid
-            a_env  = np.ones(trans_s, dtype=np.float32)
-            a_env[mid:] = np.cos(np.linspace(0.0, np.pi / 2.0, tail, dtype=np.float32))
-            b_env  = np.zeros(trans_s, dtype=np.float32)
-            b_env[mid:] = np.sin(np.linspace(0.0, np.pi / 2.0, tail, dtype=np.float32))
-
-            mixed = a_trans_final * a_env + b_trans_proc * b_env
+            # ── Transition: stem-blend (Gap 1C) or sequential crossfade ────
+            _use_stems = (
+                stems_dirs is not None
+                and stems_dirs[i] is not None
+                and stems_dirs[i + 1] is not None
+                and Path(stems_dirs[i]).is_dir()
+                and Path(stems_dirs[i + 1]).is_dir()
+            )
+            if _use_stems:
+                # render_stem_blend operates on the original tracks so it can
+                # time-stretch stems via plan.tempo_shift_ratio.
+                _blend = self.render_stem_blend(
+                    tracks[i], tracks[i + 1], plan,
+                    stems_dir_a=stems_dirs[i],
+                    stems_dir_b=stems_dirs[i + 1],
+                    full_output=False,
+                )
+                # Fit to chain's pre-stretched transition window length.
+                # For 2-song chains and same-BPM songs this is a no-op.
+                if len(_blend) != trans_s:
+                    ratio_fit = len(_blend) / max(trans_s, 1)
+                    _blend = _time_stretch(_blend, ratio_fit)
+                mixed = _pad_or_trim(_blend, trans_s).astype(np.float32)
+                log.info(
+                    "Chain [%d→%d]: stem-blend transition (Gap 1C, %d samples)",
+                    i + 1, i + 2, trans_s,
+                )
+            else:
+                # Sequential crossfade (original path)
+                tail   = trans_s - mid
+                a_env  = np.ones(trans_s, dtype=np.float32)
+                a_env[mid:] = np.cos(np.linspace(0.0, np.pi / 2.0, tail, dtype=np.float32))
+                b_env  = np.zeros(trans_s, dtype=np.float32)
+                b_env[mid:] = np.sin(np.linspace(0.0, np.pi / 2.0, tail, dtype=np.float32))
+                mixed = a_trans_final * a_env + b_trans_proc * b_env
 
             # Bridge beat (optional)
             bb = bridge_beats[i]
@@ -1151,6 +1197,45 @@ class DJEngine:
             else:
                 stretched_b[s] = None
 
+        # ── Pitch shift Song B to align keys (Gap 1B) ─────────────────────
+        ps = plan.suggested_pitch_shift
+        if ps != 0.0 and abs(ps) <= 3:
+            log.info("Applying pitch shift of %+.1f semitones to Song B", ps)
+            track_b_stretched = pitch_shift_audio(track_b_stretched, sr, ps)
+            for s in stretched_b:
+                if stretched_b[s] is not None:
+                    stretched_b[s] = pitch_shift_audio(stretched_b[s], sr, ps)
+
+        # ── Per-stem LUFS normalization (Gap 1A) ──────────────────────────
+        #
+        # Normalize every available stem to −20 LUFS before the crossfade loop.
+        # −20 LUFS leaves 6 dB of headroom for summing 4 stems (vocals + drums
+        # + bass + other) before the final master_mix() brings the whole mix to
+        # −14 LUFS. Without this step, a loud bass stem from Song B would crush
+        # Song A's softer stems — neither Spotify nor Apple do this per-stem.
+        #
+        # normalize_stems_to_target() expects {stem_name: (audio, sr)} dicts.
+        stems_a_input = {
+            s: (stems_a[s], sr)
+            for s in _STEM_NAMES if stems_a.get(s) is not None
+        }
+        stems_b_input = {
+            s: (stretched_b[s], sr)
+            for s in _STEM_NAMES if stretched_b.get(s) is not None
+        }
+
+        if stems_a_input:
+            normed_a = normalize_stems_to_target(stems_a_input, target_lufs=-20.0)
+            for s in normed_a:
+                stems_a[s] = normed_a[s]
+            log.info("Per-stem LUFS normalization applied to Song A stems (target −20 LUFS)")
+
+        if stems_b_input:
+            normed_b = normalize_stems_to_target(stems_b_input, target_lufs=-20.0)
+            for s in normed_b:
+                stretched_b[s] = normed_b[s]
+            log.info("Per-stem LUFS normalization applied to Song B stems (target −20 LUFS)")
+
         # ── Compute transition boundaries ─────────────────────────────────
         exit_sample_a = int(plan.exit_time_a * sr)
         trans_samples = int(plan.transition_seconds * sr)
@@ -1186,7 +1271,38 @@ class DJEngine:
             stem_b_full = stretched_b.get(s)
             sim = similarities[s]
 
-            fade_out, fade_in = _stem_crossfade_curves(trans_samples, sim)
+            # ── Bass stem: explicit swap-point handoff (Gap 1B) ───────────
+            #
+            # The bass stem gets special treatment instead of the generic
+            # similarity-based crossfade. Song A's bass fades to zero by the
+            # swap point; Song B's bass enters clean from zero at that same
+            # point. This prevents bass clash — the most common artifact in
+            # automated DJ mixes — and mirrors what a human DJ does manually
+            # with a 3-band mixer (kill A's bass, release B's bass at bar 8).
+            #
+            # swap_sample maps plan.eq.bass_swap_bar to a sample offset inside
+            # the transition window using the same formula as render().
+            if s == "bass":
+                swap_sample = int(
+                    plan.eq.bass_swap_bar
+                    * (trans_samples / max(plan.transition_bars, 1))
+                )
+                swap_sample = max(1, min(swap_sample, trans_samples - 1))
+
+                fade_out = np.concatenate([
+                    np.linspace(1.0, 0.0, swap_sample, dtype=np.float32),
+                    np.zeros(trans_samples - swap_sample, dtype=np.float32),
+                ])
+                fade_in = np.concatenate([
+                    np.zeros(swap_sample, dtype=np.float32),
+                    np.linspace(0.0, 1.0, trans_samples - swap_sample, dtype=np.float32),
+                ])
+                log.info(
+                    "Bass swap: A exits at sample %d (%.1f s), B enters clean",
+                    swap_sample, swap_sample / sr,
+                )
+            else:
+                fade_out, fade_in = _stem_crossfade_curves(trans_samples, sim)
 
             # ── Stem A segment: exit window ───────────────────────────────
             if stem_a_full is not None:

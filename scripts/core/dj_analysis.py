@@ -208,6 +208,9 @@ class TransitionPlan:
     # Harmonic compatibility (0.0–1.0 from Camelot wheel; -1.0 = unknown)
     harmonic_score: float = -1.0
 
+    # Semitones to shift Song B to align with Song A's key (0.0 = no shift)
+    suggested_pitch_shift: float = 0.0
+
     def __str__(self) -> str:
         return (
             f"TransitionPlan: "
@@ -556,6 +559,21 @@ def plan_transition(
         except Exception as exc:
             log.debug("Harmonic score computation failed: %s", exc)
 
+    # ── Pitch shift suggestion (Camelot-based) ──────────────────────────────
+    suggested_pitch_shift = 0.0
+    if song_a.camelot and song_b.camelot:
+        try:
+            from scripts.core.key_detection import pitch_shift_for_camelot
+            suggested_pitch_shift = float(
+                pitch_shift_for_camelot(song_b.camelot, song_a.camelot)
+            )
+            log.info(
+                "Suggested pitch shift: %+.1f semitones (%s→%s)",
+                suggested_pitch_shift, song_b.camelot, song_a.camelot,
+            )
+        except Exception as exc:
+            log.debug("Pitch shift suggestion failed: %s", exc)
+
     plan = TransitionPlan(
         exit_bar_a=exit_bar,
         exit_time_a=exit_time,
@@ -568,6 +586,7 @@ def plan_transition(
         tempo_shift_ratio=ratio,
         eq=eq,
         harmonic_score=harmonic_score,
+        suggested_pitch_shift=suggested_pitch_shift,
     )
 
     log.info(str(plan))

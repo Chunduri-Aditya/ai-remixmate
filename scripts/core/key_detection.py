@@ -577,3 +577,25 @@ def pitch_shift_for_camelot(source: str, target: str) -> int:
 
     except (ValueError, KeyError):
         return 0
+
+
+def pitch_shift_audio(audio: np.ndarray, sr: int, semitones: float) -> np.ndarray:
+    """
+    Pitch-shift audio by a given number of semitones without changing tempo.
+
+    Args:
+        audio:    Mono or stereo float32 audio array.
+        sr:       Sample rate in Hz.
+        semitones: Semitones to shift (positive = up, negative = down).
+
+    Returns:
+        Pitch-shifted audio as float32.
+    """
+    import librosa
+
+    if semitones == 0.0:
+        return audio.astype(np.float32)
+
+    log.info("Applying pitch shift: %+.1f semitones", semitones)
+    shifted = librosa.effects.pitch_shift(audio, sr=sr, n_steps=semitones)
+    return shifted.astype(np.float32)
