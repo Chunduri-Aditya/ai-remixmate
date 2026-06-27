@@ -666,16 +666,25 @@ class TestDJRenderer:
 # the @pytest.mark.dj_analysis marker unnecessarily.
 # ---------------------------------------------------------------------------
 
-def _make_structure_for_render(bpm: float, total_bars: int = 32):
-    """Build a minimal SongStructure with labelled sections for render tests."""
+def _make_structure_for_render(bpm: float, total_bars: int = 10):
+    """
+    Build a minimal SongStructure with proportional labelled sections.
+
+    Default total_bars=10 at 120 BPM → duration=20 s, matching the standard
+    test audio length used in TestStemLufsNormalization and TestBassSwap.
+    Sections are placed at quarter-boundaries so plan_transition() picks an
+    exit point within the actual audio (not past the end like the old
+    hardcoded 32-bar / 64-second structure did).
+    """
     from scripts.core.dj_engine import SongStructure, Section
     bar_sec = 60.0 / bpm * 4
     bars = [(i * bar_sec, (i + 1) * bar_sec) for i in range(total_bars)]
+    q = max(1, total_bars // 4)          # quarter-length in bars
+    outro_start = total_bars - q         # final quarter is the outro
     sections = [
-        Section("intro",  0,  8,  bars[0][0],   bars[7][1],  0.3, 0.3),
-        Section("verse",  8,  16, bars[8][0],   bars[15][1], 0.6, 0.5),
-        Section("chorus", 16, 24, bars[16][0],  bars[23][1], 0.9, 0.7),
-        Section("outro",  24, 32, bars[24][0],  bars[31][1], 0.3, 0.3),
+        Section("intro",  0,           q,           bars[0][0],           bars[q - 1][1],           0.3, 0.3),
+        Section("chorus", q,           outro_start, bars[q][0],           bars[outro_start - 1][1], 0.9, 0.7),
+        Section("outro",  outro_start, total_bars,  bars[outro_start][0], bars[total_bars - 1][1],  0.3, 0.3),
     ]
     return SongStructure(bpm=bpm, duration=total_bars * bar_sec,
                          bars=bars, sections=sections)
@@ -817,8 +826,10 @@ class TestBassSwap:
 
         silence = np.zeros(int(sr * dur), dtype=np.float32)
 
-        # Song A: only bass has content; everything else is silence
-        bass_a = _make_audio(duration=dur, bpm=bpm, freq=80.0, sr=sr) * 0.5
+        # Song A: only bass has content; everything else is silence.
+        # Gain 0.8 ensures the normalized stem has a clearly measurable RMS
+        # in the first quarter of the transition window.
+        bass_a = _make_audio(duration=dur, bpm=bpm, freq=80.0, sr=sr) * 0.8
         _write_wav(dir_a / "bass.wav",   bass_a,  sr)
         _write_wav(dir_a / "vocals.wav", silence, sr)
         _write_wav(dir_a / "drums.wav",  silence, sr)
@@ -833,9 +844,14 @@ class TestBassSwap:
         track_a = bass_a.copy()
         track_b = silence.copy()
 
+        # _make_structure_for_render(bpm) with default total_bars=10 gives
+        # duration=20 s at 120 BPM.  plan_transition picks exit_time_a at the
+        # outro start (bar 7 ≈ 14 s), which is well within the 20 s audio.
+        # transition_bars=4 → transition_seconds=8 s → window 14–22 s;
+        # the last 2 s (20–22 s) are padded, but the first 6 s have real audio.
         struct_a = _make_structure_for_render(bpm)
         struct_b = _make_structure_for_render(bpm)
-        plan = plan_transition(struct_a, struct_b, transition_bars=8)
+        plan = plan_transition(struct_a, struct_b, transition_bars=4)
 
         engine = DJEngine(sr=sr)
         mix = engine.render_stem_blend(
@@ -845,13 +861,20 @@ class TestBassSwap:
         )
 
         n = len(mix)
-        # First quarter should have energy (A's bass is playing)
+        # With transition_bars=4 at 120 BPM, bass_swap_bar=2 (midpoint).
+        # swap_sample = 2/4 * trans_samples = n//2.
+        # fade_out envelope: linspace(1→0) over first n//2, then zeros.
+        #
+        # First quarter (0 → n//4): fade_out ≈ 1→0.5 → A's bass is audible.
+        # Last quarter (3*n//4 → n): fade_out = 0 → A's bass is silent.
         rms_first_quarter = float(np.sqrt(np.mean(mix[:n // 4] ** 2)))
-        # Final quarter should be near-silent (A's bass has been swapped out)
         rms_last_quarter  = float(np.sqrt(np.mean(mix[3 * n // 4:] ** 2)))
 
-        assert rms_first_quarter > 1e-4, \
-            "Expected Song A bass energy in the first quarter of the transition"
+        assert rms_first_quarter > 1e-4, (
+            f"Expected Song A bass energy in the first quarter (fade_out ≈ 1→0.5). "
+            f"Got RMS = {rms_first_quarter:.6f}. "
+            f"Check that exit_sample_a is within the audio duration."
+        )
         assert rms_last_quarter < rms_first_quarter * 0.1, (
             f"Song A bass should be near-silent in the final quarter after swap. "
             f"First-quarter RMS: {rms_first_quarter:.5f}, "
@@ -908,3 +931,85 @@ class TestPitchShift:
         plan = plan_transition(struct_a, struct_b, transition_bars=8)
 
         assert plan.suggested_pitch_shift == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Gap 2B — SSM-novelty phrase boundary detection
+# ---------------------------------------------------------------------------
+
+@pytest.mark.dj_analysis
+class TestSSMBoundaries:
+    """
+    Tests for Gap 2B: _detect_phrase_boundaries() uses a self-similarity
+    matrix checkerboard novelty approach to locate musical phrase boundaries.
+    """
+
+    def test_phrase_boundaries_returns_list(self):
+        """_detect_phrase_boundaries on 30s synthetic audio must return a list."""
+        from scripts.core.dj_analysis import _detect_phrase_boundaries
+
+        audio = _make_audio(duration=30.0, bpm=128.0)
+        result = _detect_phrase_boundaries(audio, SR, bpm=128.0)
+
+        assert isinstance(result, list), (
+            f"Expected list, got {type(result).__name__}"
+        )
+
+    def test_phrase_boundaries_values_are_floats(self):
+        """All returned boundary times must be float seconds within the clip."""
+        from scripts.core.dj_analysis import _detect_phrase_boundaries
+
+        duration = 30.0
+        audio = _make_audio(duration=duration, bpm=128.0)
+        result = _detect_phrase_boundaries(audio, SR, bpm=128.0)
+
+        for b in result:
+            assert isinstance(b, float), f"Boundary {b!r} is not a float"
+            assert 0.0 <= b <= duration, f"Boundary {b:.2f} outside audio duration"
+
+    def test_song_structure_has_phrase_boundaries(self):
+        """analyze_structure on synthetic audio must populate phrase_boundaries as a list."""
+        from scripts.core.dj_analysis import analyze_structure
+
+        audio = _make_audio(duration=30.0, bpm=128.0)
+        struct = analyze_structure(audio, SR)
+
+        assert hasattr(struct, "phrase_boundaries"), (
+            "SongStructure is missing the phrase_boundaries field"
+        )
+        assert isinstance(struct.phrase_boundaries, list), (
+            f"phrase_boundaries should be a list, got {type(struct.phrase_boundaries).__name__}"
+        )
+
+    def test_transition_plan_uses_boundaries(self):
+        """
+        When phrase_boundaries are present, plan.exit_time_a must be a valid
+        positive float — confirming the SSM refinement branch executed without error.
+        """
+        from scripts.core.dj_analysis import plan_transition, SongStructure, Section
+
+        bpm = 120.0
+        total_bars = 32
+        bar_sec = 60.0 / bpm * 4
+        duration = total_bars * bar_sec
+        bars = [(i * bar_sec, (i + 1) * bar_sec) for i in range(total_bars)]
+        sections = [
+            Section("intro",  0,  4, bars[0][0],  bars[3][1],  0.3, 0.3),
+            Section("outro", 24, 32, bars[24][0], bars[31][1], 0.3, 0.3),
+        ]
+
+        struct_a = SongStructure(bpm=bpm, duration=duration, bars=bars, sections=sections)
+        struct_b = SongStructure(bpm=bpm, duration=duration, bars=bars, sections=sections)
+
+        # Inject synthetic boundaries so the refinement branch fires
+        struct_a.phrase_boundaries = [bar_sec * 8, bar_sec * 16, bar_sec * 22]
+        struct_b.phrase_boundaries = [bar_sec * 8, bar_sec * 16]
+
+        plan = plan_transition(struct_a, struct_b)
+
+        assert isinstance(plan.exit_time_a, float), (
+            f"exit_time_a should be float, got {type(plan.exit_time_a).__name__}"
+        )
+        assert plan.exit_time_a > 0, (
+            f"exit_time_a should be > 0, got {plan.exit_time_a}"
+        )

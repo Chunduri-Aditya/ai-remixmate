@@ -116,6 +116,9 @@ class SongStructure:
         default=None, compare=False, repr=False,
     )
 
+    # SSM-novelty phrase boundary times (seconds); populated by analyze_structure
+    phrase_boundaries: list = field(default_factory=list)
+
     @property
     def total_bars(self) -> int:
         return len(self.bars)
@@ -313,6 +316,11 @@ def analyze_structure(audio: np.ndarray, sr: int = 44100) -> SongStructure:
         sections=sections,
     )
 
+    # ── Phrase boundaries (SSM novelty) ──────────────────────────────
+    struct.phrase_boundaries = _detect_phrase_boundaries(audio, sr, bpm)
+    if struct.phrase_boundaries:
+        log.info("Phrase boundaries: %d detected", len(struct.phrase_boundaries))
+
     # ── Enrich with music intelligence ──────────────────────────────
     try:
         from scripts.core.music_intelligence import compute_track_vector
@@ -459,6 +467,72 @@ def _label_sections(
 
 
 # ---------------------------------------------------------------------------
+# SSM-novelty phrase boundary detector
+# ---------------------------------------------------------------------------
+
+def _detect_phrase_boundaries(
+    audio: np.ndarray,
+    sr: int,
+    bpm: float,
+    hop_length: int = 512,
+) -> list:
+    """
+    Detect phrase boundaries via self-similarity matrix (SSM) novelty.
+
+    Algorithm:
+      1. Beat-track to get beat frames/times.
+      2. Compute beat-synchronised chroma (chroma_cqt), normalise columns.
+      3. Build SSM: sim = chroma_norm.T @ chroma_norm.
+      4. Apply 8×8 checkerboard kernel along the diagonal → novelty curve.
+      5. Peak-pick with minimum 8-beat gap (= 2 bars).
+      6. Convert peak beat indices → seconds.
+
+    Returns [] on any exception — never crashes the caller.
+    """
+    try:
+        import librosa
+        from scipy.signal import find_peaks
+
+        _, beat_frames = librosa.beat.beat_track(y=audio, sr=sr, trim=False)
+        beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+
+        if len(beat_times) < 16:
+            return []
+
+        chroma = librosa.feature.chroma_cqt(y=audio, sr=sr, hop_length=hop_length)
+        chroma_beat = librosa.util.sync(chroma, beat_frames, aggregate=np.median)
+        # shape: (12, n_beats)
+
+        col_norms = np.linalg.norm(chroma_beat, axis=0, keepdims=True)
+        col_norms = np.maximum(col_norms, 1e-10)
+        chroma_norm = chroma_beat / col_norms
+
+        ssm = chroma_norm.T @ chroma_norm  # (n_beats, n_beats)
+
+        n = ssm.shape[0]
+        k = 8  # checkerboard kernel size
+        kernel = np.zeros((k, k))
+        kernel[:k // 2, :k // 2] =  1   # top-left
+        kernel[k // 2:, k // 2:] =  1   # bottom-right
+        kernel[:k // 2, k // 2:] = -1   # top-right
+        kernel[k // 2:, :k // 2] = -1   # bottom-left
+
+        half_k = k // 2
+        novelty = np.zeros(n)
+        for i in range(half_k, n - half_k):
+            patch = ssm[i - half_k:i + half_k, i - half_k:i + half_k]
+            novelty[i] = float(np.sum(patch * kernel))
+
+        peaks, _ = find_peaks(novelty, distance=8)
+
+        return [float(beat_times[p]) for p in peaks if p < len(beat_times)]
+
+    except Exception as exc:
+        log.debug("Phrase boundary detection failed (non-critical): %s", exc)
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Transition planner
 # ---------------------------------------------------------------------------
 
@@ -508,6 +582,33 @@ def plan_transition(
     # --- Find entry point in Song B ---
     entry_bar = song_b.best_entry_bar(phrase_size)
     entry_time = song_b.bar_start_time(entry_bar)
+
+    # --- Refine with SSM phrase boundaries ---
+    if song_a.phrase_boundaries and song_a.bars:
+        threshold_a = song_a.duration * 0.85
+        candidates_a = [b for b in song_a.phrase_boundaries if b < threshold_a]
+        if candidates_a:
+            last_boundary = candidates_a[-1]
+            nearest = min(
+                range(len(song_a.bars)),
+                key=lambda i: abs(song_a.bars[i][0] - last_boundary),
+            )
+            nearest = song_a.phrase_boundary(nearest, phrase_size)
+            nearest = min(nearest, max_exit)
+            exit_bar = nearest
+            exit_time = song_a.bar_start_time(exit_bar)
+
+    if song_b.phrase_boundaries and song_b.bars:
+        candidates_b = [b for b in song_b.phrase_boundaries if b > 0]
+        if candidates_b:
+            first_boundary = candidates_b[0]
+            nearest = min(
+                range(len(song_b.bars)),
+                key=lambda i: abs(song_b.bars[i][0] - first_boundary),
+            )
+            nearest = song_b.phrase_boundary(nearest, phrase_size)
+            entry_bar = nearest
+            entry_time = song_b.bar_start_time(entry_bar)
 
     # --- BPM bridge ---
     bpm_a = song_a.bpm
