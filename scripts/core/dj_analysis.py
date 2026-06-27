@@ -228,12 +228,23 @@ class TransitionPlan:
 # Structure analyser
 # ---------------------------------------------------------------------------
 
-def analyze_structure(audio: np.ndarray, sr: int = 44100) -> SongStructure:
+def analyze_structure(
+    audio: np.ndarray,
+    sr: int = 44100,
+    key_profile: str = "auto",
+) -> SongStructure:
     """
     Analyse the musical structure of an audio clip.
 
     Returns a SongStructure with beats, bars, and labelled sections.
     Runs in about 2–5 s for a typical 5-minute track.
+
+    Parameters
+    ----------
+    key_profile : str
+        Tonal profile for key detection: 'ks' (Krumhansl-Schmuckler),
+        'edma' (EDM major), 'edmm' (EDM major+minor), or 'auto' (choose
+        based on spectral centroid). Defaults to 'auto'.
     """
     try:
         import librosa
@@ -345,6 +356,21 @@ def analyze_structure(audio: np.ndarray, sr: int = 44100) -> SongStructure:
         )
     except Exception as exc:
         log.warning("Music intelligence enrichment failed (non-critical): %s", exc)
+
+    # ── Key detection with requested profile (authoritative key result) ────────
+    try:
+        from scripts.core.key_detection import detect_key as _detect_key
+        kr = _detect_key(audio, sr, profile=key_profile)
+        struct.key_name       = kr.key_name
+        struct.mode           = kr.mode
+        struct.camelot        = kr.camelot
+        struct.key_confidence = float(kr.confidence)
+        log.info(
+            "Key (profile=%s): %s %s (%s) conf=%.2f",
+            key_profile, kr.key_name, kr.mode, kr.camelot, kr.confidence,
+        )
+    except Exception as exc:
+        log.debug("Key detection (profile=%s) failed: %s", key_profile, exc)
 
     return struct
 

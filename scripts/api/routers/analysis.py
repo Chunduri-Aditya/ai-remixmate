@@ -82,11 +82,24 @@ def check_compatibility(req: CompatibilityRequest):
 
 
 @router.post("/analyze", response_model=JobResponse, status_code=202, tags=["analysis"])
-def analyze_song(req: AnalyzeRequest, background_tasks: BackgroundTasks = None):
+def analyze_song(
+    req: AnalyzeRequest,
+    background_tasks: BackgroundTasks = None,
+    key_profile: str = Query(
+        "auto",
+        description=(
+            "Tonal profile for key detection: "
+            "'ks' (Krumhansl-Schmuckler), "
+            "'edma' (EDM major), "
+            "'edmm' (EDM major+minor), "
+            "'auto' (spectral-centroid-based selection)"
+        ),
+    ),
+):
     _check_job_cap()
     _require_song(req.song)
-    job_id = job_store.create_job(JobType.ANALYZE, {"song": req.song})
-    job_store.submit_job(job_id, task_analyze, song=req.song)
+    job_id = job_store.create_job(JobType.ANALYZE, {"song": req.song, "key_profile": key_profile})
+    job_store.submit_job(job_id, task_analyze, song=req.song, key_profile=key_profile)
     return job_store.job_to_response(job_store.get_job(job_id))
 
 

@@ -30,9 +30,10 @@ def _index_upsert(song_name: str) -> None:
 def task_analyze(
     job_id: str,
     song: str,
+    key_profile: str = "auto",
 ) -> Dict[str, Any]:
     from scripts.core.genre import detect_genre
-    from scripts.core.dj_engine import _analyze_impl
+    from scripts.core.dj_analysis import analyze_structure
 
     log_audit("analyze_start", resource=song, job_id=job_id)
     update_job(job_id, progress=0.1, message="Loading audio…")
@@ -48,7 +49,7 @@ def task_analyze(
     genre = detect_genre(audio, sr)
 
     update_job(job_id, progress=0.7, message="Analysing structure…")
-    struct = _analyze_impl(audio, sr)
+    struct = analyze_structure(audio, sr, key_profile=key_profile)
 
     # ── Persist BPM + genre to meta.json cache for the recommendation engine ──
     try:

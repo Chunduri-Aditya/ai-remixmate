@@ -1013,3 +1013,79 @@ class TestSSMBoundaries:
         assert plan.exit_time_a > 0, (
             f"exit_time_a should be > 0, got {plan.exit_time_a}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Gap 2C — EDMA/EDMM key detection profiles
+# ---------------------------------------------------------------------------
+
+_VALID_KEY_NAMES = {'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'}
+_VALID_MODES = {'major', 'minor'}
+
+
+@pytest.mark.dj_analysis
+class TestKeyDetectionProfiles:
+    """
+    Tests for Gap 2C: detect_key() supports 'ks', 'edma', 'edmm', and 'auto'
+    tonal profiles. The new EDM-tuned profiles weight tonic/fifth/octave more
+    heavily than Krumhansl-Schmuckler, improving accuracy on sub-bass content.
+    """
+
+    _audio = None  # cached at class level to avoid repeated synthesis
+
+    @classmethod
+    def _get_audio(cls):
+        if cls._audio is None:
+            cls._audio = _make_audio(duration=5.0, bpm=128.0, freq=440.0)
+        return cls._audio
+
+    def test_ks_profile_returns_valid_key(self):
+        """detect_key with profile='ks' must return a recognized key and mode."""
+        from scripts.core.key_detection import detect_key
+
+        result = detect_key(self._get_audio(), SR, profile='ks')
+
+        assert result.key_name in _VALID_KEY_NAMES, (
+            f"key_name {result.key_name!r} not in valid note names"
+        )
+        assert result.mode in _VALID_MODES, (
+            f"mode {result.mode!r} not in {_VALID_MODES}"
+        )
+        assert isinstance(result.confidence, float)
+
+    def test_edma_profile_returns_valid_key(self):
+        """detect_key with profile='edma' must return a recognized key and mode."""
+        from scripts.core.key_detection import detect_key
+
+        result = detect_key(self._get_audio(), SR, profile='edma')
+
+        assert result.key_name in _VALID_KEY_NAMES
+        assert result.mode in _VALID_MODES
+        assert isinstance(result.confidence, float)
+
+    def test_edmm_profile_returns_valid_key(self):
+        """detect_key with profile='edmm' must return a recognized key and mode."""
+        from scripts.core.key_detection import detect_key
+
+        result = detect_key(self._get_audio(), SR, profile='edmm')
+
+        assert result.key_name in _VALID_KEY_NAMES
+        assert result.mode in _VALID_MODES
+        assert isinstance(result.confidence, float)
+
+    def test_auto_profile_does_not_raise(self):
+        """detect_key with profile='auto' must succeed and return a 3-field result."""
+        from scripts.core.key_detection import detect_key
+
+        result = detect_key(self._get_audio(), SR, profile='auto')
+
+        assert result.key_name in _VALID_KEY_NAMES
+        assert result.mode in _VALID_MODES
+        assert isinstance(result.confidence, float)
+
+    def test_unknown_profile_raises(self):
+        """detect_key with an unknown profile must raise ValueError immediately."""
+        from scripts.core.key_detection import detect_key
+
+        with pytest.raises(ValueError, match="bad"):
+            detect_key(self._get_audio(), SR, profile='bad')

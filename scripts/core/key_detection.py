@@ -55,6 +55,14 @@ _MINOR_PROF = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
 _MAJOR_PROF /= _MAJOR_PROF.sum()
 _MINOR_PROF /= _MINOR_PROF.sum()
 
+# Robine et al. 2007 — EDM-tuned profiles (heavier tonic/fifth/octave weighting)
+_EDMA_MAJOR = np.array([1.00, 0.10, 0.43, 0.10, 0.71, 0.50,
+                         0.10, 0.87, 0.10, 0.52, 0.10, 0.35], dtype=np.float32)
+_EDMM_MINOR = np.array([1.00, 0.10, 0.43, 0.71, 0.10, 0.50,
+                         0.10, 0.87, 0.52, 0.10, 0.35, 0.10], dtype=np.float32)
+
+_VALID_PROFILES = frozenset(('ks', 'edma', 'edmm', 'auto'))
+
 
 # ── Data structures ───────────────────────────────────────────────────────────
 
@@ -165,24 +173,59 @@ def _apply_hpss(audio: np.ndarray, sr: int,
 # ── Key detection ─────────────────────────────────────────────────────────────
 
 def detect_key(audio: np.ndarray, sr: int,
-               method: str = 'cqt') -> KeyResult:
+               method: str = 'cqt',
+               profile: str = 'ks') -> KeyResult:
     """
     Detect the musical key and mode of an audio signal.
 
     Uses CQT chroma with Harmonic-Percussive Source Separation (HPSS) preprocessing
-    for robustness, then correlates the mean chroma against all 24 Krumhansl-Schmuckler
-    rotated profiles (12 major + 12 minor keys).
+    for robustness, then correlates the mean chroma against all 24 tonal profiles
+    (12 major + 12 minor keys).
 
     Args:
         audio: Audio time-series (mono)
         sr: Sample rate (Hz)
         method: 'cqt' (default, high-res) or 'stft' (faster, less accurate)
+        profile: Tonal hierarchy profile to use:
+            'ks'   — Krumhansl-Schmuckler (default, genre-neutral)
+            'edma' — EDM-tuned major profile (Robine et al. 2007), KS minor
+            'edmm' — EDM-tuned major + minor profiles (better for sub-bass content)
+            'auto' — choose 'edmm' when spectral centroid < 2000 Hz, else 'edma'
 
     Returns:
         KeyResult with key_name, mode, camelot, confidence, and full correlation scores
+
+    Raises:
+        ValueError: If profile is not one of the supported values.
     """
+    if profile not in _VALID_PROFILES:
+        raise ValueError(
+            f"Unknown key detection profile {profile!r}. "
+            f"Choose from: {sorted(_VALID_PROFILES)}"
+        )
+
     try:
         import librosa
+
+        # Resolve 'auto' based on spectral centroid
+        resolved = profile
+        if profile == 'auto':
+            try:
+                centroid = float(librosa.feature.spectral_centroid(y=audio, sr=sr).mean())
+                resolved = 'edmm' if centroid < 2000 else 'edma'
+            except Exception:
+                resolved = 'ks'
+
+        # Select tonal profiles
+        if resolved == 'ks':
+            major_prof: np.ndarray = _MAJOR_PROF
+            minor_prof: np.ndarray = _MINOR_PROF
+        elif resolved == 'edma':
+            major_prof = _EDMA_MAJOR.astype(np.float64)
+            minor_prof = _MINOR_PROF
+        else:  # 'edmm'
+            major_prof = _EDMA_MAJOR.astype(np.float64)
+            minor_prof = _EDMM_MINOR.astype(np.float64)
 
         # Apply harmonic preprocessing for robustness
         harmonic = _apply_hpss(audio, sr, margin=2.0)
@@ -209,7 +252,7 @@ def detect_key(audio: np.ndarray, sr: int,
 
         chroma_vector = c.astype(np.float32)
 
-        # Compute correlations against all 24 keys
+        # Compute correlations against all 24 keys using selected profiles
         correlation_scores: Dict[str, float] = {}
         best_val, best_key, best_mode = -np.inf, 0, 'major'
 
@@ -217,7 +260,7 @@ def detect_key(audio: np.ndarray, sr: int,
             key_note = NOTE_NAMES[k]
 
             # Major key correlation
-            rotated_major = np.roll(_MAJOR_PROF, k)
+            rotated_major = np.roll(major_prof, k)
             maj_corr = float(np.corrcoef(c, rotated_major)[0, 1])
             if np.isnan(maj_corr):
                 maj_corr = 0.0
@@ -227,7 +270,7 @@ def detect_key(audio: np.ndarray, sr: int,
                 best_val, best_key, best_mode = maj_corr, k, 'major'
 
             # Minor key correlation
-            rotated_minor = np.roll(_MINOR_PROF, k)
+            rotated_minor = np.roll(minor_prof, k)
             min_corr = float(np.corrcoef(c, rotated_minor)[0, 1])
             if np.isnan(min_corr):
                 min_corr = 0.0
@@ -262,7 +305,8 @@ def detect_key(audio: np.ndarray, sr: int,
 
 
 def detect_key_segments(audio: np.ndarray, sr: int,
-                        segment_seconds: float = 30.0) -> List[KeyResult]:
+                        segment_seconds: float = 30.0,
+                        profile: str = 'ks') -> List[KeyResult]:
     """
     Perform segment-wise key detection for tracks with key changes.
 
@@ -273,6 +317,7 @@ def detect_key_segments(audio: np.ndarray, sr: int,
         audio: Audio time-series (mono)
         sr: Sample rate (Hz)
         segment_seconds: Duration of each segment in seconds (default: 30.0)
+        profile: Tonal profile passed to detect_key ('ks', 'edma', 'edmm', 'auto')
 
     Returns:
         List of KeyResult objects, one per segment
@@ -280,7 +325,7 @@ def detect_key_segments(audio: np.ndarray, sr: int,
     segment_samples = int(segment_seconds * sr)
     if len(audio) < segment_samples:
         # Audio is shorter than one segment — return single detection
-        return [detect_key(audio, sr)]
+        return [detect_key(audio, sr, profile=profile)]
 
     results: List[KeyResult] = []
     # 50% overlap between segments
@@ -295,12 +340,12 @@ def detect_key_segments(audio: np.ndarray, sr: int,
         if len(segment) < segment_samples // 2:
             break
 
-        result = detect_key(segment, sr)
+        result = detect_key(segment, sr, profile=profile)
         results.append(result)
 
         start += hop_samples
 
-    return results if results else [detect_key(audio, sr)]
+    return results if results else [detect_key(audio, sr, profile=profile)]
 
 
 # ── Camelot wheel utilities ───────────────────────────────────────────────────
