@@ -662,29 +662,36 @@ def plan_transition(
         b_fade_end_bar=transition_bars,
     )
 
-    # ── Harmonic compatibility (Camelot wheel) ────────────────────────────────
-    harmonic_score = -1.0
-    if song_a.camelot and song_b.camelot:
-        try:
-            from scripts.core.music_intelligence import camelot_harmonic_score
-            harmonic_score = float(camelot_harmonic_score(song_a.camelot, song_b.camelot))
-            # If tracks are harmonically incompatible (< 0.5), prefer a shorter
-            # overlap so the clash window is minimised.
-            if harmonic_score < 0.35 and transition_bars >= 16:
-                old_bars = transition_bars
-                transition_bars = ((8 + phrase_size - 1) // phrase_size) * phrase_size
-                transition_seconds = transition_bars * (60.0 / bpm_a) * 4
-                log.info(
-                    "Harmonic clash (score=%.2f, %s→%s): shortened transition %d→%d bars",
-                    harmonic_score, song_a.camelot, song_b.camelot, old_bars, transition_bars,
-                )
-            else:
-                log.info(
-                    "Harmonic score: %.2f (%s→%s)",
-                    harmonic_score, song_a.camelot, song_b.camelot,
-                )
-        except Exception as exc:
-            log.debug("Harmonic score computation failed: %s", exc)
+    # ── Psychoacoustic consonance (replaces Camelot-distance harmonic score) ───
+    harmonic_score: float = 0.5
+    try:
+        from scripts.core.key_detection import psychoacoustic_consonance
+        harmonic_score = psychoacoustic_consonance(
+            song_a.key_name, song_a.mode,
+            song_b.key_name, song_b.mode,
+        )
+        # Shorten the transition window when consonance is low to reduce clash
+        if harmonic_score < 0.35 and transition_bars >= 16:
+            old_bars = transition_bars
+            transition_bars = ((8 + phrase_size - 1) // phrase_size) * phrase_size
+            transition_seconds = transition_bars * (60.0 / bpm_a) * 4
+            log.info(
+                "Harmonic clash (consonance=%.2f, %s %s→%s %s): "
+                "shortened transition %d→%d bars",
+                harmonic_score,
+                song_a.key_name, song_a.mode,
+                song_b.key_name, song_b.mode,
+                old_bars, transition_bars,
+            )
+        else:
+            log.info(
+                "Psychoacoustic consonance: %.2f (%s %s → %s %s)",
+                harmonic_score,
+                song_a.key_name, song_a.mode,
+                song_b.key_name, song_b.mode,
+            )
+    except Exception as exc:
+        log.debug("Consonance computation failed: %s", exc)
 
     # ── Pitch shift suggestion (Camelot-based) ──────────────────────────────
     suggested_pitch_shift = 0.0

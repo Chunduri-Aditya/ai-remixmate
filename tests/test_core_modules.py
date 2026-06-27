@@ -1089,3 +1089,82 @@ class TestKeyDetectionProfiles:
 
         with pytest.raises(ValueError, match="bad"):
             detect_key(self._get_audio(), SR, profile='bad')
+
+
+# ---------------------------------------------------------------------------
+# Gap 2D — psychoacoustic consonance score
+# ---------------------------------------------------------------------------
+
+class TestPsychoacousticConsonance:
+    """
+    Tests for Gap 2D: psychoacoustic_consonance() uses Sethares roughness to
+    score harmonic compatibility between two keys. No librosa needed — pure math.
+    """
+
+    def test_same_key_is_maximally_consonant(self):
+        """Unison (same key) should produce consonance > 0.95."""
+        from scripts.core.key_detection import psychoacoustic_consonance
+
+        score = psychoacoustic_consonance('A', 'major', 'A', 'major')
+
+        assert score > 0.95, (
+            f"Unison should be near-maximally consonant, got {score:.4f}"
+        )
+
+    def test_tritone_lower_than_fifth(self):
+        """C→F# (tritone) must be less consonant than C→G (perfect fifth)."""
+        from scripts.core.key_detection import psychoacoustic_consonance
+
+        tritone = psychoacoustic_consonance('C', 'major', 'F#', 'major')
+        fifth   = psychoacoustic_consonance('C', 'major', 'G',  'major')
+
+        assert tritone < fifth, (
+            f"Tritone consonance ({tritone:.4f}) should be < "
+            f"perfect fifth ({fifth:.4f})"
+        )
+
+    def test_fifth_above_threshold(self):
+        """C→G (perfect fifth) should produce consonance > 0.5."""
+        from scripts.core.key_detection import psychoacoustic_consonance
+
+        score = psychoacoustic_consonance('C', 'major', 'G', 'major')
+
+        assert score > 0.5, (
+            f"Perfect fifth should be above midpoint, got {score:.4f}"
+        )
+
+    def test_score_in_unit_interval(self):
+        """All key pairs must produce consonance in [0.0, 1.0]."""
+        from scripts.core.key_detection import psychoacoustic_consonance
+
+        pairs = [
+            ('C', 'major', 'F#', 'major'),
+            ('A', 'minor', 'E',  'major'),
+            ('D', 'major', 'D',  'minor'),
+        ]
+        for ka, ma, kb, mb in pairs:
+            score = psychoacoustic_consonance(ka, ma, kb, mb)
+            assert 0.0 <= score <= 1.0, (
+                f"{ka} {ma} → {kb} {mb}: score {score:.4f} outside [0, 1]"
+            )
+
+    @pytest.mark.dj_analysis
+    def test_transition_plan_harmonic_score_is_float(self):
+        """plan_transition() must set harmonic_score to a float in [0, 1]."""
+        from scripts.core.dj_analysis import plan_transition
+
+        struct_a = _make_structure_for_render(120.0)
+        struct_b = _make_structure_for_render(120.0)
+        struct_a.key_name = 'C'
+        struct_a.mode     = 'major'
+        struct_b.key_name = 'G'
+        struct_b.mode     = 'major'
+
+        plan = plan_transition(struct_a, struct_b)
+
+        assert isinstance(plan.harmonic_score, float), (
+            f"harmonic_score should be float, got {type(plan.harmonic_score).__name__}"
+        )
+        assert 0.0 <= plan.harmonic_score <= 1.0, (
+            f"harmonic_score {plan.harmonic_score:.4f} outside [0, 1]"
+        )

@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -62,6 +63,73 @@ _EDMM_MINOR = np.array([1.00, 0.10, 0.43, 0.71, 0.10, 0.50,
                          0.10, 0.87, 0.52, 0.10, 0.35, 0.10], dtype=np.float32)
 
 _VALID_PROFILES = frozenset(('ks', 'edma', 'edmm', 'auto'))
+
+# 12-TET note frequencies relative to A4=440 Hz
+_NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+_NOTE_SEMITONES = {
+    'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4,  'F':  5,
+    'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11,
+}
+
+
+def _note_to_hz(note: str, octave: int = 4) -> float:
+    """Convert a note name + octave to Hz using equal temperament (A4=440)."""
+    semitones_from_a4 = (_NOTE_SEMITONES[note] - 9) + (octave - 4) * 12
+    return 440.0 * (2 ** (semitones_from_a4 / 12.0))
+
+
+def _sethares_roughness(f1: float, f2: float) -> float:
+    """Sethares 1993 roughness model — peaks at Δf ≈ 25 Hz."""
+    delta = abs(f1 - f2)
+    if delta < 1e-6:
+        return 0.0
+    return (delta / 25.0) * math.exp(1.0 - delta / 25.0)
+
+
+def psychoacoustic_consonance(
+    key_a: str,
+    mode_a: str,
+    key_b: str,
+    mode_b: str,
+    n_partials: int = 6,
+) -> float:
+    """
+    Compute psychoacoustic consonance between two keys using Sethares roughness.
+
+    Computes pairwise roughness between the first n_partials of each tonic
+    frequency, then maps to a consonance score in [0, 1] (1 = maximally
+    consonant, 0 = maximally rough).
+
+    Parameters
+    ----------
+    key_a, key_b : str
+        Root note names, e.g. 'C', 'F#'. Slash notation ('C/E') uses only
+        the first element.
+    mode_a, mode_b : str
+        Unused in the frequency model but accepted for API consistency.
+    n_partials : int
+        Number of harmonic partials to include per tonic (default 6).
+
+    Returns
+    -------
+    float in [0.0, 1.0]; returns 0.5 on any exception.
+    """
+    try:
+        hz_a = _note_to_hz(key_a.split('/')[0].strip())
+        hz_b = _note_to_hz(key_b.split('/')[0].strip())
+        partials_a = [hz_a * (i + 1) for i in range(n_partials)]
+        partials_b = [hz_b * (i + 1) for i in range(n_partials)]
+        total_roughness = sum(
+            _sethares_roughness(fa, fb)
+            for fa in partials_a
+            for fb in partials_b
+            if fa != fb
+        )
+        max_roughness = n_partials * n_partials  # conservative upper bound
+        consonance = 1.0 - min(total_roughness / max(max_roughness, 1.0), 1.0)
+        return float(max(0.0, min(1.0, consonance)))
+    except Exception:
+        return 0.5  # neutral fallback
 
 
 # ── Data structures ───────────────────────────────────────────────────────────
