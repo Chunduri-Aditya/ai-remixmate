@@ -659,22 +659,14 @@ def pitch_shift_for_camelot(source: str, target: str) -> int:
         num_t = int(target[:-1])
         letter_t = target[-1]
 
-        # Map Camelot numbers to root notes: 8B = C major, 9B = G major, etc.
-        # Camelot uses a circle of fifths offset
-        camelot_to_semitone = {
-            '1A': 9,   '1B': 7,    # G# minor, B major
-            '2A': 4,   '2B': 2,    # D# minor, F# major
-            '3A': 11,  '3B': 9,    # B minor, C# major
-            '4A': 6,   '4B': 4,    # F minor, G# major
-            '5A': 1,   '5B': 11,   # C minor, D# major
-            '6A': 8,   '6B': 6,    # G minor, A# major
-            '7A': 3,   '7B': 1,    # D minor, F major
-            '8A': 10,  '8B': 0,    # A minor, C major
-            '9A': 5,   '9B': 7,    # E minor, G major
-            '10A': 0,  '10B': 2,   # B minor, D major
-            '11A': 7,  '11B': 9,   # F# minor, A major
-            '12A': 2,  '12B': 4,   # C# minor, E major
-        }
+        # Derive semitone mapping from the authoritative CAMELOT + NOTE_NAMES
+        # constants defined at module level.  This is the single source of truth
+        # and eliminates the stale inline table that had A-ring off by +1 and
+        # B-ring 1B–7B off by −4 semitones.
+        camelot_to_semitone: dict[str, int] = {}
+        for _key_name, _code in CAMELOT.items():
+            _root = _key_name.split()[0]           # 'C', 'G#', 'F#', …
+            camelot_to_semitone[_code] = NOTE_NAMES.index(_root)
 
         semitone_s = camelot_to_semitone.get(source, 0)
         semitone_t = camelot_to_semitone.get(target, 0)

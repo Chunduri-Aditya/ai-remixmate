@@ -75,7 +75,7 @@ class GenreResult(BaseModel):
 
 class JobResponse(BaseModel):
     job_id: str
-    status: JobStatus
+    status: str          # normalised uppercase: PENDING|RUNNING|COMPLETED|FAILED|CANCELLED
     job_type: JobType
     created_at: float
     started_at: Optional[float] = None

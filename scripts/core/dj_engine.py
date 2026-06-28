@@ -547,19 +547,31 @@ class DJEngine:
         try:
             import scipy.signal as sig
         except ImportError:
-            # Degrade gracefully when scipy is absent — simple cosine envelope
-            t = np.linspace(0, np.pi / 2, len(audio), dtype=np.float32)
+            # Degrade gracefully when scipy is absent — simple cosine/sine envelope
+            tail_start = max(0, len(audio) - fade_samples)
             if direction == "out":
+                t = np.linspace(0.0, np.pi / 2.0, len(audio), dtype=np.float32)
                 return (audio * np.cos(t)).astype(np.float32)
-            return (audio * np.sin(t)).astype(np.float32)
+            else:
+                # Head is silent; tail rises 0→1
+                result = np.zeros(len(audio), dtype=np.float32)
+                seg_len = len(audio) - tail_start
+                t = np.linspace(0.0, np.pi / 2.0, seg_len, dtype=np.float32)
+                result[tail_start:] = audio[tail_start:] * np.sin(t)
+                return result
 
         if len(audio) < fade_samples or fade_samples < 256:
             # Too short for frequency splitting — fall back to simple envelope
-            t = np.linspace(0, np.pi / 2, len(audio), dtype=np.float32)
+            tail_start = max(0, len(audio) - fade_samples)
             if direction == "out":
-                return audio * np.cos(t)
+                t = np.linspace(0.0, np.pi / 2.0, len(audio), dtype=np.float32)
+                return (audio * np.cos(t)).astype(np.float32)
             else:
-                return audio * np.sin(t)
+                result = np.zeros(len(audio), dtype=np.float32)
+                seg_len = len(audio) - tail_start
+                t = np.linspace(0.0, np.pi / 2.0, seg_len, dtype=np.float32)
+                result[tail_start:] = audio[tail_start:] * np.sin(t)
+                return result.astype(np.float32)
 
         # Design 3-band crossover filters
         nyq = self.sr / 2.0
@@ -592,17 +604,22 @@ class DJEngine:
             fade_mid  = np.sin(t)                                    # Normal
             fade_low  = np.sin(np.clip(t * 1.4, 0, np.pi / 2))   # Fast rise
 
-        # Apply per-band envelopes
-        # Only the tail (fade_samples) portion gets the fade
-        result = np.copy(audio)
+        # Apply per-band envelopes to the tail (last fade_samples).
+        # out: head plays at full amplitude, tail fades 1→0 (song A exits)
+        # in:  head is completely silent, tail rises 0→1 (song B enters)
         tail_start = len(audio) - fade_samples
-
-        # Replace tail with frequency-separated faded version
         low_tail  = low[tail_start:]  * fade_low
         mid_tail  = mid[tail_start:]  * fade_mid
         high_tail = high[tail_start:] * fade_high
 
-        result[tail_start:] = low_tail + mid_tail + high_tail
+        if direction == "out":
+            result = np.copy(audio)
+            result[tail_start:] = low_tail + mid_tail + high_tail
+        else:
+            # Zero the head — Song B is completely silent before the 0 mark.
+            # Matches render_chain()'s b_env[:mid]=0 semantics exactly.
+            result = np.zeros_like(audio)
+            result[tail_start:] = low_tail + mid_tail + high_tail
 
         return result
 
@@ -780,11 +797,8 @@ class DJEngine:
 
         # --- Bass swap ---
         swap_sample = int(plan.eq.bass_swap_bar *
-                          (plan.transition_seconds / plan.transition_bars) * sr)
+                          (plan.transition_seconds / max(plan.transition_bars, 1)) * sr)
         swap_sample = min(swap_sample, trans_samples)
-
-        b_lp, a_lp_coeffs = _butter_lowpass(plan.eq.bass_crossover_hz, sr), None
-        b_lp_b, b_lp_a = _butter_lowpass(plan.eq.bass_crossover_hz, sr)
 
         # Before swap: A keeps bass, B has no bass (already HP'd)
         # After swap: A loses bass, B gets full bass

@@ -43,6 +43,7 @@ import time
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -219,7 +220,7 @@ def _load_from_db() -> None:
     """
     try:
         _init_db()
-        with _get_conn() as conn:
+        with closing(_get_conn()) as conn:
             rows = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 500").fetchall()
 
         for row in rows:
@@ -235,7 +236,7 @@ def _load_from_db() -> None:
                 job["status"]  = JobStatus.FAILED.value
                 job["error"]   = "Process restarted before job could finish"
                 job["message"] = "Failed: process restarted"
-                with _get_conn() as conn:
+                with closing(_get_conn()) as conn:
                     _upsert_row(conn, job)
 
             _jobs[job["job_id"]] = job
@@ -243,7 +244,7 @@ def _load_from_db() -> None:
         logger.info("Job store loaded from SQLite", extra={"count": len(_jobs)})
     except Exception as exc:  # noqa: BLE001
         # Non-fatal: fallback to empty in-memory store if DB is unavailable
-        logger.warning("Could not load jobs from SQLite, starting fresh: %s", exc)
+        logger.warning(f"Could not load jobs from SQLite, starting fresh: {exc}")
 
 
 _load_from_db()
@@ -273,10 +274,10 @@ def create_job(job_type: JobType, meta: Optional[Dict] = None) -> str:
     with _lock:
         _jobs[job_id] = job
         try:
-            with _get_conn() as conn:
+            with closing(_get_conn()) as conn:
                 _upsert_row(conn, job)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Could not persist job to SQLite: %s", exc)
+            logger.warning(f"Could not persist job to SQLite: {exc}")
 
     logger.info("Job created", extra={"job_id": job_id, "job_type": job_type})
     _emit("job_created", job)
@@ -321,16 +322,16 @@ def update_job(
 
             # Compute ETA from elapsed time
             if progress > 0.0 and job.get("started_at") is not None:
-                elapsed    = time.time() - job["started_at"]
+                elapsed    = max(time.time() - job["started_at"], 1e-6)
                 rate       = progress / elapsed
                 remaining  = (1.0 - progress) / (rate + 1e-8)
                 job["eta_sec"] = int(remaining)
 
         try:
-            with _get_conn() as conn:
+            with closing(_get_conn()) as conn:
                 _upsert_row(conn, job)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Could not persist job update to SQLite: %s", exc)
+            logger.warning(f"Could not persist job update to SQLite: {exc}")
 
         # Emit SSE after update (still under lock to get consistent snapshot)
         current_status = _status_value(job.get("status"))
@@ -373,10 +374,10 @@ def cancel_job(job_id: str) -> bool:
         job["finished_at"] = time.time()
 
         try:
-            with _get_conn() as conn:
+            with closing(_get_conn()) as conn:
                 _upsert_row(conn, job)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Could not persist cancellation to SQLite: %s", exc)
+            logger.warning(f"Could not persist cancellation to SQLite: {exc}")
 
     logger.info("Job cancelled", extra={"job_id": job_id})
     cancelled_job = _jobs.get(job_id, {})
@@ -429,10 +430,10 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
             job["started_at"] = time.time()
             job["message"]    = "Running"
             try:
-                with _get_conn() as conn:
+                with closing(_get_conn()) as conn:
                     _upsert_row(conn, job)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Could not persist job start to SQLite: %s", exc)
+                logger.warning(f"Could not persist job start to SQLite: {exc}")
 
         logger.info("Job started", extra={"job_id": job_id})
 
@@ -441,6 +442,7 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
 
             # Check if cancelled mid-flight
             if job_id in _cancelled:
+                _cancelled.discard(job_id)
                 return
 
             with _lock:
@@ -451,10 +453,11 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
                 if result is not None:
                     job["result"] = result
                 try:
-                    with _get_conn() as conn:
+                    with closing(_get_conn()) as conn:
                         _upsert_row(conn, job)
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("Could not persist job completion to SQLite: %s", exc)
+                    logger.warning(f"Could not persist job completion to SQLite: {exc}")
+            _cancelled.discard(job_id)   # completed jobs no longer need the cancel flag
 
             logger.info(
                 "Job completed successfully",
@@ -469,10 +472,11 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
                 job["error"]       = str(exc)
                 job["message"]     = f"Failed: {exc}"
                 try:
-                    with _get_conn() as conn:
+                    with closing(_get_conn()) as conn:
                         _upsert_row(conn, job)
                 except Exception as db_exc:  # noqa: BLE001
-                    logger.warning("Could not persist job failure to SQLite: %s", db_exc)
+                    logger.warning(f"Could not persist job failure to SQLite: {db_exc}")
+            _cancelled.discard(job_id)   # failed jobs no longer need the cancel flag
 
             logger.error(
                 "Job failed with exception",
@@ -488,10 +492,15 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
 
 
 def job_to_response(job: Dict) -> JobResponse:
-    """Convert the raw job dict to a Pydantic response model."""
+    """Convert the raw job dict to a Pydantic response model.
+
+    Uses _norm_status (uppercase, done→COMPLETED) to match the SSE serializer
+    and the frontend TypeScript contract. Previously used _status_value which
+    returned lowercase 'done' — disagreeing with SSE's 'COMPLETED'.
+    """
     return JobResponse(
         job_id      = job["job_id"],
-        status      = _status_value(job["status"]),
+        status      = _norm_status(job["status"]),
         job_type    = _type_value(job["job_type"]),
         created_at  = job["created_at"],
         started_at  = job.get("started_at"),

@@ -53,15 +53,19 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     from scripts.api.jobs import register_sse_hook                       # noqa: PLC0415
     import asyncio as _asyncio                                           # noqa: PLC0415
 
+    # Capture the running event loop here (async context) so worker threads
+    # can schedule coroutines safely via call_soon_threadsafe.
+    # asyncio.get_event_loop() raises RuntimeError on Python 3.12 when called
+    # from a ThreadPoolExecutor worker that has no current event loop.
+    _event_loop = _asyncio.get_running_loop()
+
     def _sync_emit(event_type: str, job_dict: dict) -> None:
         """Thread-safe shim: schedule async broadcast from sync job-store callbacks."""
         try:
-            loop = _asyncio.get_event_loop()
-            if loop.is_running():
-                loop.call_soon_threadsafe(
-                    loop.create_task,
-                    broadcaster.broadcast(event_type, job_dict),
-                )
+            _event_loop.call_soon_threadsafe(
+                _event_loop.create_task,
+                broadcaster.broadcast(event_type, job_dict),
+            )
         except Exception:  # noqa: BLE001
             pass
 

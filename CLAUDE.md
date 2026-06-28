@@ -175,6 +175,38 @@ curl http://localhost:8000/jobs | python3 -m json.tool
 
 ---
 
+# Session Update: June 27, 2026 — Improvements Complete ✅
+
+## What Happened
+
+All Stage 1, Stage 2, and Stage 3A improvements from IMPROVEMENTS.md implemented and committed.
+
+| Gap | Status | Commit |
+|-----|--------|--------|
+| 1A Per-stem LUFS normalization | ✅ | `dj_engine.py:render_stem_blend()` |
+| 1B Bass swap envelope | ✅ | `dj_engine.py:render_stem_blend()` per-stem loop |
+| 1C Chain render stem path | ✅ | `render_chain(stems_dirs=)` |
+| 2A Pitch shift audio | ✅ | `key_detection.py:pitch_shift_audio()` + `TransitionPlan.suggested_pitch_shift` |
+| 2B SSM-novelty boundaries | ✅ | `dj_analysis.py:_detect_phrase_boundaries()` |
+| 2C EDMA/EDMM key profiles | ✅ | `detect_key(profile=)` + `/analyze?key_profile=` |
+| 2D Psychoacoustic consonance | ✅ | `key_detection.py:psychoacoustic_consonance()` |
+| 3A GiantSteps benchmark | ✅ | `scripts/benchmarks/giantsteps_eval.py` |
+
+**Test status: 190/190 pass** (up from 167 at session start)
+
+## Current State
+
+```
+Branch: main
+Tests: 190/190 pass
+New modules: pitch_shift_audio, psychoacoustic_consonance, _detect_phrase_boundaries,
+             normalize_stems_to_target (wired), giantsteps_eval (synthetic + real modes)
+Next: Stage 3B — paper draft (ISMIR 2027 target)
+      Stage 4 candidate — global energy-arc TSP optimizer (setlist_planner.py)
+```
+
+---
+
 # Session Update: June 26, 2026 — Merge Complete ✅
 
 ## What Happened

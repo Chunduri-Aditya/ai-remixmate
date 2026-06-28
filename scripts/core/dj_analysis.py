@@ -642,27 +642,10 @@ def plan_transition(
     ratio = bpm_b / bpm_a if bpm_a > 0 else 1.0
     transition_seconds = transition_bars * (60.0 / bpm_a) * 4
 
-    # --- EQ plan ---
-    # Classic bass swap at the midpoint of the transition.
-    # Volume fade bars span the FULL window (0 → transition_bars) so the
-    # equal-power crossfade in DJEngine.render() controls amplitude — these
-    # fields are kept for metadata/logging but are no longer used to drive
-    # the actual crossfade curve (render() uses cos/sin directly).
-    bass_swap_bar = transition_bars // 2
-
-    eq = EQPlan(
-        hp_start_hz=_HP_START_HZ,
-        hp_end_hz=_HP_END_HZ,
-        hp_ramp_bars=transition_bars // 2,      # HP ramp over first half
-        bass_swap_bar=bass_swap_bar,
-        bass_crossover_hz=_BASS_CROSSOVER,
-        a_fade_start_bar=0,                      # full-window fade (metadata only)
-        a_fade_end_bar=transition_bars,
-        b_fade_start_bar=0,                      # full-window fade (metadata only)
-        b_fade_end_bar=transition_bars,
-    )
-
-    # ── Psychoacoustic consonance (replaces Camelot-distance harmonic score) ───
+    # ── Psychoacoustic consonance — computed FIRST so shortening applies
+    #    before EQPlan is built (otherwise bass_swap_bar lands at the end of
+    #    the shortened window instead of the midpoint, disabling bass-swap
+    #    exactly when keys clash).
     harmonic_score: float = 0.5
     try:
         from scripts.core.key_detection import psychoacoustic_consonance
@@ -692,6 +675,26 @@ def plan_transition(
             )
     except Exception as exc:
         log.debug("Consonance computation failed: %s", exc)
+
+    # --- EQ plan (built AFTER consonance shortening so bass_swap_bar
+    #     always lands at the midpoint of the final transition window) ---
+    # Volume fade bars span the FULL window (0 → transition_bars) so the
+    # equal-power crossfade in DJEngine.render() controls amplitude — these
+    # fields are kept for metadata/logging but are no longer used to drive
+    # the actual crossfade curve (render() uses cos/sin directly).
+    bass_swap_bar = transition_bars // 2
+
+    eq = EQPlan(
+        hp_start_hz=_HP_START_HZ,
+        hp_end_hz=_HP_END_HZ,
+        hp_ramp_bars=transition_bars // 2,      # HP ramp over first half
+        bass_swap_bar=bass_swap_bar,
+        bass_crossover_hz=_BASS_CROSSOVER,
+        a_fade_start_bar=0,                      # full-window fade (metadata only)
+        a_fade_end_bar=transition_bars,
+        b_fade_start_bar=0,                      # full-window fade (metadata only)
+        b_fade_end_bar=transition_bars,
+    )
 
     # ── Pitch shift suggestion (Camelot-based) ──────────────────────────────
     suggested_pitch_shift = 0.0
