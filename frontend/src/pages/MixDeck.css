@@ -122,6 +122,24 @@
 .md-green  { color: var(--color-green-500)  !important; }
 .md-muted  { color: var(--color-text-faint) !important; }
 
+/* Energy mini-bar shown inline with the energy value */
+.md-energy-bar {
+  display: inline-block;
+  width: 52px;
+  height: 4px;
+  background: var(--color-surface-elevated);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  vertical-align: middle;
+}
+.md-energy-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-green-500), var(--color-amber-500));
+  border-radius: var(--radius-full);
+  transition: width 0.3s ease;
+}
+
 .md-deck__empty {
   font-size: var(--text-sm);
   text-align: center;

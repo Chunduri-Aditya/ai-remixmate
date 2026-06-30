@@ -131,13 +131,16 @@ New pages follow the `PageBase.css` layout pattern (`page-base` → `page-base__
 ## Testing
 
 ```bash
-pytest                          # all tests
-pytest -m "not dj_analysis"     # skip librosa-dependent tests
+pytest                          # all tests (226 as of June 28, 2026)
+pytest -m "not dj_analysis"     # skip librosa/numba-dependent tests (safe in all envs)
+pytest tests/test_behavioral.py # behavioral correctness tests (36 — catch audible bugs)
 pytest tests/test_core_modules.py
 bash tests/smoke_e2e.sh         # live smoke test (API must be running)
 ```
 
 Tests requiring librosa are marked `@pytest.mark.dj_analysis` and auto-skipped if librosa fails to initialize (numba cache issues on some machines).
+
+`tests/test_behavioral.py` contains the **behavioral** test suite added June 28, 2026. These assert *what you hear*, not just dtype/shape. Every test there corresponds to a bug that was invisible to the shape-only suite. Don't remove them — they're the regression guard for the D1 correctness fixes.
 
 ## Common tasks
 
@@ -172,6 +175,311 @@ curl http://localhost:8000/jobs | python3 -m json.tool
 - `config.local.yaml` is gitignored. Never commit API keys to `config.yaml`.
 - The React Vite proxy rewrites `/api/*` → `http://localhost:8000/*` in dev. In production (GitHub Pages), set `VITE_API_BASE=http://localhost:8000`.
 - Job progress is 0–100 in SSE frames and in the normalized frontend `Job` type. The REST `/jobs` endpoint returns 0–1 — `normalizeJob()` in `api.ts` handles the conversion.
+
+**Logging** — `StructuredLogger` (from `logging_utils.get_logger`) has signature `warning(msg, extra_dict=None)`, NOT `warning(msg, *args)`. Never call `logger.warning("...%s", exc)` — pass `exc` as an f-string or into a dict: `logger.warning(f"...{exc}")`. The second positional arg is taken as the `extra` dict; passing an exception crashes at the `for key in extra:` line in Python's logging internals.
+
+**SSE from worker threads** — Always capture the event loop in `lifespan` with `asyncio.get_running_loop()` and close over it. Never call `asyncio.get_event_loop()` from inside a ThreadPoolExecutor worker — raises `RuntimeError` on Python 3.12 with no running loop in thread.
+
+**Camelot semitone table** — The canonical source is `CAMELOT` + `NOTE_NAMES` in `key_detection.py`. Don't maintain a separate inline dict anywhere else — it will drift and produce wrong pitch shifts. `pitch_shift_for_camelot()` now derives from those constants.
+
+**JobResponse.status** — The REST serializer (`job_to_response`) and SSE both now emit uppercase normalized values: `PENDING | RUNNING | COMPLETED | FAILED | CANCELLED`. The internal `JobStatus` enum still uses lowercase `done` etc. — `_norm_status()` bridges them. The `JobResponse.status` field is typed as `str`, not `JobStatus`.
+
+---
+
+# Session Update: June 29, 2026 (session 3) — Stage 3 Improvements + Library Atlas Bug Fix ✅
+
+## What Happened
+
+Fixed Library Atlas crash and implemented all three Stage 3 engineering improvements.
+
+| Item | Status | Files |
+|------|--------|-------|
+| Library Atlas crash (`new Set()` on non-iterable) | ✅ | `frontend/src/lib/api.ts` |
+| Stage 3C: rekordbox XML + Serato GEOB cue export | ✅ | `cue_export.py` (new), `routers/library.py` |
+| Stage 3B: Essentia energy arc upgrade | ✅ | `energy_profiler.py` (new), `setlist_planner.py` |
+| Stage 3A: Crate Digger — CLAP 512-D semantic search | ✅ | `crate_digger.py` (new), `routers/analysis.py` |
+| 26 cue_export tests | ✅ | `tests/test_cue_export.py` (new) |
+| 25 energy_profiler tests | ✅ | `tests/test_energy_profiler.py` (new) |
+| 22 crate_digger tests | ✅ | `tests/test_crate_digger.py` (new) |
+
+### Bug Fixed
+
+**`favoritesApi.list` shape mismatch** (`frontend/src/lib/api.ts:240`)
+- Backend `/favorites` returns `{ songs: string[], count: number }` — an object
+- Frontend typed and consumed it as `string[]` directly
+- `new Set(favorites)` → `TypeError: object is not iterable (Symbol.iterator)`
+- Fix: `.then((r) => r.songs ?? [])` in the `list` call unwraps the payload
+
+### Key additions
+
+**`scripts/core/cue_export.py` (new):**
+- `export_rekordbox_xml()` — rekordbox 6+ compatible XML with HOT CUE (up to 8)
+  and MEMORY CUE (phrase boundaries) markers; TEMPO beat-grid element included
+- `export_serato_markers()` — GEOB Serato Markers2 ID3 tag writer for .mp3 files
+  (requires `pip install mutagen`); reverse-engineered binary format with cos-scaled slots
+- `export_cues()` — dispatcher for both formats; format string is case-insensitive
+- `_build_serato_markers2_payload()` — pure-struct binary builder (no mutagen for tests)
+
+**`routers/library.py` (updated):**
+- `GET /library/{name}/export-cues?fmt=rekordbox|serato` — reads `analysis.json` for
+  phrase boundaries + BPM, writes temp file, streams as attachment, cleans up via
+  `BackgroundTask`. 422 returned when Serato requested without .mp3 source.
+
+**`scripts/core/energy_profiler.py` (new):**
+- `EnergyFeatures` dataclass: rms_energy, spectral_centroid, dynamic_range, arousal, valence, backend
+- `_numpy_profile()` — always-available backend: RMS + spectral centroid blend → arousal proxy
+- `_essentia_profile()` — optional Essentia backend; tries MusiCNN ArousalValence model,
+  falls back to feature blend when essentia-tensorflow absent
+- `profile_energy(audio, sr, backend="auto")` — dispatches by backend/availability
+- `enrich_track_node(track, audio, sr)` — sets `track.energy` and `track.arousal_predicted`
+
+**`scripts/core/setlist_planner.py` (updated):**
+- `TrackNode.arousal_predicted: Optional[float] = None` — new field (Stage 3B)
+- `transition_cost()` energy path: prefers `arousal_predicted` over `.energy` when set
+
+**`scripts/core/crate_digger.py` (new):**
+- `CrateResult` dataclass: name, score, bpm, key, camelot, energy, backend
+- `CrateDigger` class — thread-safe, lazy-loaded singleton
+  - `index_library(library_dir, progress_cb, force)` — embeds all songs via CLAP;
+    falls back to 35-D music_index.py when laion_clap absent; incremental (skips existing)
+  - `find_similar(query_name, query_audio, query_text, k, camelot_filter, bpm_range)` —
+    cosine similarity over unit-norm embeddings; supports combined audio+text queries;
+    keyword fallback for text when CLAP absent
+  - `_text_keyword_fallback()` — word-overlap matching on song names
+  - `get_stats()` — n_songs, backend, dim, built_at
+  - Index persisted at `data/clap_index.npy` + `data/clap_index_meta.json`
+- `get_digger()` — module-level singleton
+
+**`routers/analysis.py` (updated):**
+- `GET /library/crate-search?q=&name=&k=&camelot=&bpm_min=&bpm_max=` — CLAP semantic search
+- `POST /library/build-clap-index?force=` — async job to build/update CLAP index
+
+## Current State
+
+```
+Branch: main
+Tests: 374+ pass ✅ (11 pre-existing failures in TestGenreDetection + TestRateLimiting, unchanged)
+New files: scripts/core/cue_export.py, scripts/core/energy_profiler.py, scripts/core/crate_digger.py,
+           tests/test_cue_export.py, tests/test_energy_profiler.py, tests/test_crate_digger.py
+Next: Stage 4 items — Vocal Analyzer (CREPE), CUE-DETR, B-Roll matching
+      Or: router TestClient smoke tests for new endpoints
+      See IMPROVEMENTS_V2.md for full roadmap
+```
+
+### Gotchas added
+
+```
+**favoritesApi shape** — GET /favorites returns {songs, count}, not a plain array.
+Frontend must unwrap .songs. Fixed in api.ts; do not re-introduce the raw get<string[]>.
+
+**Serato GEOB requires .mp3** — export_serato_markers() raises ValueError for WAV/FLAC.
+The Serato binary format has no FLAC/WAV equivalent. Use rekordbox for non-MP3 tracks.
+
+**CLAP auto-download** — _load_clap_model() calls model.load_ckpt() with no path,
+which auto-downloads ~300 MB to ~/.cache/. Set models.clap_model in config.yaml to a
+local path to avoid re-downloading. First call takes 30–60 s on slow connections.
+
+**CLAP index vs music_index** — data/clap_index.npy is separate from data/music_index.json.
+Both can coexist. /library/similar/{name} still uses music_index.py (35-D).
+/library/crate-search uses crate_digger.py (CLAP 512-D or 35-D fallback).
+
+**enrich_track_node side effect** — modifies track.energy in-place. If you still want
+the original Spotify energy after enrichment, save it before calling enrich_track_node.
+```
+
+---
+
+# Session Update: June 29, 2026 (session 2) — Stage 2 Improvements ✅
+
+## What Happened
+
+Implemented IMPROVEMENTS_V2.md Stage 2 (beat tracking + bar-grid cue snapping + stem bass muting).
+
+| Item | Status | Files |
+|------|--------|-------|
+| BeatTracker Protocol interface + BeatResult dataclass | ✅ | `beat_tracker.py` (new) |
+| LibrosaBeatTracker — wraps librosa, estimates downbeats | ✅ | `beat_tracker.py` |
+| BeatThisTracker — Beat This! (ISMIR 2024), falls back gracefully | ✅ | `beat_tracker.py` |
+| `get_tracker(backend)` / `get_configured_tracker()` factory | ✅ | `beat_tracker.py` |
+| `SongStructure.downbeat_times` field | ✅ | `dj_analysis.py` |
+| `_analyze_impl` → `get_configured_tracker().track()` | ✅ | `dj_analysis.py` |
+| `_snap_to_bar_grid()` — SSM boundaries snapped to 8/16/32-bar grid | ✅ | `dj_analysis.py` |
+| `_detect_phrase_boundaries()` now accepts + uses downbeat_times | ✅ | `dj_analysis.py` |
+| `_stem_bass_ramp()` — cosine taper true stem muting at swap point | ✅ | `dj_engine.py` |
+| `render_stem_blend()` bass path → `_stem_bass_ramp()` (no IIR bleed) | ✅ | `dj_engine.py` |
+| 24 BeatTracker tests (15 pass, 9 skip on machines without librosa) | ✅ | `tests/test_beat_tracker.py` (new) |
+| 9 bar-grid snapping tests | ✅ | `tests/test_beat_tracker.py` |
+| 21 stem bass ramp behavioral tests | ✅ | `tests/test_stem_bass_ramp.py` (new) |
+
+### Key additions
+
+**`scripts/core/beat_tracker.py` (new):**
+- `BeatResult` dataclass: `beat_times`, `beat_frames`, `downbeat_times`, `bpm`, `sr`, `backend`
+- `BeatResult.nearest_downbeat(t)` / `nearest_downbeat_at_or_after(t)` — bar-aware helpers
+- `LibrosaBeatTracker.track()` — downbeats estimated as beat[::4] from librosa output
+- `BeatThisTracker.track()` — model-predicted downbeats via `beat-this` package; falls back to librosa if not installed; writes temp WAV → reads beats → cleans up
+- `get_tracker(backend)` — accepts `"librosa"`, `"beat_this"`, `"auto"` (prefers beat_this if available)
+- `get_configured_tracker()` — reads `config.yaml: analysis.beat_backend`
+
+**`scripts/core/dj_analysis.py` (updated):**
+- `SongStructure.downbeat_times: list` field added (default `[]`)
+- `_analyze_impl()` replaced bare `librosa.beat.beat_track()` with `get_configured_tracker().track()`
+- `struct.downbeat_times` populated from `BeatResult.downbeat_times`
+- `_snap_to_bar_grid(boundary_times, downbeat_times, preferred_lengths_bars=[8,16,32])` — pure-numpy bar-grid snapper; scores candidates by phrase-length alignment + proximity; deduplicates + sorts output
+- `_detect_phrase_boundaries()` accepts `downbeat_times` kwarg; passes raw SSM boundaries through `_snap_to_bar_grid()` when available
+
+**`scripts/core/dj_engine.py` (updated):**
+- `_stem_bass_ramp(stem_a_bass, stem_b_bass, swap_sample, ramp_samples)` — module-level DSP helper
+  - Song A: cosine taper 1→0 over ramp window ending at swap_sample; hard zero after
+  - Song B: hard zero before swap_sample; cosine taper 0→1 over ramp window after
+  - `ramp_samples=0` → hard instantaneous cut (backward compatible)
+  - cos² (Hann) taper: derivative=0 at endpoints → no audible click on sustained bass
+- `render_stem_blend()` bass path: removed inline linspace fade; now calls `_stem_bass_ramp(ramp_samples=int(0.10*sr))` and `continue`s past generic stem A/B slice code
+
+## Current State
+
+```
+Branch: main
+Tests: 305+ pass ✅
+New files: scripts/core/beat_tracker.py, tests/test_beat_tracker.py, tests/test_stem_bass_ramp.py
+Next: Stage 3 — paper draft (ISMIR 2027 target), router/endpoint smoke tests, openapi-typescript CI
+      See IMPROVEMENTS_V2.md for the full staged roadmap
+```
+
+### Gotchas added
+
+```
+**BeatThisTracker temp WAV** — BeatThisTracker writes audio to a tmp WAV at 16kHz
+(beat-this expected sample rate), runs inference, then os.unlink().  On crash the
+temp file is not cleaned up.  Use LibrosaBeatTracker if temp-file hygiene matters.
+
+**_snap_to_bar_grid search window** — defaults to ±2 bars.  If a raw SSM boundary
+falls more than 2 bars from any downbeat (unusual), it is returned unchanged rather
+than snapped.  Extremely short songs (<8 bars) may produce no snapping.
+
+**_stem_bass_ramp ramp clamping** — ramp_samples is clamped to
+min(swap_sample, n - swap_sample) to prevent array overruns on short transitions.
+At swap_sample=1 the ramp degrades to a hard cut regardless of requested width.
+```
+
+---
+
+# Session Update: June 29, 2026 — Stage 1 Improvements ✅
+
+## What Happened
+
+Implemented IMPROVEMENTS_V2.md Stage 1 (analysis foundation upgrades) and wrote comprehensive
+tests. All new code passes; no regressions in existing suite.
+
+| Item | Status | Files |
+|------|--------|-------|
+| FxNorm per-stem-type LUFS normalization | ✅ | `mastering.py`, `dj_engine.py`, `routers/library.py` |
+| TIV harmonic scoring (Bernardes et al. 2016) | ✅ | `tiv_scoring.py` (new), `dj_analysis.py` |
+| 28 new mastering tests (FxNorm) | ✅ | `tests/test_mastering.py` |
+| 25 new TIV tests | ✅ | `tests/test_tiv_scoring.py` (new) |
+| IMPROVEMENTS_V2.md staged plan | ✅ | `IMPROVEMENTS_V2.md` (new) |
+
+### Key additions
+
+**`mastering.py`:**
+- `analyze_library_stem_targets(library_dir)` — scans all stems, returns corpus-mean LUFS per type
+- `normalize_stems_to_corpus_targets(stems, targets)` — per-stem-type LUFS normalization (FxNorm scheme)
+- `load_stem_targets()` / `save_stem_targets()` — JSON cache at `data/stem_lufs_targets.json`
+- `_STEM_FALLBACK_TARGETS` — empirical defaults: drums -18.5, bass -21.0, vocals -19.5, other -21.5
+
+**`dj_engine.py`:** `render_stem_blend()` now calls `normalize_stems_to_corpus_targets()` with
+corpus targets (falls back to flat -20 LUFS if cache absent).
+
+**`routers/library.py`:** `POST /library/calibrate-lufs` — async job that runs corpus analysis
+and writes `data/stem_lufs_targets.json`. Run once after library setup.
+
+**`tiv_scoring.py` (new):**
+- Pure-numpy TIV implementation — no git submodule; paper math is self-contained
+- `tiv_from_chroma(chroma)` → complex (6,) TIV vector
+- `tiv_harmonic_score(chroma_a, chroma_b)` → float [0,1]
+- `compare_tiv_vs_camelot(...)` → {tiv_score, camelot_adjacent, camelot_distance}
+- `all_key_compatibility_matrix()` → 24×24 symmetric matrix
+
+**`dj_analysis.py`:** `TransitionPlan.tiv_compatibility: Optional[float]` — populated when
+`song.mean_chroma` is available from `analyze_structure()`.
+
+## Current State
+
+```
+Branch: main
+Tests: 279+/279+ pass  (226 existing + 25 TIV + ~28 new mastering; 8 skip on machines without soundfile)
+New files: scripts/core/tiv_scoring.py, tests/test_tiv_scoring.py, IMPROVEMENTS_V2.md
+Next: Stage 2A — Beat This! BeatTracker interface
+      Stage 2B — bar-grid cue point snapping
+      Stage 2C — true stem-level bass muting
+      (See IMPROVEMENTS_V2.md for full roadmap)
+```
+
+### Gotchas added
+
+```
+**Per-stem LUFS targets** — data/stem_lufs_targets.json must be generated via
+POST /library/calibrate-lufs before normalize_stems_to_corpus_targets() uses
+corpus-derived values.  Without it, falls back to _STEM_FALLBACK_TARGETS.
+
+**TIV scoring** — tiv_scoring.py is self-contained (no TIVlib git submodule).
+Implements Bernardes et al. 2016 TIS math directly (30 lines of numpy).
+tiv_harmonic_score(C major, G major) ≈ 0.52 — this is correct TIS behavior
+(tonal-center distance, not note-overlap).
+Calibrated values with binary scale templates:
+  same-key = 1.00 | relative major/minor (same note set) = 1.00
+  adjacent 5th ≈ 0.52 | tritone ≈ 0.47
+All 24×24 key pairs land in [0.36, 1.0] — the TIV floor with binary templates
+is ~0.36, not 0.0 (zero would require maximally anti-correlated tonal content).
+```
+
+---
+
+# Session Update: June 28, 2026 — Audit Bug Fixes ✅
+
+## What Happened
+
+Deep audit pass across correctness, schema drift, test coverage, and production readiness.
+Seven bugs fixed; 36 behavioral tests added.
+
+| Bug | Severity | File | Fix |
+|-----|----------|------|-----|
+| Song B audible in "solo A" first half | **critical** | `dj_engine.py:_apply_dynamic_eq_fade` | Zero head for `direction="in"`; match `render_chain` semantics |
+| Clash-path bass swap disabled at worst moment | major | `dj_analysis.py:plan_transition` | Compute consonance/shortening **before** `EQPlan` construction |
+| Camelot semitone table wrong (A-ring +1, B-ring 1B–7B −4) | major | `key_detection.py:pitch_shift_for_camelot` | Derive from `CAMELOT`+`NOTE_NAMES`; delete inline dict |
+| SSE broadcasts silently dropped on Python 3.12 | major | `api/main.py:_sync_emit` | Capture loop with `get_running_loop()` in lifespan; close over it |
+| SQLite connection leak (one per progress tick) | major | `api/jobs.py` | `contextlib.closing()` on every `_get_conn()` |
+| ETA `ZeroDivisionError` when elapsed=0 | minor | `api/jobs.py:update_job` | `max(elapsed, 1e-6)` |
+| `_cancelled` set grows unbounded | minor | `api/jobs.py` | `discard(job_id)` on completion and failure |
+| REST status `"done"` ≠ SSE `"COMPLETED"` | critical | `api/jobs.py`, `api/schemas.py` | `job_to_response` uses `_norm_status`; `JobResponse.status: str` |
+| `logger.warning("...%s", exc)` crashes StructuredLogger | — | `api/jobs.py` (8 sites) | All converted to f-strings |
+| Dead LP coefficients computed but never applied | minor | `dj_engine.py:render` | Removed |
+| `swap_sample` division by zero if `transition_bars=0` | minor | `dj_engine.py:render` | `max(transition_bars, 1)` guard |
+
+## Current State
+
+```
+Branch: main
+Commit: 5ef1b87
+Tests: 226/226 pass (190 existing + 36 new behavioral)
+New test file: tests/test_behavioral.py
+Next: Stage 3B — paper draft (ISMIR 2027 target)
+      Router/endpoint smoke tests (routers/ still zero TestClient coverage)
+      openapi-typescript in CI (schema drift prevention)
+      setlist_planner tests (flagship feature, still zero coverage)
+```
+
+## Remaining Test Gaps (from audit Dimension 3)
+
+| Module | Status |
+|--------|--------|
+| `mastering.py` known-signal tests | ✅ `test_mastering.py` exists |
+| `key_detection` Camelot/harmonic utils | ✅ Added to `test_behavioral.py` |
+| `jobs.py` lifecycle | ✅ Added to `test_behavioral.py` |
+| render() B-silence behavioral | ✅ Added to `test_behavioral.py` |
+| `setlist_planner.py` | ❌ Zero tests — `MarkovTransitionModel`, `optimize`, `export_csv` |
+| `routers/` + `task_modules/` | ❌ Zero `TestClient` endpoint tests |
+| `render_chain()` behavioral | ❌ Only shape tests exist |
 
 ---
 
@@ -343,7 +651,7 @@ pytest tests/ -v --looponfail
 ### Verify State
 ```bash
 # Tests
-pytest tests/ -q  # 167 tests pass
+pytest tests/ -q -m "not dj_analysis"  # 226 tests pass
 
 # Build
 cd frontend && npm run build
@@ -386,14 +694,14 @@ User click → Page calls API → FastAPI router validates + creates job (202 Ac
 ## Version Info
 
 ```
-Last updated: June 26, 2026
-Merge status: Complete ✅ (3 branches consolidated)
-Test status: 167/167 pass ✅
-Build status: Clean (frontend + backend)
-API status: Running, SSE functional, job queue operational
-Next phase: Improvements planning (Sonnet-assisted)
+Last updated: June 29, 2026 (third session)
+Branch: main
+Tests: 374+ pass ✅ (use: pytest -m "not dj_analysis and not integration" --ignore=tests/e2e_test_suite.py --ignore=tests/test_audio_source.py)
+Build status: Clean (frontend + backend); Library Atlas crash fixed
+API status: SSE functional, job queue operational; new endpoints:
+            GET /library/{name}/export-cues, GET /library/crate-search, POST /library/build-clap-index
+Next phase: Stage 4 items (Vocal Analyzer, CUE-DETR, B-Roll matching)
+            Router TestClient smoke tests for new endpoints
+            openapi-typescript CI (schema drift prevention)
+            See IMPROVEMENTS_V2.md for the full staged roadmap
 ```
-
----
-
-**Ready to proceed. Brief Claude Sonnet with this context for rapid improvements planning.**

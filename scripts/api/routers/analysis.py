@@ -5,8 +5,10 @@ POST /compatibility                    — instant Camelot + BPM check
 POST /analyze                          — genre + structure analysis (queued job)
 GET  /recommend/{name}                 — top compatible songs for a track
 GET  /library/similar/{name}           — RAG vector similarity search
+GET  /library/crate-search             — CLAP 512-D semantic similarity search
 GET  /index/stats                      — RAG index statistics
 POST /index/rebuild                    — rebuild RAG index (queued job)
+POST /library/build-clap-index         — build / update CLAP embedding index (queued job)
 """
 
 from typing import List, Optional
@@ -172,4 +174,119 @@ def rebuild_index(background_tasks: BackgroundTasks = None):
     _check_job_cap()
     job_id = job_store.create_job(JobType.ANALYZE, {"type": "index_rebuild"})
     job_store.submit_job(job_id, task_rebuild_index)
+    return job_store.job_to_response(job_store.get_job(job_id))
+
+
+# ---------------------------------------------------------------------------
+# Stage 3A — CLAP Crate Digger (semantic similarity search)
+# ---------------------------------------------------------------------------
+
+@router.get("/library/crate-search", tags=["analysis"])
+def crate_search(
+    q: Optional[str] = Query(None, description="Text query ('dark minimal techno')"),
+    name: Optional[str] = Query(None, description="Library song name to use as audio query"),
+    k: int = Query(10, ge=1, le=50, description="Number of results"),
+    camelot: Optional[str] = Query(None, description="Camelot key filter, e.g. '10A'"),
+    bpm_min: Optional[float] = Query(None, description="Minimum BPM filter"),
+    bpm_max: Optional[float] = Query(None, description="Maximum BPM filter"),
+):
+    """
+    Semantic similarity search using CLAP 512-D embeddings.
+
+    At least one of ``q`` (text) or ``name`` (song) must be provided.
+    When both are supplied, their embeddings are averaged before search.
+
+    Requires ``laion_clap`` (``pip install laion_clap``).  Falls back to the
+    35-D music_index.py search when CLAP is not installed; text queries are
+    degraded to a name-substring keyword match in that case.
+
+    Returns the top-k results sorted by similarity descending.
+    """
+    if not q and not name:
+        raise HTTPException(status_code=400, detail="Provide at least one of: q (text) or name (song)")
+
+    bpm_range = None
+    if bpm_min is not None or bpm_max is not None:
+        bpm_range = (float(bpm_min or 0.0), float(bpm_max or 9999.0))
+
+    try:
+        from scripts.core.crate_digger import get_digger
+        digger = get_digger()
+        if digger.is_empty():
+            raise HTTPException(
+                status_code=404,
+                detail="CLAP index is empty — run POST /library/build-clap-index first",
+            )
+        results = digger.find_similar(
+            query_name=name,
+            query_text=q,
+            k=k,
+            camelot_filter=camelot,
+            bpm_range=bpm_range,
+        )
+        return {
+            "query_text": q,
+            "query_name": name,
+            "results": [
+                {
+                    "name": r.name,
+                    "score": round(r.score, 4),
+                    "bpm": r.bpm,
+                    "key": r.key,
+                    "camelot": r.camelot,
+                    "energy": r.energy,
+                    "backend": r.backend,
+                }
+                for r in results
+            ],
+            "backend": results[0].backend if results else "none",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/library/build-clap-index", response_model=JobResponse, status_code=202, tags=["analysis"])
+def build_clap_index(
+    force: bool = Query(False, description="Re-embed all songs even if already indexed"),
+):
+    """
+    Build (or update) the CLAP 512-D embedding index for the whole library.
+
+    Uses LAION-CLAP (``pip install laion_clap``) when available; falls back
+    to the 35-D music_index.py embeddings.
+
+    Already-indexed songs are skipped unless ``force=True``.
+
+    Returns a job_id for SSE tracking.
+    """
+    _check_job_cap()
+
+    def _task_build_clap(job_id: str) -> None:
+        try:
+            from scripts.core.crate_digger import get_digger
+            job_store.update_job(job_id, status="running", progress=0.05,
+                                 message="Initialising CLAP index…")
+
+            def _progress(frac: float):
+                job_store.update_job(
+                    job_id, progress=max(0.05, min(0.95, frac)),
+                    message=f"Embedding songs… {int(frac * 100)}%",
+                )
+
+            digger = get_digger()
+            n = digger.index_library(progress_cb=_progress, force=force)
+            stats = digger.get_stats()
+            job_store.update_job(
+                job_id, status="done", progress=1.0,
+                message=f"CLAP index built: {stats['n_songs']} songs",
+                result=stats,
+            )
+        except Exception as exc:
+            job_store.update_job(job_id, status="failed",
+                                 message=f"CLAP index build failed: {exc}")
+
+    job_id = job_store.create_job(JobType.ANALYZE, {"type": "build_clap_index", "force": force})
+    job_store.submit_job(job_id, _task_build_clap)
     return job_store.job_to_response(job_store.get_job(job_id))

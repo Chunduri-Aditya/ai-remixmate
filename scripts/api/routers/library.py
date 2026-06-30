@@ -7,7 +7,9 @@ GET  /library/{name}                       — single song detail
 DELETE /library/{name}                     — remove song from library
 GET  /library/{name}/audio                 — stream the full.wav
 GET  /library/{name}/stems/{stem}          — stream a specific stem
+GET  /library/{name}/export-cues           — export cue points (rekordbox|serato)
 GET  /outputs/{session_id}/{filename}      — stream a rendered mix
+POST /library/calibrate-lufs               — compute per-stem LUFS targets
 POST /library/initialize                   — one-shot pipeline
 """
 
@@ -180,6 +182,178 @@ def stream_output(session_id: str, filename: str):
 # ---------------------------------------------------------------------------
 # Full library initialisation (stem split → compress → index, one job)
 # ---------------------------------------------------------------------------
+
+@router.post("/library/calibrate-lufs", response_model=JobResponse, status_code=202, tags=["library"])
+def calibrate_stem_lufs():
+    """
+    Compute per-stem-type LUFS corpus targets across the whole library.
+
+    Iterates every song that has Demucs stems, measures integrated LUFS for
+    each stem type (drums / bass / vocals / other), and writes the per-type
+    means to ``data/stem_lufs_targets.json``.  Subsequent remix calls will use
+    these corpus-derived targets instead of the flat -20 LUFS fallback.
+
+    Run this once after initial library setup, or after adding many new tracks.
+    Returns a job_id for SSE tracking.
+    """
+    _check_job_cap()
+
+    def _task_calibrate_lufs(job_id: str) -> None:
+        try:
+            from scripts.core.mastering import analyze_library_stem_targets, save_stem_targets
+            from scripts.core.paths import DATA_DIR
+
+            job_store.update_job(job_id, status="running", progress=0.1,
+                                 message="Scanning library stems…")
+            targets = analyze_library_stem_targets()
+            job_store.update_job(job_id, progress=0.9, message="Saving targets…")
+            save_stem_targets(targets, cache_path=DATA_DIR / "stem_lufs_targets.json")
+            job_store.update_job(job_id, status="done", progress=1.0,
+                                 message="Stem LUFS calibration complete",
+                                 result=targets)
+        except Exception as exc:
+            job_store.update_job(job_id, status="failed",
+                                 message=f"Calibration failed: {exc}")
+
+    job_id = job_store.create_job(JobType.ANALYZE, {"type": "calibrate_lufs"})
+    job_store.submit_job(job_id, _task_calibrate_lufs)
+    return job_store.job_to_response(job_store.get_job(job_id))
+
+
+@router.get("/library/{name}/export-cues", tags=["library"])
+def export_cues(
+    name: str,
+    fmt: str = Query("rekordbox", description="Export format: 'rekordbox' or 'serato'"),
+):
+    """
+    Export RemixMate cue points and phrase boundaries for a song to DJ software format.
+
+    Reads the song's analysis file (``analysis.json``) for phrase boundaries and BPM.
+    Returns the exported file as a download (``Content-Disposition: attachment``).
+
+    Formats
+    -------
+    rekordbox
+        Standard rekordbox 6+ XML collection file with HOT CUE and MEMORY CUE markers.
+        Compatible with rekordbox 6+, DJay Pro (via XML import), and VirtualDJ.
+        Returns ``application/xml``.
+
+    serato
+        Serato Markers2 GEOB ID3 tags written into the song's .mp3 file and returned
+        as ``audio/mpeg``.  Requires mutagen (``pip install mutagen``).
+        Only works when the song was downloaded as an .mp3 (not WAV).
+
+    The first phrase boundary is used as Cue 1, each subsequent boundary as further cues.
+    If no analysis exists, only Cue 1 at 0.0 s is exported and BPM is 0.
+    """
+    import json, tempfile, shutil
+    from fastapi.responses import FileResponse as _FileResponse
+
+    song_dir = _require_song(name)
+    fmt = fmt.lower().strip()
+
+    if fmt not in ("rekordbox", "serato"):
+        raise HTTPException(status_code=400, detail=f"Unknown format {fmt!r}. Use 'rekordbox' or 'serato'.")
+
+    # ── Load analysis if present ──────────────────────────────────────────────
+    analysis_path = song_dir / "analysis.json"
+    bpm: float = 0.0
+    phrase_boundaries: list[float] = []
+    artist: str = ""
+    duration: float = 0.0
+
+    if analysis_path.exists():
+        try:
+            data = json.loads(analysis_path.read_text())
+            bpm = float(data.get("bpm", 0.0))
+            phrase_boundaries = [float(t) for t in data.get("phrase_boundaries", [])]
+            artist = str(data.get("artist", ""))
+            duration = float(data.get("duration", 0.0))
+        except Exception:
+            pass  # fall through to defaults
+
+    # Cue points = phrase boundaries, or [0.0] if none
+    cue_points = phrase_boundaries if phrase_boundaries else [0.0]
+
+    try:
+        from scripts.core.cue_export import export_cues as _export_cues
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"cue_export module unavailable: {e}")
+
+    if fmt == "rekordbox":
+        # Write to a temp file, stream it, then clean up
+        with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as f:
+            tmp_path = Path(f.name)
+        try:
+            _export_cues(
+                song_name=name,
+                cue_points=cue_points,
+                phrase_boundaries=phrase_boundaries,
+                bpm=bpm,
+                fmt="rekordbox",
+                output_path=tmp_path,
+                audio_path=(song_dir / "full.wav") if (song_dir / "full.wav").exists() else None,
+                artist=artist,
+                total_time_s=duration,
+            )
+            # FileResponse streams the file; FastAPI deletes it after sending via background task
+            return _FileResponse(
+                str(tmp_path),
+                media_type="application/xml",
+                filename=f"{name}_rekordbox.xml",
+                background=_delete_tmp(tmp_path),
+            )
+        except Exception as exc:
+            tmp_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    # serato — need an mp3 source file
+    mp3_candidates = list(song_dir.glob("*.mp3"))
+    if not mp3_candidates:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Serato export requires an .mp3 source file. "
+                f"No .mp3 found in library/{name}/. "
+                "Download the track as MP3 first."
+            ),
+        )
+    src_mp3 = mp3_candidates[0]
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+        tmp_path = Path(f.name)
+    shutil.copy2(src_mp3, tmp_path)
+    try:
+        _export_cues(
+            song_name=name,
+            cue_points=cue_points,
+            phrase_boundaries=phrase_boundaries,
+            bpm=bpm,
+            fmt="serato",
+            output_path=tmp_path,
+            audio_path=tmp_path,
+        )
+        return _FileResponse(
+            str(tmp_path),
+            media_type="audio/mpeg",
+            filename=f"{name}_serato.mp3",
+            background=_delete_tmp(tmp_path),
+        )
+    except ImportError as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=501,
+            detail=f"mutagen not installed — cannot write Serato tags. Install with: pip install mutagen. ({exc})",
+        )
+    except Exception as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+def _delete_tmp(path: Path):
+    """Background task that removes a temp file after the response is sent."""
+    from starlette.background import BackgroundTask
+    return BackgroundTask(lambda: path.unlink(missing_ok=True))
+
 
 @router.post("/library/initialize", response_model=JobResponse, status_code=202, tags=["library"])
 def initialize_library(req: InitializeLibraryRequest, background_tasks=None):

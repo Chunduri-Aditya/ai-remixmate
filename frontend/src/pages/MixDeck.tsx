@@ -24,7 +24,7 @@ import { WaveformDeck } from '@/components/WaveformDeck'
 import { TransitionTimeline } from '@/components/TransitionTimeline'
 import { RemixControls, RemixOptions, REMIX_DEFAULTS } from '@/components/RemixControls'
 import { CamelotWheel } from '@/components/CamelotWheel'
-import type { SongInfo, CompatibilityResult } from '@/types'
+import type { SongInfo, CompatibilityResult, SimilarTrack } from '@/types'
 import './PageBase.css'
 import './MixDeck.css'
 
@@ -38,21 +38,25 @@ function DeckCard({
   song,
   songInfo,
   songs,
+  suggestedSongs,
   onChange,
   audioUrl,
   cueStart,
   cueEnd,
   shortcutTarget,
+  loadingSongInfo,
 }: {
   label: 'A' | 'B'
   song: string
   songInfo?: SongInfo
   songs: string[]
+  suggestedSongs?: string[]
   onChange: (v: string) => void
   audioUrl?: string
   cueStart?: number
   cueEnd?: number
   shortcutTarget?: boolean
+  loadingSongInfo?: boolean
 }) {
   const accentVar = label === 'A' ? 'var(--color-amber-500)' : 'var(--color-ice-400)'
   const glowVar   = label === 'A' ? 'var(--color-amber-glow)' : 'var(--color-ice-glow)'
@@ -75,37 +79,74 @@ function DeckCard({
           onChange={(e) => onChange(e.target.value)}
         >
           <option value="">— select a track —</option>
-          {songs.map((n) => <option key={n} value={n}>{n}</option>)}
+          {suggestedSongs && suggestedSongs.length > 0 ? (
+            <>
+              <optgroup label="✦ Similar to Deck A">
+                {suggestedSongs.map((n) => (
+                  <option key={`sug-${n}`} value={n}>{n}</option>
+                ))}
+              </optgroup>
+              <optgroup label="All tracks">
+                {songs.filter((n) => !suggestedSongs.includes(n)).map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </optgroup>
+            </>
+          ) : (
+            songs.map((n) => <option key={n} value={n}>{n}</option>)
+          )}
         </select>
       </div>
 
-      {songInfo ? (
+      {song ? (
         <div className="md-deck__meta">
           <div className="md-meta-row">
             <span className="md-meta-key text-muted">BPM</span>
             <span className="md-meta-val font-mono">
-              {songInfo.bpm?.toFixed(1) ?? '—'}
+              {loadingSongInfo && !songInfo?.bpm
+                ? <Loader2 size={11} className="md-spin" />
+                : songInfo?.bpm?.toFixed(1) ?? '—'}
             </span>
           </div>
           <div className="md-meta-row">
             <span className="md-meta-key text-muted">Key</span>
             <span className="md-meta-val font-mono">
-              {songInfo.key ?? '—'}
-              {songInfo.camelot && (
-                <span className="md-camelot">{songInfo.camelot}</span>
-              )}
+              {loadingSongInfo && !songInfo?.key
+                ? <Loader2 size={11} className="md-spin" />
+                : (
+                  <>
+                    {songInfo?.key ?? '—'}
+                    {songInfo?.camelot && (
+                      <span className="md-camelot">{songInfo.camelot}</span>
+                    )}
+                  </>
+                )}
             </span>
           </div>
           <div className="md-meta-row">
             <span className="md-meta-key text-muted">Energy</span>
             <span className="md-meta-val font-mono">
-              {songInfo.energy !== undefined ? `${Math.round(songInfo.energy * 100)}` : '—'}
+              {loadingSongInfo && songInfo?.energy === undefined
+                ? <Loader2 size={11} className="md-spin" />
+                : songInfo?.energy !== undefined
+                  ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {Math.round(songInfo.energy * 100)}
+                      <span className="md-energy-bar">
+                        <span
+                          className="md-energy-fill"
+                          style={{ width: `${Math.round(songInfo.energy * 100)}%` }}
+                        />
+                      </span>
+                    </span>
+                  )
+                  : '—'}
             </span>
           </div>
           <div className="md-meta-row">
             <span className="md-meta-key text-muted">Stems</span>
-            <span className={`md-meta-val font-mono ${songInfo.has_stems ? 'md-green' : 'md-muted'}`}>
-              {songInfo.has_stems ? 'yes' : 'no'}
+            <span className={`md-meta-val font-mono ${songInfo?.has_stems ? 'md-green' : 'md-muted'}`}>
+              {songInfo?.has_stems ? 'yes' : 'no'}
             </span>
           </div>
         </div>
@@ -301,9 +342,41 @@ export default function MixDeck() {
     staleTime: 60_000,
   })
 
+  // Fetch full detail for each selected song (includes BPM / key / energy from analysis.json)
+  const { data: detailA, isLoading: loadingA } = useQuery<SongInfo>({
+    queryKey: ['song-detail', songA],
+    queryFn: () => libraryApi.get(songA),
+    enabled: !!songA,
+    staleTime: 120_000,
+  })
+  const { data: detailB, isLoading: loadingB } = useQuery<SongInfo>({
+    queryKey: ['song-detail', songB],
+    queryFn: () => libraryApi.get(songB),
+    enabled: !!songB,
+    staleTime: 120_000,
+  })
+
+  // Fetch similar songs for Deck B when Deck A is loaded
+  const { data: similarTracksA = [] } = useQuery<SimilarTrack[]>({
+    queryKey: ['similar', songA],
+    queryFn: () => analysisApi.similar(songA, 8),
+    enabled: !!songA,
+    staleTime: 300_000,
+  })
+
   const songNames  = useMemo(() => songs.map((s) => s.name).sort(), [songs])
   const infoA      = useMemo(() => songs.find((s) => s.name === songA), [songs, songA])
   const infoB      = useMemo(() => songs.find((s) => s.name === songB), [songs, songB])
+
+  // Use the detailed fetch (has analysis) if available; fall back to list entry
+  const songInfoA = detailA ?? infoA
+  const songInfoB = detailB ?? infoB
+
+  // Names of similar songs for Deck B, excluding Deck A's song itself
+  const similarNamesForB = useMemo(
+    () => similarTracksA.map((t) => t.name).filter((n) => n !== songA),
+    [similarTracksA, songA],
+  )
   const canCompare = songA && songB && songA !== songB
   const shortcutDeck: 'A' | 'B' | null = songA ? 'A' : songB ? 'B' : null
 
@@ -315,7 +388,7 @@ export default function MixDeck() {
   const cueStartA  = compat?.transition_plan?.exit_time_a
   const cueEndA    = compat?.transition_plan?.entry_time_b
   const cueStartB  = compat?.transition_plan?.entry_time_b
-  const cueEndB    = cueStartB !== undefined ? cueStartB + (infoB?.duration ?? 0) * 0.1 : undefined
+  const cueEndB    = cueStartB !== undefined ? cueStartB + (songInfoB?.duration ?? 0) * 0.1 : undefined
 
   async function checkCompat() {
     if (!canCompare) return
@@ -394,13 +467,14 @@ export default function MixDeck() {
           <DeckCard
             label="A"
             song={songA}
-            songInfo={infoA}
+            songInfo={songInfoA}
             songs={songNames}
             onChange={(v) => { setSongA(v); setCompat(null) }}
             audioUrl={audioUrlA}
             cueStart={cueStartA}
             cueEnd={cueEndA}
             shortcutTarget={shortcutDeck === 'A'}
+            loadingSongInfo={loadingA}
           />
 
           <div className="md-center">
@@ -418,13 +492,15 @@ export default function MixDeck() {
           <DeckCard
             label="B"
             song={songB}
-            songInfo={infoB}
+            songInfo={songInfoB}
             songs={songNames}
+            suggestedSongs={similarNamesForB}
             onChange={(v) => { setSongB(v); setCompat(null) }}
             audioUrl={audioUrlB}
             cueStart={cueStartB}
             cueEnd={cueEndB}
             shortcutTarget={shortcutDeck === 'B'}
+            loadingSongInfo={loadingB}
           />
         </div>
 
@@ -435,14 +511,14 @@ export default function MixDeck() {
         {compat && <CompatPanel result={compat} />}
         {songA && songB && (
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 'var(--space-2)' }}>
-            <CamelotWheel keyA={infoA?.key} keyB={infoB?.key} size={220} />
+            <CamelotWheel keyA={songInfoA?.key} keyB={songInfoB?.key} size={220} />
           </div>
         )}
         {compat && (
           <TransitionTimeline
             result={compat}
-            durationA={infoA?.duration}
-            durationB={infoB?.duration}
+            durationA={songInfoA?.duration}
+            durationB={songInfoB?.duration}
           />
         )}
 
@@ -476,7 +552,7 @@ export default function MixDeck() {
                 <input
                   type="number"
                   className="md-input"
-                  placeholder={infoA?.bpm?.toFixed(1) ?? 'auto'}
+                  placeholder={songInfoA?.bpm?.toFixed(1) ?? 'auto'}
                   value={targetBpm}
                   onChange={(e) => setTargetBpm(e.target.value)}
                   min={60}

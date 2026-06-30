@@ -138,6 +138,9 @@ class TrackNode:
     genres: List[str] = field(default_factory=list)
     spotify_id: str = ""
 
+    # Energy Profiler (Stage 3B) — populated by enrich_track_node()
+    arousal_predicted: Optional[float] = None   # model/numpy arousal [0,1]
+
     @property
     def display(self) -> str:
         return f"{self.artist} — {self.name}" if self.artist else self.name
@@ -213,9 +216,13 @@ def transition_cost(
 
     # ── Energy flow cost ──────────────────────────────────────────────────────
     ideal_energy = _arc_target_energy(arc_position, arc)
-    energy_delta = abs(b.energy - ideal_energy)
+    # Prefer arousal_predicted (from energy_profiler) when available.
+    # Falls back to the Spotify-derived energy field.
+    b_energy = b.arousal_predicted if b.arousal_predicted is not None else b.energy
+    a_energy = a.arousal_predicted if a.arousal_predicted is not None else a.energy
+    energy_delta = abs(b_energy - ideal_energy)
     # Also penalise skipping more than 2 energy levels from A to B
-    direct_jump = abs(b.energy - a.energy)
+    direct_jump = abs(b_energy - a_energy)
     energy_cost = min(1.0, energy_delta * 0.6 + direct_jump * 0.4)
 
     total = (
@@ -514,6 +521,9 @@ class SetlistPlanner:
                     best_track = candidate
                     best_ts = ts
 
+            # Capture current's position BEFORE appending best_track so
+            # len(ordered)-1 is current's index, not best_track's index.
+            current_position = len(ordered) - 1
             ordered.append(best_track)
             remaining.remove(best_track)
             cumulative_cost += best_score
@@ -521,7 +531,7 @@ class SetlistPlanner:
             # Record this step's transition
             results.append({
                 **current.to_dict(),
-                "position": len(ordered) - 1,
+                "position": current_position,
                 "arc_target_energy": round(_arc_target_energy(position, arc), 3),
                 "transition_to_next": {
                     "next_track": best_track.display,

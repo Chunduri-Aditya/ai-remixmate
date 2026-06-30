@@ -54,7 +54,7 @@ from scripts.core.dj_analysis import (
 )
 
 # Mastering utilities — used for per-stem LUFS normalization in render_stem_blend()
-from scripts.core.mastering import normalize_stems_to_target
+from scripts.core.mastering import normalize_stems_to_target, normalize_stems_to_corpus_targets, load_stem_targets
 from scripts.core.key_detection import pitch_shift_audio
 
 # _analyze_impl was renamed to analyze_structure during the dj_analysis module split.
@@ -143,6 +143,91 @@ def _make_hp_ramp(total_samples: int, sr: int,
         out[s:e] = _apply_filter(audio[s:e], b, a)
 
     return out
+
+
+def _stem_bass_ramp(
+    stem_a_bass: np.ndarray,
+    stem_b_bass: np.ndarray,
+    swap_sample: int,
+    ramp_samples: int = 0,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    True stem-level bass muting at the phrase boundary (Stage 2C).
+
+    Replaces the IIR low-shelf approximation used in render() with a direct
+    sample-domain operation on the actual Demucs bass stems.
+
+    Behaviour
+    ---------
+    Song A bass:
+        Tapers from 1.0 → 0.0 over the ``ramp_samples`` window ending at
+        ``swap_sample``.  Hard zero after ``swap_sample``.  This prevents
+        A's sub-bass from rumbling under B's incoming track.
+
+    Song B bass:
+        Hard zero before ``swap_sample``.  Tapers from 0.0 → 1.0 over the
+        ``ramp_samples`` window starting at ``swap_sample``.
+
+    A cosine taper is used (Hann window half) rather than linear to avoid the
+    audible "ramp click" that linear fades produce on sustained bass notes.
+
+    Parameters
+    ----------
+    stem_a_bass : np.ndarray, shape (N,)
+        Bass stem for Song A over the full transition window.
+    stem_b_bass : np.ndarray, shape (N,)
+        Bass stem for Song B over the full transition window.
+    swap_sample : int
+        Sample index inside the transition window where bass ownership transfers.
+        Must be in [0, min(len(a), len(b))].
+    ramp_samples : int
+        Width of the cosine taper in samples.  0 → hard instantaneous swap
+        (useful for testing or very short transitions).  Default 0.
+        A reasonable value is int(0.1 * sr) — 100 ms at 44.1 kHz.
+
+    Returns
+    -------
+    (ducked_a, ducked_b) : Tuple[np.ndarray, np.ndarray]
+        Modified bass stems ready to be added into the transition mix.
+    """
+    n_a = len(stem_a_bass)
+    n_b = len(stem_b_bass)
+    swap_sample = max(0, min(swap_sample, min(n_a, n_b)))
+    ramp_samples = max(0, min(ramp_samples, min(swap_sample, n_a - swap_sample, n_b - swap_sample)))
+
+    ducked_a = np.zeros_like(stem_a_bass)
+    ducked_b = np.zeros_like(stem_b_bass)
+
+    # Song A: region before the ramp → full level; ramp → cosine taper → zero
+    if ramp_samples > 0:
+        ramp_start = max(0, swap_sample - ramp_samples)
+        # Pre-ramp: full
+        ducked_a[:ramp_start] = stem_a_bass[:ramp_start]
+        # Ramp: cos taper 1 → 0
+        actual_ramp = swap_sample - ramp_start
+        if actual_ramp > 0:
+            taper = (np.cos(np.linspace(0.0, np.pi / 2.0, actual_ramp)) ** 2).astype(np.float32)
+            ducked_a[ramp_start:swap_sample] = stem_a_bass[ramp_start:swap_sample] * taper
+        # After swap: stays zero (already initialised)
+    else:
+        # Hard cut: everything before swap at full level
+        ducked_a[:swap_sample] = stem_a_bass[:swap_sample]
+
+    # Song B: zero before swap; ramp after swap → full level
+    if ramp_samples > 0:
+        ramp_end = min(n_b, swap_sample + ramp_samples)
+        # Ramp: cos taper 0 → 1
+        actual_ramp = ramp_end - swap_sample
+        if actual_ramp > 0:
+            taper = (np.sin(np.linspace(0.0, np.pi / 2.0, actual_ramp)) ** 2).astype(np.float32)
+            ducked_b[swap_sample:ramp_end] = stem_b_bass[swap_sample:ramp_end] * taper
+        # Post-ramp: full
+        ducked_b[ramp_end:] = stem_b_bass[ramp_end:]
+    else:
+        # Hard cut: everything from swap onward at full level
+        ducked_b[swap_sample:] = stem_b_bass[swap_sample:]
+
+    return ducked_a, ducked_b
 
 
 # ---------------------------------------------------------------------------
@@ -1220,15 +1305,18 @@ class DJEngine:
                 if stretched_b[s] is not None:
                     stretched_b[s] = pitch_shift_audio(stretched_b[s], sr, ps)
 
-        # ── Per-stem LUFS normalization (Gap 1A) ──────────────────────────
+        # ── Per-stem LUFS normalization (FxNorm-Automix scheme) ───────────
         #
-        # Normalize every available stem to −20 LUFS before the crossfade loop.
-        # −20 LUFS leaves 6 dB of headroom for summing 4 stems (vocals + drums
-        # + bass + other) before the final master_mix() brings the whole mix to
-        # −14 LUFS. Without this step, a loud bass stem from Song B would crush
-        # Song A's softer stems — neither Spotify nor Apple do this per-stem.
+        # Each stem type is normalized to its corpus-derived LUFS target
+        # (drums → ~-18.5, bass → ~-21.0, vocals → ~-19.5, other → ~-21.5).
+        # Using per-stem-type targets (not one flat -20 LUFS) preserves the
+        # natural loudness relationships between stem types while preventing
+        # inter-stem collisions when summing.  Falls back to -20 LUFS flat if
+        # no corpus cache exists (data/stem_lufs_targets.json).
         #
-        # normalize_stems_to_target() expects {stem_name: (audio, sr)} dicts.
+        # Reference: Steinmetz et al. ISMIR 2022 (FxNorm-Automix).
+        _corpus_targets = load_stem_targets()
+
         stems_a_input = {
             s: (stems_a[s], sr)
             for s in _STEM_NAMES if stems_a.get(s) is not None
@@ -1239,16 +1327,16 @@ class DJEngine:
         }
 
         if stems_a_input:
-            normed_a = normalize_stems_to_target(stems_a_input, target_lufs=-20.0)
+            normed_a = normalize_stems_to_corpus_targets(stems_a_input, targets=_corpus_targets)
             for s in normed_a:
                 stems_a[s] = normed_a[s]
-            log.info("Per-stem LUFS normalization applied to Song A stems (target −20 LUFS)")
+            log.info("FxNorm corpus-targets applied to Song A stems")
 
         if stems_b_input:
-            normed_b = normalize_stems_to_target(stems_b_input, target_lufs=-20.0)
+            normed_b = normalize_stems_to_corpus_targets(stems_b_input, targets=_corpus_targets)
             for s in normed_b:
                 stretched_b[s] = normed_b[s]
-            log.info("Per-stem LUFS normalization applied to Song B stems (target −20 LUFS)")
+            log.info("FxNorm corpus-targets applied to Song B stems")
 
         # ── Compute transition boundaries ─────────────────────────────────
         exit_sample_a = int(plan.exit_time_a * sr)
@@ -1285,17 +1373,15 @@ class DJEngine:
             stem_b_full = stretched_b.get(s)
             sim = similarities[s]
 
-            # ── Bass stem: explicit swap-point handoff (Gap 1B) ───────────
+            # ── Bass stem: true stem-level bass muting (Stage 2C) ────────
             #
-            # The bass stem gets special treatment instead of the generic
-            # similarity-based crossfade. Song A's bass fades to zero by the
-            # swap point; Song B's bass enters clean from zero at that same
-            # point. This prevents bass clash — the most common artifact in
-            # automated DJ mixes — and mirrors what a human DJ does manually
-            # with a 3-band mixer (kill A's bass, release B's bass at bar 8).
+            # Song A's bass tapers to zero before the swap point via a cosine
+            # taper (_stem_bass_ramp). Song B enters clean at the swap.
+            # This is a direct sample-domain operation on the Demucs bass
+            # stem — no IIR approximation, no bleed between tracks.
             #
-            # swap_sample maps plan.eq.bass_swap_bar to a sample offset inside
-            # the transition window using the same formula as render().
+            # A 100 ms cosine ramp avoids the click that a hard instantaneous
+            # cut would produce on sustained bass notes.
             if s == "bass":
                 swap_sample = int(
                     plan.eq.bass_swap_bar
@@ -1303,18 +1389,33 @@ class DJEngine:
                 )
                 swap_sample = max(1, min(swap_sample, trans_samples - 1))
 
-                fade_out = np.concatenate([
-                    np.linspace(1.0, 0.0, swap_sample, dtype=np.float32),
-                    np.zeros(trans_samples - swap_sample, dtype=np.float32),
-                ])
-                fade_in = np.concatenate([
-                    np.zeros(swap_sample, dtype=np.float32),
-                    np.linspace(0.0, 1.0, trans_samples - swap_sample, dtype=np.float32),
-                ])
-                log.info(
-                    "Bass swap: A exits at sample %d (%.1f s), B enters clean",
-                    swap_sample, swap_sample / sr,
-                )
+                # 100 ms cosine ramp (clamped to available headroom)
+                ramp_samples = min(int(0.10 * sr), swap_sample, trans_samples - swap_sample)
+
+                # Resolve the actual stem slices here so _stem_bass_ramp gets them
+                a_raw = stem_a_full
+                b_raw = stem_b_full
+
+                if a_raw is not None and b_raw is not None:
+                    a_slice_bass = _pad_or_trim(
+                        a_raw[exit_sample_a : exit_sample_a + trans_samples], trans_samples
+                    )
+                    b_slice_bass = _pad_or_trim(
+                        b_raw[entry_sample_b : entry_sample_b + trans_samples], trans_samples
+                    )
+                    ducked_a, ducked_b = _stem_bass_ramp(
+                        a_slice_bass, b_slice_bass, swap_sample, ramp_samples
+                    )
+                    transition_mix += ducked_a + ducked_b
+                    log.info(
+                        "Bass swap (cosine ramp): A exits over %d ms at sample %d, "
+                        "B enters clean",
+                        int(ramp_samples / sr * 1000), swap_sample,
+                    )
+                    continue   # Skip the generic stem A/B slice code below
+
+                # If one stem is missing, fall back to generic crossfade
+                fade_out, fade_in = _stem_crossfade_curves(trans_samples, sim)
             else:
                 fade_out, fade_in = _stem_crossfade_curves(trans_samples, sim)
 

@@ -237,7 +237,7 @@ export const tagsApi = {
 // --- Favorites ---
 
 export const favoritesApi = {
-  list:   ()           => get<string[]>('/favorites'),
+  list:   () => get<{ songs: string[]; count: number }>('/favorites').then((r) => r.songs ?? []),
   add:    (name: string) => post<void>(`/favorites/${encodeURIComponent(name)}`),
   remove: (name: string) => del<void>(`/favorites/${encodeURIComponent(name)}`),
 }

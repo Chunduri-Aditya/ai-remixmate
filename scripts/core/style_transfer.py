@@ -319,11 +319,14 @@ def run_style_transfer(
         return StyleTransferResult(success=False, song_name=song_name,
                                     description=config.description, error=str(exc))
 
-    _prog(0.10, "Extracting melody fingerprint (CQT chroma)…")
+    _prog(0.10, "Detecting source key…")
 
-    # ── 2. Detect key + extract chroma ─────────────────────────────────────
+    # ── 2. Detect key ──────────────────────────────────────────────────────
+    # Note: _extract_melody_chroma() is NOT called here — the HuggingFace
+    # MusicgenMelodyProcessor handles its own internal chroma extraction from
+    # the raw audio passed via `audio=source_32k` below.  Calling it here was
+    # dead computation: the returned array was never passed to the model.
     source_key, source_camelot = _detect_source_key(source_audio, source_sr)
-    chroma = _extract_melody_chroma(source_audio, source_sr)  # (1, 12, n_frames)
 
     _prog(0.20, f"Source key: {source_key} ({source_camelot}). Loading MusicGen…")
 

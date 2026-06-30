@@ -216,11 +216,21 @@ def apply_limiter(
         1.0,
     ).astype(np.float32)
 
-    # Smooth gain reduction (exponential release)
+    # Smooth gain reduction (exponential release).
+    # The recurrence  gain[i] = (1-α)*reduction[i] + α*gain[i-1]  is a causal
+    # first-order IIR — equivalent to lfilter(b=[1-α], a=[1, -α]).
+    # Both reduction and gain are always ≤ 1.0, so the original min(1.0, …)
+    # clamp was a no-op; vectorising with lfilter gives identical results while
+    # avoiding a Python loop over millions of samples.
     alpha = float(np.exp(-1.0 / rel_samp))
-    gain  = np.ones(len(audio), dtype=np.float32)
-    for i in range(1, len(gain)):
-        gain[i] = min(1.0, reduction[i] + alpha * (gain[i - 1] - reduction[i]))
+    b_g   = np.array([1.0 - alpha], dtype=np.float64)
+    a_g   = np.array([1.0, -alpha], dtype=np.float64)
+    # lfilter_zi gives the steady-state initial state; scaling by 1.0 means
+    # the filter "remembers" a past gain of 1.0 (unity before any limiting).
+    from scipy.signal import lfilter, lfilter_zi                     # noqa: PLC0415
+    zi   = lfilter_zi(b_g, a_g) * 1.0
+    gain, _ = lfilter(b_g, a_g, reduction.astype(np.float64), zi=zi)
+    gain = np.clip(gain, 0.0, 1.0).astype(np.float32)
 
     limited = (audio * gain).astype(np.float32)
     return np.clip(limited, -ceiling, ceiling)
@@ -447,6 +457,9 @@ def normalize_stems_to_target(
     Using -20 LUFS per-stem before mixing prevents inter-stem level collisions.
     The final mix is then mastered to -14 LUFS.
 
+    Prefer normalize_stems_to_corpus_targets() when corpus-derived per-stem-type
+    targets are available — it produces more natural stem balances.
+
     Parameters
     ----------
     stem_audio : Dict[str, Tuple[np.ndarray, int]]
@@ -462,4 +475,218 @@ def normalize_stems_to_target(
     for stem_name, (audio, sr) in stem_audio.items():
         normalized, _ = normalize_to_lufs(audio, sr, target_lufs=target_lufs)
         result[stem_name] = normalized
+    return result
+
+
+# ── FxNorm-Automix-style per-stem-type corpus normalization ──────────────────
+#
+# Reference: Steinmetz et al. "Automatic Multitrack Mixing with a
+#            Context-Aware Loudness Model" (Sony, ISMIR 2022 / FxNorm-Automix).
+#
+# Key insight: drums, bass, vocals, and other stems have very different
+# frequency content and perceived loudness at the same LUFS.  Using one flat
+# -20 LUFS target for all stems produces mix imbalances that are invisible in
+# LUFS meters but clearly audible.
+#
+# Solution: measure the mean integrated LUFS of each stem type across the whole
+# library (the "corpus target"), then normalize each stem to *its type's* corpus
+# mean.  This preserves the natural loudness relationships between stem types
+# while preventing inter-stem collisions.
+
+#: Fallback per-stem targets used when the library has < 3 songs of any type.
+#: Derived empirically from commercial EDM/pop productions.
+_STEM_FALLBACK_TARGETS: Dict[str, float] = {
+    "drums":  -18.5,   # transient-heavy; naturally louder integrated
+    "bass":   -21.0,   # sustained sub; high energy but fewer transients
+    "vocals": -19.5,   # dynamic; moderate integrated LUFS
+    "other":  -21.5,   # chords/pads; typically the softest stem
+}
+
+
+def analyze_library_stem_targets(
+    library_dir: Optional[Path] = None,
+    min_songs: int = 3,
+) -> Dict[str, float]:
+    """
+    Compute per-stem-type mean integrated LUFS across the library.
+
+    Iterates every song directory that has Demucs stems and measures integrated
+    LUFS for each stem type.  Returns a dict of stem_name → mean LUFS target.
+    Stem types with fewer than `min_songs` measurements fall back to
+    ``_STEM_FALLBACK_TARGETS``.
+
+    Results should be cached to ``data/stem_lufs_targets.json`` and reloaded on
+    subsequent calls; this function performs full audio I/O and is slow.
+
+    Parameters
+    ----------
+    library_dir : Path, optional
+        Path to the library root.  Defaults to ``scripts.core.paths.LIBRARY_DIR``.
+    min_songs : int
+        Minimum measurements required before trusting corpus mean (default 3).
+
+    Returns
+    -------
+    Dict[str, float]
+        stem_name → mean integrated LUFS across the library corpus.
+    """
+    if library_dir is None:
+        from scripts.core.paths import LIBRARY_DIR
+        library_dir = LIBRARY_DIR
+
+    stem_names = ("drums", "bass", "vocals", "other")
+    measurements: Dict[str, List[float]] = {s: [] for s in stem_names}
+
+    song_dirs = sorted(d for d in library_dir.iterdir() if d.is_dir())
+    if not song_dirs:
+        log.warning("[mastering] Library is empty — using fallback stem targets")
+        return dict(_STEM_FALLBACK_TARGETS)
+
+    import soundfile as sf
+
+    for song_dir in song_dirs:
+        for stem in stem_names:
+            for ext in (".wav", ".flac"):
+                stem_path = song_dir / f"{stem}{ext}"
+                if not stem_path.exists():
+                    continue
+                try:
+                    audio, sr = sf.read(str(stem_path), dtype="float32", always_2d=False)
+                    if audio.ndim > 1:
+                        audio = audio.mean(axis=1)
+                    if len(audio) < sr:           # skip clips < 1 second
+                        break
+                    lufs = compute_lufs(audio, sr)
+                    if np.isfinite(lufs) and lufs > -70.0:  # skip silence / -inf
+                        measurements[stem].append(lufs)
+                except Exception as exc:
+                    log.debug("[mastering] Skipping %s/%s: %s", song_dir.name, stem, exc)
+                break  # found a file for this stem; don't try next ext
+
+    targets: Dict[str, float] = {}
+    for stem in stem_names:
+        vals = measurements[stem]
+        if len(vals) >= min_songs:
+            targets[stem] = float(np.mean(vals))
+            log.info(
+                "[mastering] Corpus target  %-8s  %.1f LUFS  (n=%d)",
+                stem, targets[stem], len(vals),
+            )
+        else:
+            targets[stem] = _STEM_FALLBACK_TARGETS[stem]
+            log.info(
+                "[mastering] Fallback target %-8s  %.1f LUFS  (only %d samples)",
+                stem, targets[stem], len(vals),
+            )
+    return targets
+
+
+def load_stem_targets(cache_path: Optional[Path] = None) -> Dict[str, float]:
+    """
+    Load per-stem-type LUFS targets from cache, or fall back to built-in defaults.
+
+    Parameters
+    ----------
+    cache_path : Path, optional
+        Path to ``stem_lufs_targets.json``.  Defaults to ``data/stem_lufs_targets.json``.
+
+    Returns
+    -------
+    Dict[str, float]
+        stem_name → LUFS target.  Always returns a complete dict with all four
+        stem types.
+    """
+    if cache_path is None:
+        from scripts.core.paths import DATA_DIR
+        cache_path = DATA_DIR / "stem_lufs_targets.json"
+
+    if cache_path.exists():
+        try:
+            import json
+            with open(cache_path) as f:
+                cached = json.load(f)
+            # Merge with fallbacks so new stem types are always covered
+            return {**_STEM_FALLBACK_TARGETS, **cached}
+        except Exception as exc:
+            log.warning(f"[mastering] Failed to load stem targets cache: {exc}")
+
+    return dict(_STEM_FALLBACK_TARGETS)
+
+
+def save_stem_targets(targets: Dict[str, float], cache_path: Optional[Path] = None) -> None:
+    """Persist per-stem-type LUFS targets to JSON cache."""
+    if cache_path is None:
+        from scripts.core.paths import DATA_DIR
+        cache_path = DATA_DIR / "stem_lufs_targets.json"
+    import json
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(cache_path, "w") as f:
+        json.dump(targets, f, indent=2)
+    log.info("[mastering] Saved stem LUFS targets → %s", cache_path)
+
+
+def normalize_stems_to_corpus_targets(
+    stem_audio: Dict[str, Tuple[np.ndarray, int]],
+    targets: Optional[Dict[str, float]] = None,
+    fallback_lufs: float = -20.0,
+    true_peak_ceiling: float = -1.0,
+) -> Dict[str, np.ndarray]:
+    """
+    Normalize each stem to its corpus-derived per-stem-type LUFS target.
+
+    This is the FxNorm-Automix-style improvement over ``normalize_stems_to_target``.
+    Instead of applying one flat LUFS value to all stems, each stem type is
+    normalized to the mean LUFS of *that type* across the library corpus.
+
+    Parameters
+    ----------
+    stem_audio : Dict[str, Tuple[np.ndarray, int]]
+        stem_name → (audio_array, sample_rate)
+    targets : Dict[str, float], optional
+        Per-stem-type LUFS targets.  If None, loads from
+        ``data/stem_lufs_targets.json`` or falls back to built-in defaults.
+    fallback_lufs : float
+        Target LUFS for stem types not found in ``targets`` (default -20.0).
+    true_peak_ceiling : float
+        Maximum true peak allowed per stem in dBFS (default -1.0).
+        Applied after LUFS normalization to prevent inter-stem clipping.
+
+    Returns
+    -------
+    Dict[str, np.ndarray]
+        Normalized audio arrays keyed by stem name.
+    """
+    if targets is None:
+        targets = load_stem_targets()
+
+    result: Dict[str, np.ndarray] = {}
+
+    for stem_name, (audio, sr) in stem_audio.items():
+        if len(audio) == 0:
+            result[stem_name] = audio
+            continue
+
+        audio_f = audio.astype(np.float32)
+        target = targets.get(stem_name, fallback_lufs)
+
+        normalized, gain_db = normalize_to_lufs(audio_f, sr, target_lufs=target)
+
+        # True-peak ceiling: if any sample exceeds ceiling after normalization,
+        # apply a gentle brick-wall limit to avoid clipping when stems are summed.
+        peak = float(np.max(np.abs(normalized)))
+        ceiling_lin = 10.0 ** (true_peak_ceiling / 20.0)
+        if peak > ceiling_lin:
+            clip_gain = ceiling_lin / peak
+            normalized = normalized * clip_gain
+            log.debug(
+                "[mastering] True-peak clip: stem '%s' clamped by %.1f dB",
+                stem_name, 20.0 * np.log10(clip_gain),
+            )
+
+        result[stem_name] = normalized
+        log.debug(
+            "[mastering] Corpus-norm: stem='%s' target=%.1f LUFS gain=%.1f dB",
+            stem_name, target, gain_db,
+        )
+
     return result

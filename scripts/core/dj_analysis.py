@@ -119,6 +119,11 @@ class SongStructure:
     # SSM-novelty phrase boundary times (seconds); populated by analyze_structure
     phrase_boundaries: list = field(default_factory=list)
 
+    # Downbeat times (seconds) — beat 1 of each bar.  Estimated from bar
+    # alignment when using LibrosaBeatTracker; model-predicted when using
+    # BeatThisTracker.  Used for bar-grid cue point snapping (Stage 2B).
+    downbeat_times: list = field(default_factory=list)
+
     @property
     def total_bars(self) -> int:
         return len(self.bars)
@@ -211,6 +216,12 @@ class TransitionPlan:
     # Harmonic compatibility (0.0–1.0 from Camelot wheel; -1.0 = unknown)
     harmonic_score: float = -1.0
 
+    # TIS (Tonal Interval Space) harmonic score — continuous [0, 1].
+    # Computed from chroma vectors when available; None when chroma unavailable.
+    # Captures continuous harmonic content, not just Camelot key label.
+    # Reference: Bernardes et al. DAFx/JNMR 2016.
+    tiv_compatibility: Optional[float] = None
+
     # Semitones to shift Song B to align with Song A's key (0.0 = no shift)
     suggested_pitch_shift: float = 0.0
 
@@ -255,10 +266,14 @@ def analyze_structure(
     duration = len(audio) / sr
     log.info("Analysing structure (%.1f s)…", duration)
 
-    # ── 1. Beat tracking ──────────────────────────────────────────────
-    tempo, beat_frames = librosa.beat.beat_track(y=audio, sr=sr, trim=False)
-    bpm = float(np.atleast_1d(tempo)[0])
-    beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+    # ── 1. Beat tracking (swappable backend) ────────────────────────
+    from scripts.core.beat_tracker import get_configured_tracker
+    _tracker = get_configured_tracker()
+    _beat_result = _tracker.track(audio, sr)
+
+    bpm        = _beat_result.bpm
+    beat_frames = _beat_result.beat_frames
+    beat_times  = _beat_result.beat_times
 
     # ── 2. Build bar grid (4 beats per bar) ───────────────────────────
     beats: List[Beat] = []
@@ -327,10 +342,20 @@ def analyze_structure(
         sections=sections,
     )
 
-    # ── Phrase boundaries (SSM novelty) ──────────────────────────────
-    struct.phrase_boundaries = _detect_phrase_boundaries(audio, sr, bpm)
+    # ── Store downbeat times for bar-grid cue snapping (Stage 2B) ───
+    struct.downbeat_times = list(_beat_result.downbeat_times)
+
+    # ── Phrase boundaries (SSM novelty + bar-grid snap) ─────────────
+    # Pass beat_frames and downbeat_times from the BeatResult so that:
+    #  1. The redundant beat_track() call inside _detect_phrase_boundaries is skipped.
+    #  2. Raw SSM times are snapped to the nearest 8/16/32-bar downbeat (Stage 2B).
+    struct.phrase_boundaries = _detect_phrase_boundaries(
+        audio, sr, bpm,
+        beat_frames=beat_frames,
+        downbeat_times=_beat_result.downbeat_times,
+    )
     if struct.phrase_boundaries:
-        log.info("Phrase boundaries: %d detected", len(struct.phrase_boundaries))
+        log.info("Phrase boundaries: %d detected (bar-grid snapped)", len(struct.phrase_boundaries))
 
     # ── Enrich with music intelligence ──────────────────────────────
     try:
@@ -493,6 +518,110 @@ def _label_sections(
 
 
 # ---------------------------------------------------------------------------
+# Bar-grid cue point snapping (Stage 2B)
+# ---------------------------------------------------------------------------
+
+def _snap_to_bar_grid(
+    boundary_times: list,
+    downbeat_times: np.ndarray,
+    preferred_lengths_bars: list = None,
+    bar_duration_s: float = 0.0,
+) -> list:
+    """
+    Snap raw SSM phrase-boundary times to the nearest downbeat that is also
+    a multiple of a preferred phrase length (8 or 16 bars) from the song start.
+
+    A DJ never drops a track mid-bar.  SSM novelty catches structurally
+    interesting moments but their timestamps drift off the bar grid by
+    several beats.  This function corrects that.
+
+    Algorithm:
+      For each raw boundary time:
+        1. Find all downbeats within ±2 bars of the raw time.
+        2. Among those candidates, prefer ones that fall on a multiple of
+           preferred_lengths_bars bars from song start (8, 16, 32…).
+        3. If no candidate aligns to a preferred length, take the nearest
+           downbeat.
+
+    Parameters
+    ----------
+    boundary_times : list[float]
+        Raw boundary times in seconds.
+    downbeat_times : np.ndarray
+        Downbeat times from BeatResult (beat 1 of each bar), shape (M,).
+    preferred_lengths_bars : list[int]
+        Bar lengths to prefer for snapping.  Default [8, 16, 32].
+    bar_duration_s : float
+        Duration of one bar in seconds.  Used to compute the ±2-bar window.
+        If 0.0, computed from median interval between downbeats.
+
+    Returns
+    -------
+    list[float]
+        Bar-grid-aligned boundary times, deduplicated, sorted.
+    """
+    if preferred_lengths_bars is None:
+        preferred_lengths_bars = [8, 16, 32]
+
+    if len(downbeat_times) == 0 or len(boundary_times) == 0:
+        return list(boundary_times)
+
+    downbeat_times = np.asarray(downbeat_times, dtype=np.float64)
+
+    # Estimate bar duration from downbeat spacing
+    if bar_duration_s <= 0.0:
+        if len(downbeat_times) >= 2:
+            bar_duration_s = float(np.median(np.diff(downbeat_times)))
+        else:
+            bar_duration_s = 2.0   # 120 BPM fallback
+
+    snap_window = 2.0 * bar_duration_s   # ±2 bars search radius
+    snapped: list[float] = []
+
+    for raw_t in boundary_times:
+        # Candidates: downbeats within ±2 bars
+        diffs = np.abs(downbeat_times - raw_t)
+        candidate_mask = diffs <= snap_window
+        candidates = downbeat_times[candidate_mask]
+
+        if len(candidates) == 0:
+            # No nearby downbeat — keep raw (won't happen in well-formed tracks)
+            snapped.append(raw_t)
+            continue
+
+        # Prefer candidates on multiples of preferred_lengths_bars from downbeat[0]
+        origin = float(downbeat_times[0])
+        best = None
+        best_score = float("inf")
+
+        for cand in candidates:
+            bar_offset = (cand - origin) / bar_duration_s
+            bar_index = int(round(bar_offset))
+            dist = abs(cand - raw_t)
+
+            # Score: prefer phrase-length multiples; among ties, nearest wins
+            on_preferred = any(bar_index % n == 0 for n in preferred_lengths_bars)
+            score = dist if on_preferred else dist + snap_window
+            if score < best_score:
+                best_score = score
+                best = float(cand)
+
+        snapped.append(best if best is not None else float(candidates[np.argmin(diffs[candidate_mask])]))
+
+    # Deduplicate and sort
+    seen: set[float] = set()
+    result: list[float] = []
+    for t in sorted(snapped):
+        # Round to 3 decimal places to collapse values that differ by < 1ms
+        rounded = round(t, 3)
+        if rounded not in seen:
+            seen.add(rounded)
+            result.append(rounded)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # SSM-novelty phrase boundary detector
 # ---------------------------------------------------------------------------
 
@@ -500,18 +629,30 @@ def _detect_phrase_boundaries(
     audio: np.ndarray,
     sr: int,
     bpm: float,
+    beat_frames: Optional[np.ndarray] = None,
+    downbeat_times: Optional[np.ndarray] = None,
     hop_length: int = 512,
 ) -> list:
     """
-    Detect phrase boundaries via self-similarity matrix (SSM) novelty.
+    Detect phrase boundaries via self-similarity matrix (SSM) novelty,
+    then snap them to the bar grid.
 
     Algorithm:
-      1. Beat-track to get beat frames/times.
+      1. Beat-track to get beat frames/times (re-used from caller when available).
       2. Compute beat-synchronised chroma (chroma_cqt), normalise columns.
       3. Build SSM: sim = chroma_norm.T @ chroma_norm.
       4. Apply 8×8 checkerboard kernel along the diagonal → novelty curve.
       5. Peak-pick with minimum 8-beat gap (= 2 bars).
       6. Convert peak beat indices → seconds.
+      7. Snap each raw boundary to the nearest 8/16/32-bar downbeat (Stage 2B).
+
+    Args:
+        beat_frames: Pre-computed beat frame indices from the outer analysis.
+                     When supplied, the redundant librosa.beat.beat_track() call
+                     is skipped — saves ~0.5 s per song on CPU.
+        downbeat_times: Downbeat times (beat 1 of each bar) from BeatResult.
+                        When supplied, raw SSM boundaries are snapped to the bar
+                        grid.  When None, raw SSM times are returned unchanged.
 
     Returns [] on any exception — never crashes the caller.
     """
@@ -519,7 +660,10 @@ def _detect_phrase_boundaries(
         import librosa
         from scipy.signal import find_peaks
 
-        _, beat_frames = librosa.beat.beat_track(y=audio, sr=sr, trim=False)
+        # Re-use caller's beat frames when available to avoid a redundant
+        # beat_track() call (beat tracking is the most expensive step).
+        if beat_frames is None or len(beat_frames) == 0:
+            _, beat_frames = librosa.beat.beat_track(y=audio, sr=sr, trim=False)
         beat_times = librosa.frames_to_time(beat_frames, sr=sr)
 
         if len(beat_times) < 16:
@@ -550,8 +694,19 @@ def _detect_phrase_boundaries(
             novelty[i] = float(np.sum(patch * kernel))
 
         peaks, _ = find_peaks(novelty, distance=8)
+        raw_boundaries = [float(beat_times[p]) for p in peaks if p < len(beat_times)]
 
-        return [float(beat_times[p]) for p in peaks if p < len(beat_times)]
+        # ── Stage 2B: snap raw SSM times to the bar grid ─────────────
+        if downbeat_times is not None and len(downbeat_times) >= 2:
+            bar_duration_s = float(60.0 / bpm * 4.0)
+            raw_boundaries = _snap_to_bar_grid(
+                raw_boundaries,
+                np.asarray(downbeat_times, dtype=np.float64),
+                preferred_lengths_bars=[8, 16, 32],
+                bar_duration_s=bar_duration_s,
+            )
+
+        return raw_boundaries
 
     except Exception as exc:
         log.debug("Phrase boundary detection failed (non-critical): %s", exc)
@@ -696,6 +851,29 @@ def plan_transition(
         b_fade_end_bar=transition_bars,
     )
 
+    # ── TIV (Tonal Interval Space) harmonic score ───────────────────────────
+    # Computed from mean chroma vectors when available.  Complements the
+    # binary Camelot adjacency check with a continuous score over actual
+    # harmonic content.  Reference: Bernardes et al. DAFx/JNMR 2016.
+    tiv_compatibility: Optional[float] = None
+    chroma_a = getattr(song_a, "mean_chroma", None)
+    chroma_b = getattr(song_b, "mean_chroma", None)
+    if chroma_a is not None and chroma_b is not None:
+        try:
+            from scripts.core.tiv_scoring import tiv_harmonic_score
+            tiv_compatibility = tiv_harmonic_score(
+                np.asarray(chroma_a, dtype=np.float64),
+                np.asarray(chroma_b, dtype=np.float64),
+            )
+            log.info(
+                "TIV harmonic score: %.3f (%s %s → %s %s)",
+                tiv_compatibility,
+                song_a.key_name, song_a.mode,
+                song_b.key_name, song_b.mode,
+            )
+        except Exception as exc:
+            log.debug("TIV scoring failed (chroma unavailable?): %s", exc)
+
     # ── Pitch shift suggestion (Camelot-based) ──────────────────────────────
     suggested_pitch_shift = 0.0
     if song_a.camelot and song_b.camelot:
@@ -723,6 +901,7 @@ def plan_transition(
         tempo_shift_ratio=ratio,
         eq=eq,
         harmonic_score=harmonic_score,
+        tiv_compatibility=tiv_compatibility,
         suggested_pitch_shift=suggested_pitch_shift,
     )
 
