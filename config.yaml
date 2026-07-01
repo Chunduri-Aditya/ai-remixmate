@@ -59,6 +59,15 @@ library:                        # Smart storage management
   max_size_gb: 50.0             # Evict LRU full.wav files when exceeded
   keep_raw_after_separation: false  # Delete full.wav once stems are produced
   prune_on_download: true       # Auto-prune after each successful separation
+  auto_evict_on_download: true  # Run LRU eviction after every download — can delete
+                                 # OTHER old songs' full.wav (or whole song dirs) if the
+                                 # library is over max_size_gb. Set false to only evict
+                                 # manually via POST /library/storage/evict.
+  library_dir: ""                # "" = <project root>/library. Set an absolute path to
+                                  # store the library on an external drive or NAS mount,
+                                  # e.g. "/Volumes/MusicDrive/remixmate-library".
+                                  # Filesystem paths only — not S3/GCS object storage.
+  outputs_dir: ""                 # "" = <project root>/outputs. Same rules as library_dir.
 
 # ---------------------------------------------------------------------------
 database:

@@ -177,9 +177,21 @@ def _quick_features(wav_path: Path, sr: int = 22050, duration: float = 30.0) -> 
         import librosa
         audio, _ = librosa.load(str(wav_path), sr=sr, mono=True, duration=duration)
 
-        # BPM
+        # BPM — same octave-correction as the real analysis pipeline
+        # (beat_tracker.py) so this quick-index pass can't silently disagree
+        # with the render-time BPM by 2x on the same song. Previously this
+        # called librosa.beat.beat_track() raw with no octave handling at
+        # all, which is the confirmed root cause of cached-vs-render BPM
+        # mismatches (e.g. 63.8 cached vs 129.2 at render) — see
+        # REMIX_QUALITY_INSIGHTS.md finding #2.
         tempo, beats = librosa.beat.beat_track(y=audio, sr=sr)
-        data["bpm"] = round(float(np.atleast_1d(tempo)[0]), 1)
+        raw_bpm = float(np.atleast_1d(tempo)[0])
+        try:
+            from scripts.core.beat_tracker import resolve_bpm_octave
+            bpm = resolve_bpm_octave(raw_bpm, audio, sr, hop_length=512)
+        except Exception:
+            bpm = raw_bpm
+        data["bpm"] = round(bpm, 1)
 
         # Key (Krumhansl-Schmuckler on CQT chroma)
         try:

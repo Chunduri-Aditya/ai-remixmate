@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-remixmate-feature-lab"
+version = "0.1.0"
+description = "Isolated remix intelligence feature lab for AI RemixMate"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+audio = ["librosa>=0.11", "numpy>=2.0", "soundfile>=0.12"]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

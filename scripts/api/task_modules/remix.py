@@ -166,6 +166,10 @@ def task_dj_remix(
     return {
         "output":            str(out_path),
         "session_id":        session_id,
+        # Browser-playable URL — served by GET /outputs/{session_id}/{filename}.
+        # NOTE: out_dir is named "dj_{session_id}", not bare session_id, so the
+        # path segment here must match out_dir.name, not the raw session_id.
+        "stream_url":        f"/outputs/{out_dir.name}/{out_path.name}",
         "song_a":            song_a,
         "song_b":            song_b,
         "bpm_a":             round(plan.bpm_a, 1),
@@ -309,6 +313,9 @@ def task_dj_chain(
     return {
         "output":          str(out_path),
         "session_id":      session_id,
+        # Browser-playable URL — out_dir is "chain_{session_id}", so the path
+        # segment must match out_dir.name, not the raw session_id.
+        "stream_url":      f"/outputs/{out_dir.name}/{out_path.name}",
         "songs":           songs,
         "n_songs":         n,
         "n_transitions":   n - 1,

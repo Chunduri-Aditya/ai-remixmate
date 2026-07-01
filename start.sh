@@ -9,6 +9,7 @@
 #   ./start.sh ui           # legacy Streamlit UI + API
 #   ./start.sh stop         # kill everything
 #   ./start.sh --skip-setup # start without reinstalling packages
+#   ./start.sh --no-open    # don't auto-open a browser tab (default: opens one)
 
 set -e
 
@@ -22,6 +23,7 @@ KEY_FILE="$CERT_DIR/key.pem"
 
 HTTPS_MODE=false
 SKIP_SETUP=false
+OPEN_BROWSER=true
 PY=""   # absolute path — set by ensure_python_env()
 VENV_DIR="$ROOT/remix-env"
 
@@ -73,6 +75,46 @@ ensure_python_env() {
   echo "  ✅  Created $PY ($($PY --version 2>&1))"
   echo ""
   echo "  Tip: next time run  source remix-env/bin/activate  before ./start.sh"
+}
+
+# Wait until $1 (a URL) responds, up to $2 seconds (default 25). Returns
+# non-zero on timeout instead of hanging forever if the server never comes up.
+wait_for_http() {
+  local url=$1
+  local timeout=${2:-25}
+  if ! command -v curl &>/dev/null; then
+    sleep 2   # best effort — no curl to poll with
+    return 0
+  fi
+  local waited=0
+  while ! curl -sk -o /dev/null --max-time 1 "$url" 2>/dev/null; do
+    sleep 0.5
+    waited=$((waited + 1))
+    if [ "$waited" -ge $((timeout * 2)) ]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+# Auto-open $1 in the default browser — macOS `open`, Linux `xdg-open`/`wslview`.
+# Respects --no-open. Never fails the script if no opener is found.
+open_browser() {
+  local url=$1
+  if ! $OPEN_BROWSER; then
+    return 0
+  fi
+  if command -v open &>/dev/null; then
+    open "$url" &>/dev/null &
+  elif command -v xdg-open &>/dev/null; then
+    xdg-open "$url" &>/dev/null &
+  elif command -v wslview &>/dev/null; then
+    wslview "$url" &>/dev/null &
+  else
+    echo "  ℹ️   Couldn't auto-detect a browser opener — open $url manually."
+    return 1
+  fi
+  echo "  🌐  Opened $url in your browser."
 }
 
 kill_port() {
@@ -208,15 +250,27 @@ start_api() {
 
   ensure_python_env
 
+  # --reload with no --reload-dir watches the ENTIRE project root by
+  # default — including library/, outputs/, and data/, which a download or
+  # remix job writes to continuously (new WAV/FLAC stems, rendered mixes,
+  # jobs.db, music_index.json). Every one of those writes looked like a
+  # source-code change to watchfiles, so uvicorn restarted the whole server
+  # mid-job — killing the ThreadPoolExecutor worker that was rendering it.
+  # That's what a "stuck at 90% forever" / "557s elapsed" job actually was:
+  # not a slow render, but the server pulling the rug out from under it.
+  # Restricting the watch to scripts/ (the only place app code lives) fixes
+  # it: code edits still hot-reload, audio/job-store writes no longer do.
+  RELOAD_ARGS=(--reload --reload-dir "$ROOT/scripts")
+
   if $HTTPS_MODE; then
     echo "🚀  Starting API at https://0.0.0.0:$API_PORT (HTTPS)"
     echo "    Docs: https://localhost:$API_PORT/docs"
-    $PY -m uvicorn scripts.api.main:app --reload --host 0.0.0.0 --port $API_PORT \
+    $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --host 0.0.0.0 --port $API_PORT \
       --ssl-certfile "$CERT_FILE" --ssl-keyfile "$KEY_FILE" &
   else
     echo "🚀  Starting API at http://0.0.0.0:$API_PORT"
     echo "    Docs: http://localhost:$API_PORT/docs"
-    (cd "$ROOT" && $PY -m uvicorn scripts.api.main:app --reload --host 0.0.0.0 --port $API_PORT) &
+    (cd "$ROOT" && $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --host 0.0.0.0 --port $API_PORT) &
   fi
   API_PID=$!
   echo "    PID: $API_PID"
@@ -285,12 +339,15 @@ for arg in "$@"; do
     --skip-setup)
       SKIP_SETUP=true
       ;;
+    --no-open|--no-browser)
+      OPEN_BROWSER=false
+      ;;
     stop|api|ui|both|frontend|setup)
       MODE="$arg"
       ;;
     *)
       echo "Unknown argument: $arg"
-      echo "Usage: $0 [setup|frontend|api|ui|both|stop] [--https|--skip-setup]"
+      echo "Usage: $0 [setup|frontend|api|ui|both|stop] [--https|--skip-setup|--no-open]"
       exit 1
       ;;
   esac
@@ -354,6 +411,13 @@ case "$MODE" in
     echo ""
     echo "Tip: run './start.sh' for the new React UI + DJ widget."
     echo "Press Ctrl+C to stop."
+    UI_URL="http://localhost:$UI_PORT"
+    $HTTPS_MODE && UI_URL="https://localhost:$UI_PORT"
+    if wait_for_http "$UI_URL" 25; then
+      open_browser "$UI_URL"
+    else
+      echo "  ⚠️   UI didn't respond within 25s — open $UI_URL manually once it's up."
+    fi
     wait
     ;;
   frontend|"")
@@ -361,6 +425,12 @@ case "$MODE" in
     sleep 2
     start_frontend
     print_frontend_urls
+    FRONTEND_URL="http://localhost:$FRONTEND_PORT"
+    if wait_for_http "$FRONTEND_URL" 25; then
+      open_browser "$FRONTEND_URL"
+    else
+      echo "  ⚠️   Frontend didn't respond within 25s — open $FRONTEND_URL manually once it's up."
+    fi
     wait
     ;;
   both)
@@ -383,10 +453,17 @@ case "$MODE" in
     echo ""
     echo "Tip: run './start.sh' for the new React UI + DJ widget."
     echo "Press Ctrl+C to stop."
+    UI_URL="http://localhost:$UI_PORT"
+    $HTTPS_MODE && UI_URL="https://localhost:$UI_PORT"
+    if wait_for_http "$UI_URL" 25; then
+      open_browser "$UI_URL"
+    else
+      echo "  ⚠️   UI didn't respond within 25s — open $UI_URL manually once it's up."
+    fi
     wait
     ;;
   *)
-    echo "Usage: $0 [setup|frontend|api|ui|both|stop] [--https|--skip-setup]"
+    echo "Usage: $0 [setup|frontend|api|ui|both|stop] [--https|--skip-setup|--no-open]"
     exit 1
     ;;
 esac

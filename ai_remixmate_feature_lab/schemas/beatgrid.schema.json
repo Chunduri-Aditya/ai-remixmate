@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/beatgrid.schema.json",
+  "title": "BeatGrid",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bpm",
+    "beatTimes",
+    "downbeats",
+    "beatsPerBar",
+    "confidence"
+  ],
+  "properties": {
+    "bpm": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Positive beats per minute."
+    },
+    "beatTimes": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0
+      },
+      "description": "Beat timestamps in seconds. Values must be ascending."
+    },
+    "downbeats": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0
+      },
+      "description": "Downbeat timestamps in seconds. Values must be ascending and aligned to bars."
+    },
+    "beatsPerBar": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16,
+      "default": 4
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Beatgrid confidence from 0 to 1."
+    },
+    "source": {
+      "type": "string",
+      "description": "Algorithm or user source."
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/cuePoint.schema.json",
+  "title": "CuePoint",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "trackId",
+    "timestampSec",
+    "label",
+    "type"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "trackId": {
+      "type": "string"
+    },
+    "timestampSec": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Cue timestamp in seconds; must be non-negative."
+    },
+    "label": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "memory",
+        "hot",
+        "load",
+        "mix_in",
+        "mix_out",
+        "drop",
+        "vocal"
+      ]
+    },
+    "color": {
+      "type": "string"
+    },
+    "beatIndex": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

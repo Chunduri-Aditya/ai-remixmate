@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/mixerState.schema.json",
+  "title": "MixerState",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "crossfader",
+    "masterGainDb",
+    "channels"
+  ],
+  "properties": {
+    "crossfader": {
+      "type": "number",
+      "minimum": -1,
+      "maximum": 1,
+      "description": "-1 full left, 0 center, 1 full right."
+    },
+    "masterGainDb": {
+      "type": "number",
+      "minimum": -60,
+      "maximum": 6
+    },
+    "cueMix": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "limiterEnabled": {
+      "type": "boolean"
+    },
+    "channels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "deckId",
+          "volume",
+          "gainDb",
+          "eq"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "deckId": {
+            "type": "string"
+          },
+          "volume": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "gainDb": {
+            "type": "number",
+            "minimum": -60,
+            "maximum": 6
+          },
+          "eq": {
+            "type": "object",
+            "required": [
+              "lowDb",
+              "midDb",
+              "highDb"
+            ],
+            "properties": {
+              "lowDb": {
+                "type": "number",
+                "minimum": -24,
+                "maximum": 6
+              },
+              "midDb": {
+                "type": "number",
+                "minimum": -24,
+                "maximum": 6
+              },
+              "highDb": {
+                "type": "number",
+                "minimum": -24,
+                "maximum": 6
+              }
+            }
+          },
+          "mute": {
+            "type": "boolean"
+          },
+          "solo": {
+            "type": "boolean"
+          },
+          "meter": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    }
+  }
+}

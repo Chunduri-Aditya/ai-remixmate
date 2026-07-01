@@ -33,6 +33,7 @@ def download_song(req: DownloadRequest, background_tasks: BackgroundTasks = None
         query=req.query,
         name=req.name,
         separate=req.separate,
+        auto_analyze=req.auto_analyze,
     )
     return job_store.job_to_response(job_store.get_job(job_id))
 
@@ -56,6 +57,7 @@ def download_batch(req: BatchDownloadRequest):
             query=query,
             name=None,
             separate=req.separate,
+            auto_analyze=req.auto_analyze,
         )
         responses.append(job_store.job_to_response(job_store.get_job(job_id)))
     return responses
@@ -74,5 +76,6 @@ def download_playlist_route(req: PlaylistDownloadRequest, background_tasks: Back
         url=req.url,
         separate=req.separate,
         limit=req.limit,
+        auto_analyze=req.auto_analyze,
     )
     return job_store.job_to_response(job_store.get_job(job_id))

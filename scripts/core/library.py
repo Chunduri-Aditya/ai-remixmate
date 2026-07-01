@@ -199,14 +199,37 @@ class LibraryManager:
         return (_song_dir(name) / "vocals.wav").exists()
 
     def list_songs(self) -> List[SongEntry]:
-        """Return all songs currently in the library."""
+        """
+        Return all songs currently in the library.
+
+        Self-heals stale index entries: anything whose directory was deleted
+        outside of evict_lru() (e.g. the pre-fix DELETE /library/{name},
+        which never touched the index) gets dropped here and the index
+        rewritten, instead of permanently inflating total_songs / corrupting
+        eviction's LRU ordering.
+        """
         index = self._load_index()
         entries = []
+        stale_names = []
         for name, data in index.items():
             try:
-                entries.append(SongEntry(**data))
+                entry = SongEntry(**data)
             except Exception:
-                pass
+                stale_names.append(name)
+                continue
+            if not Path(entry.path).exists():
+                stale_names.append(name)
+                continue
+            entries.append(entry)
+
+        if stale_names:
+            log.info("list_songs: dropping %d stale index entr%s (directory no longer exists): %s",
+                      len(stale_names), "y" if len(stale_names) == 1 else "ies",
+                      ", ".join(stale_names[:10]) + (", …" if len(stale_names) > 10 else ""))
+            for name in stale_names:
+                index.pop(name, None)
+            self._save_index(index)
+
         return sorted(entries, key=lambda e: e.last_accessed, reverse=True)
 
     def song_info(self, name: str) -> Optional[SongEntry]:
@@ -262,6 +285,26 @@ class LibraryManager:
         if name in index:
             index[name]["last_accessed"] = time.time()
             self._save_index(index)
+
+    def unregister(self, name: str) -> bool:
+        """
+        Remove a song's entry from the persisted index without touching disk.
+
+        Call this whenever a song directory is deleted by something other
+        than evict_lru() (which already pops its own index entries) — e.g.
+        DELETE /library/{name}. Without this, the index accumulates phantom
+        entries for songs that no longer exist on disk, which inflates
+        storage_status()'s total_songs and corrupts evict_lru()'s LRU
+        ordering (it sorts/evicts from this same index).
+
+        Returns True if an entry was actually removed.
+        """
+        index = self._load_index()
+        if name in index:
+            index.pop(name, None)
+            self._save_index(index)
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Deduplication via audio fingerprinting

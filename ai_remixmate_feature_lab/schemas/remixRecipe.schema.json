@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/remixRecipe.schema.json",
+  "title": "RemixRecipe",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "transitionPlanId",
+    "steps"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "transitionPlanId": {
+      "type": "string"
+    },
+    "method": {
+      "type": "string"
+    },
+    "stemSuggestions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "timingSuggestion": {
+      "type": "string"
+    },
+    "riskWarnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "order",
+          "title",
+          "instruction"
+        ],
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "title": {
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "startSec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "endSec": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

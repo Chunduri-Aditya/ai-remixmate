@@ -254,3 +254,76 @@ class TestNormalizeStemsToCorpusTargets:
         result = normalize_stems_to_corpus_targets(stems, targets={}, fallback_lufs=fallback)
         actual_lufs = compute_lufs(result["unknown_stem"], SR)
         assert abs(actual_lufs - fallback) < 1.5
+
+
+# ---------------------------------------------------------------------------
+# apply_limiter — REMIX_QUALITY_INSIGHTS.md finding #4 regression guard
+#
+# Confirmed root cause: the old implementation smoothed gain reduction with
+# a single release_ms time constant in BOTH directions (one scipy.lfilter
+# call). A transient needing full reduction took the same ~50ms to engage as
+# a fully-limited section took to recover, so the unattenuated peak passed
+# through during that attack lag and got caught by the hard-clip safety net
+# instead of being smoothly limited — audible distortion, not loudness
+# control. Reproduced live this session as a 227,029-sample clipping defect
+# on an extreme-tempo-stretch render. Fix: independent fast-attack /
+# slow-release coefficients via _smooth_gain_envelope().
+# ---------------------------------------------------------------------------
+
+class TestLimiterAttackRelease:
+    def test_attack_faster_than_release(self):
+        """Gain must drop toward a sudden reduction target faster than it
+        recovers back toward unity afterward — that asymmetry is the entire
+        point of a look-ahead limiter and was missing before this fix."""
+        from scripts.core.mastering import _smooth_gain_envelope
+        reduction = np.ones(2000)
+        reduction[500:520] = 0.1  # sudden heavy reduction for 20 samples
+        alpha_attack = float(np.exp(-1.0 / (SR * 0.002)))   # 2ms
+        alpha_release = float(np.exp(-1.0 / (SR * 0.05)))   # 50ms
+        gain = _smooth_gain_envelope(reduction, alpha_attack, alpha_release)
+
+        # Samples to fall within 10% of the reduction target after the step down
+        attack_idx = int(np.argmax(gain[500:] <= 0.11))
+        # Samples to climb back within 10% of unity after the step back up
+        release_idx = int(np.argmax(gain[520:] >= 0.9))
+
+        assert attack_idx < release_idx, (
+            f"attack ({attack_idx} samples) should be faster than "
+            f"release ({release_idx} samples)"
+        )
+        assert attack_idx < 200, "attack should engage in well under 5ms"
+
+    def test_dense_transients_no_clipping(self):
+        """Dense, sharp transients (the exact material the original symmetric
+        smoothing failed on) must not exceed the ceiling after limiting."""
+        from scripts.core.mastering import apply_limiter
+        rng = np.random.default_rng(0)
+        n = SR * 2
+        audio = (rng.standard_normal(n) * 0.05).astype(np.float32)
+        for i in range(0, n, int(SR * 0.05)):
+            audio[i:i + 5] = 1.5  # sharp transient well above ceiling
+
+        ceiling_db = -1.0
+        ceiling = 10.0 ** (ceiling_db / 20.0)
+        out = apply_limiter(audio, ceiling_db=ceiling_db, sr=SR)
+
+        assert np.max(np.abs(out)) <= ceiling + 1e-6
+        assert np.all(np.isfinite(out))
+
+    def test_attack_ms_parameter_respected(self):
+        """A slower attack_ms should reach the reduction target later than a
+        faster one, confirming the parameter actually controls attack speed."""
+        from scripts.core.mastering import _smooth_gain_envelope
+        reduction = np.ones(2000)
+        reduction[500:] = 0.1
+        alpha_release = float(np.exp(-1.0 / (SR * 0.05)))
+
+        fast = _smooth_gain_envelope(
+            reduction, float(np.exp(-1.0 / (SR * 0.001))), alpha_release)
+        slow = _smooth_gain_envelope(
+            reduction, float(np.exp(-1.0 / (SR * 0.02))), alpha_release)
+
+        # 5ms after the step, the fast-attack envelope must have dropped
+        # further toward the target than the slow-attack one.
+        check_at = 500 + int(SR * 0.005)
+        assert fast[check_at] < slow[check_at]

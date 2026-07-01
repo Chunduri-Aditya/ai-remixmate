@@ -31,6 +31,7 @@ from scripts.api.task_modules.remix import (
 # Analysis tasks
 from scripts.api.task_modules.analysis import (
     task_analyze,
+    task_analyze_missing,
     task_initialize_library,
     task_rebuild_index,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "task_remix_preview",
     # Analysis
     "task_analyze",
+    "task_analyze_missing",
     "task_rebuild_index",
     "task_initialize_library",
     # Generative

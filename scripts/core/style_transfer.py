@@ -169,7 +169,7 @@ def _load_source_audio(song_name: str, config: StyleTransferConfig) -> Tuple[np.
             f"Checked: {[str(p) for p in candidates]}"
         )
 
-    log.info("[style_transfer] Loading source: %s", src_path.name)
+    log.info(f"[style_transfer] Loading source: {src_path.name}")
     audio, sr = librosa.load(
         str(src_path),
         sr=None,
@@ -221,7 +221,7 @@ def _detect_source_key(audio: np.ndarray, sr: int) -> Tuple[str, str]:
         result = detect_key(audio, sr)
         return f"{result.key_name} {result.mode}", result.camelot
     except Exception as exc:
-        log.debug("[style_transfer] Key detection failed: %s", exc)
+        log.debug(f"[style_transfer] Key detection failed: {exc}")
         return "Unknown", "8B"
 
 
@@ -269,7 +269,7 @@ def _master_and_save(
     else:
         sf.write(str(out_path), mastered, sr, subtype="PCM_24")
 
-    log.info("[style_transfer] Saved: %s (%.1f LUFS)", out_path.name, report.lufs_integrated)
+    log.info(f"[style_transfer] Saved: {out_path.name} ({report.lufs_integrated:.1f} LUFS)")
     return str(out_path), report.lufs_integrated
 
 
@@ -304,7 +304,7 @@ def run_style_transfer(
     def _prog(p: float, msg: str) -> None:
         if progress_cb:
             progress_cb(p, msg)
-        log.info("[style_transfer] %.0f%% — %s", p * 100, msg)
+        log.info(f"[style_transfer] {p * 100:.0f}% — {msg}")
 
     _prog(0.05, "Loading source audio…")
     t0 = time.time()
@@ -440,7 +440,7 @@ def run_style_transfer(
         except Exception:
             pass
         error_msg = str(exc)
-        log.error("[style_transfer] Generation failed: %s", error_msg)
+        log.error(f"[style_transfer] Generation failed: {error_msg}")
         log_audit("style_transfer_failed", resource=song_name,
                   metadata={"error": error_msg})
         return StyleTransferResult(

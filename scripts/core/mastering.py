@@ -181,11 +181,71 @@ def detect_clipping(
 
 # ── True-peak limiter ─────────────────────────────────────────────────────────
 
+def _smooth_gain_envelope(
+    reduction:    np.ndarray,
+    alpha_attack: float,
+    alpha_release: float,
+) -> np.ndarray:
+    """
+    Sample-accurate two-coefficient envelope follower (gain[i] = a*gain[i-1]
+    + (1-a)*reduction[i], where `a` switches between a fast attack
+    coefficient and a slow release coefficient depending on direction).
+
+    REMIX_QUALITY_INSIGHTS.md finding #4: the previous implementation
+    smoothed gain reduction with a single `release_ms` time constant in
+    *both* directions via scipy.signal.lfilter (a linear, time-invariant
+    filter). A transient needing full reduction took the same ~50ms to ramp
+    down as a fully-limited section took to ramp back up to unity — during
+    that attack lag the unattenuated peak passed through and got caught by
+    the hard-clip safety net instead of being smoothly limited, which is
+    audible distortion, not loudness control. Real look-ahead limiters use a
+    fast attack (near-instant) and a slow release (avoids pumping) —
+    asymmetric by design, which is why this can't be one lfilter call.
+
+    The recursion is inherently sequential (the coefficient at each sample
+    depends on whether gain is dropping or recovering), so it isn't
+    expressible as a single LTI filter. Numba JIT-compiles the loop to
+    native speed (numba is already a transitive dependency via librosa);
+    falls back to a pure-Python loop — slower, but still correct — if numba
+    is unavailable, same graceful-degradation pattern used elsewhere in this
+    codebase (e.g. BeatThisTracker → LibrosaBeatTracker).
+    """
+    red = reduction.astype(np.float64)
+    n = red.shape[0]
+
+    try:
+        from numba import njit  # noqa: PLC0415
+
+        @njit(cache=True)
+        def _run(r, a_atk, a_rel):
+            out = np.empty(r.shape[0], dtype=np.float64)
+            g = 1.0
+            for i in range(r.shape[0]):
+                target = r[i]
+                a = a_atk if target < g else a_rel
+                g = a * g + (1.0 - a) * target
+                out[i] = g
+            return out
+
+        gain = _run(red, float(alpha_attack), float(alpha_release))
+    except Exception:
+        gain = np.empty(n, dtype=np.float64)
+        g = 1.0
+        for i in range(n):
+            target = red[i]
+            a = alpha_attack if target < g else alpha_release
+            g = a * g + (1.0 - a) * target
+            gain[i] = g
+
+    return gain
+
+
 def apply_limiter(
     audio:          np.ndarray,
     ceiling_db:     float = -1.0,
     lookahead_ms:   float = 3.0,
     release_ms:     float = 50.0,
+    attack_ms:      float = 2.0,
     sr:             int   = 44100,
 ) -> np.ndarray:
     """
@@ -194,16 +254,26 @@ def apply_limiter(
     Algorithm:
       1. Compute peak envelope with a look-ahead window (maximum filter)
       2. Where envelope exceeds ceiling, compute required gain reduction
-      3. Smooth gain curve (exponential release) to avoid clicks
-      4. Apply gain, then hard-clip as safety net
+      3. Smooth gain curve with independent attack/release time constants —
+         fast attack so the look-ahead window's advance warning is actually
+         used, slow release so gain recovery doesn't pump (see
+         _smooth_gain_envelope docstring for why these must differ)
+      4. Apply gain, then hard-clip as a true safety net (should now fire
+         rarely — under the old symmetric smoothing it was firing as the
+         primary limiting mechanism on dense transient material)
 
     Args:
         ceiling_db:   True-peak ceiling (default -1 dBFS)
         lookahead_ms: Anticipation window (default 3 ms)
-        release_ms:   Gain release time constant (default 50 ms)
+        attack_ms:    Gain-reduction attack time constant (default 2 ms —
+                      fast enough that look-ahead-detected peaks are caught
+                      before they pass through)
+        release_ms:   Gain-recovery release time constant (default 50 ms —
+                      slow enough to avoid audible pumping)
     """
     ceiling   = 10.0 ** (ceiling_db / 20.0)
     la_samp   = max(1, int(sr * lookahead_ms  / 1000.0))
+    att_samp  = max(1, int(sr * attack_ms  / 1000.0))
     rel_samp  = max(1, int(sr * release_ms / 1000.0))
 
     peak_env  = np.abs(audio.astype(np.float32))
@@ -216,20 +286,9 @@ def apply_limiter(
         1.0,
     ).astype(np.float32)
 
-    # Smooth gain reduction (exponential release).
-    # The recurrence  gain[i] = (1-α)*reduction[i] + α*gain[i-1]  is a causal
-    # first-order IIR — equivalent to lfilter(b=[1-α], a=[1, -α]).
-    # Both reduction and gain are always ≤ 1.0, so the original min(1.0, …)
-    # clamp was a no-op; vectorising with lfilter gives identical results while
-    # avoiding a Python loop over millions of samples.
-    alpha = float(np.exp(-1.0 / rel_samp))
-    b_g   = np.array([1.0 - alpha], dtype=np.float64)
-    a_g   = np.array([1.0, -alpha], dtype=np.float64)
-    # lfilter_zi gives the steady-state initial state; scaling by 1.0 means
-    # the filter "remembers" a past gain of 1.0 (unity before any limiting).
-    from scipy.signal import lfilter, lfilter_zi                     # noqa: PLC0415
-    zi   = lfilter_zi(b_g, a_g) * 1.0
-    gain, _ = lfilter(b_g, a_g, reduction.astype(np.float64), zi=zi)
+    alpha_attack  = float(np.exp(-1.0 / att_samp))
+    alpha_release = float(np.exp(-1.0 / rel_samp))
+    gain = _smooth_gain_envelope(reduction, alpha_attack, alpha_release)
     gain = np.clip(gain, 0.0, 1.0).astype(np.float32)
 
     limited = (audio * gain).astype(np.float32)

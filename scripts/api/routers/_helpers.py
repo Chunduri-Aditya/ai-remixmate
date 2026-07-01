@@ -5,16 +5,21 @@ These utilities are used by multiple routers for common operations like
 song validation, stem file lookup, and rate limiting.
 """
 
-import re
 from pathlib import Path
 from typing import Optional
 
 from fastapi import HTTPException
 
-# Song names on disk are produced by sanitize_name() in youtube_music.py:
-# alphanumeric, spaces, hyphens, parens, brackets, ampersands — max 120 chars.
+# Song names on disk are produced by scripts.core.paths.sanitize_song_name()
+# — the single shared source of truth for "what characters are allowed in a
+# song name", also used by scripts/download.py:_sanitize(). Both used to be
+# independent definitions (a loose blocklist on the download side, a strict
+# allowlist here) that disagreed on common title punctuation — a perfectly
+# normal download could land on disk fine and then 400 forever on every
+# subsequent request. Re-exported here (rather than imported directly) to
+# keep this file's existing CodeQL-recognized-sanitizer shape intact.
 # This pattern is used as an explicit CodeQL-recognized sanitizer in _require_song.
-_SAFE_SONG_NAME_RE = re.compile(r'^[\w\s\-\(\)\[\]&]{1,120}$')
+from scripts.core.paths import SONG_NAME_RE as _SAFE_SONG_NAME_RE
 
 from scripts.api import jobs as job_store
 from scripts.api.schemas import SongInfo
@@ -54,11 +59,46 @@ def _song_info(song_dir: Path) -> SongInfo:
     except Exception:
         pass
 
+    from scripts.core.analysis_pipeline import has_analysis as _has_analysis
+
+    analyzed = _has_analysis(song_dir)
+    bpm = key = mode = camelot = genre = duration = energy = None
+    if analyzed:
+        try:
+            import json
+            meta = json.loads((song_dir / "meta.json").read_text())
+            bpm      = meta.get("bpm")
+            key      = meta.get("key")
+            mode     = meta.get("mode")
+            camelot  = meta.get("camelot")
+            genre    = meta.get("genre")
+            energy   = meta.get("energy_mean")  # 0-1 already, matches frontend's expected scale
+        except Exception:
+            pass
+        # duration isn't persisted to meta.json (only bpm/key/genre/etc are) —
+        # it lives in analysis.json instead, written alongside it.
+        try:
+            import json
+            analysis_doc = json.loads((song_dir / "analysis.json").read_text())
+            duration = analysis_doc.get("duration")
+        except Exception:
+            pass
+
     return SongInfo(
         name=song_dir.name,
+        path=str(song_dir),
         size_mb=round(size / 1_048_576, 2),
         has_full_wav=(song_dir / "full.wav").exists(),
+        has_stems=len(stems) > 0,
         stems=stems,
+        has_analysis=analyzed,
+        bpm=bpm,
+        key=key,
+        mode=mode,
+        camelot=camelot,
+        energy=energy,
+        genre=genre,
+        duration=duration,
         license_type=license_type,
         source=source,
     )

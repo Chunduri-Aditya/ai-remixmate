@@ -351,10 +351,8 @@ def _inpaint_vampnet(
     mask_t  = torch.from_numpy(~mask_1d).unsqueeze(0).unsqueeze(0)  # (1, 1, T) — True=MASK
 
     log.info(
-        "[inpainting] VampNet: %d tokens, %.1f%% masked, %d steps",
-        combined_codes.shape[1],
-        (~mask_1d).mean() * 100,
-        config.sampling_steps,
+        f"[inpainting] VampNet: {combined_codes.shape[1]} tokens, "
+        f"{(~mask_1d).mean() * 100:.1f}% masked, {config.sampling_steps} steps"
     )
 
     with torch.no_grad():
@@ -436,7 +434,7 @@ def run_inpainting(
     def _prog(p: float, msg: str) -> None:
         if progress_cb:
             progress_cb(p, msg)
-        log.info("[inpainting] %.0f%% — %s", p * 100, msg)
+        log.info(f"[inpainting] {p * 100:.0f}% — {msg}")
 
     t0 = time.time()
     device = get_device()
@@ -456,7 +454,7 @@ def run_inpainting(
     if bpm is None:
         _prog(0.10, "Auto-detecting BPM…")
         bpm = _detect_bpm(audio_a, sr_a)
-        log.info("[inpainting] Auto-detected BPM: %.1f", bpm)
+        log.info(f"[inpainting] Auto-detected BPM: {bpm:.1f}")
 
     # ── 2. Extract tail of A and head of B ────────────────────────────────
     _prog(0.15, "Extracting transition segments…")
@@ -483,7 +481,7 @@ def run_inpainting(
     n_b    = codes_b.shape[1]
     n_total = n_a + n_b
 
-    log.info("[inpainting] codes_a: %s, codes_b: %s", codes_a.shape, codes_b.shape)
+    log.info(f"[inpainting] codes_a: {codes_a.shape}, codes_b: {codes_b.shape}")
 
     # Combined token sequence
     combined = np.concatenate([codes_a, codes_b], axis=1)  # (n_cb, n_a + n_b)
@@ -514,7 +512,7 @@ def run_inpainting(
         mask_1d = build_prefix_suffix_mask(n_total, n_a, n_b)
 
     pct_masked = (~mask_1d).mean() * 100
-    log.info("[inpainting] Mask: %.1f%% tokens will be inpainted", pct_masked)
+    log.info(f"[inpainting] Mask: {pct_masked:.1f}% tokens will be inpainted")
 
     # ── 5. Inpaint ─────────────────────────────────────────────────────────
     _prog(0.45, "Running VampNet inpainting…")
@@ -526,9 +524,7 @@ def run_inpainting(
 
     except (ImportError, RuntimeError, AttributeError) as exc:
         # Graceful fallback: cosine interpolation
-        log.warning(
-            "[inpainting] VampNet unavailable (%s). Using cosine fallback.", exc
-        )
+        log.warning(f"[inpainting] VampNet unavailable ({exc}). Using cosine fallback.")
         method = "cosine_fallback"
         # Inpaint gap = 4 bars worth of tokens
         n_gap = _bars_to_tokens(config.crossfade_bars, bpm)

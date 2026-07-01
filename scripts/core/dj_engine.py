@@ -269,7 +269,22 @@ def _time_stretch(audio: np.ndarray, ratio: float) -> np.ndarray:
     raw = ratio
     ratio = _safe_ratio(ratio)
     if raw != ratio and raw is not None and math.isfinite(raw):
-        log.info("Clamped stretch ratio %.3f → %.3f", raw, ratio)
+        # Distinguish a routine clamp from one that hugs the boundary —
+        # the latter is the signature of a BPM octave error (a true ~2x
+        # tempo mismatch lands the raw ratio right at/past 0.5 or 2.0,
+        # not somewhere in the middle of the band). REMIX_QUALITY_INSIGHTS.md
+        # finding #3: previously nothing upstream flagged *why* a ratio hit
+        # the ceiling, only that it did.
+        near_boundary = raw <= _MIN_STRETCH * 1.1 or raw >= _MAX_STRETCH * 0.9
+        if near_boundary:
+            log.warning(
+                "Clamped stretch ratio %.3f → %.3f — hugs the safety boundary, "
+                "likely a BPM octave-detection error rather than a real tempo "
+                "mismatch (see REMIX_QUALITY_INSIGHTS.md #2/#3)",
+                raw, ratio,
+            )
+        else:
+            log.info("Clamped stretch ratio %.3f → %.3f", raw, ratio)
     if abs(ratio - 1.0) < 0.02:
         return audio
     try:

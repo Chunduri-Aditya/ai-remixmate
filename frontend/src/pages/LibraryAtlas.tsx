@@ -300,11 +300,11 @@ function SongDrawer({
           {/* Full metadata */}
           <div className="la-drawer__section">
             <div className="la-drawer__meta-grid">
-              {song.bpm      !== undefined && <><span className="la-drawer__meta-label">BPM</span><span className="font-mono">{song.bpm.toFixed(1)}</span></>}
+              {song.bpm      != null && <><span className="la-drawer__meta-label">BPM</span><span className="font-mono">{song.bpm.toFixed(1)}</span></>}
               {song.key                    && <><span className="la-drawer__meta-label">Key</span><span>{song.key}</span></>}
               {song.camelot               && <><span className="la-drawer__meta-label">Camelot</span><span className="font-mono">{song.camelot}</span></>}
-              {song.energy   !== undefined && <><span className="la-drawer__meta-label">Energy</span><span className="font-mono">{Math.round(song.energy * 100)}%</span></>}
-              {song.duration !== undefined && <><span className="la-drawer__meta-label">Duration</span><span className="font-mono">{fmtDuration(song.duration)}</span></>}
+              {song.energy   != null && <><span className="la-drawer__meta-label">Energy</span><span className="font-mono">{Math.round(song.energy * 100)}%</span></>}
+              {song.duration != null && <><span className="la-drawer__meta-label">Duration</span><span className="font-mono">{fmtDuration(song.duration)}</span></>}
               {song.genre                 && <><span className="la-drawer__meta-label">Genre</span><span>{song.genre}</span></>}
             </div>
             <div className="la-chips" style={{ marginTop: 'var(--space-2)' }}>
@@ -601,6 +601,31 @@ export default function LibraryAtlas() {
     setSelected(new Set())
   }, [selected, upsertJob])
 
+  // Songs missing BPM/key/energy — backend's has_analysis() check, mirrored
+  // here from has_analysis flag on each row. Drives the "Analyze missing"
+  // button below; no manual row-selection required.
+  const missingCount = useMemo(
+    () => songs.filter((s) => !s.has_analysis).length,
+    [songs],
+  )
+  const [analyzingMissing, setAnalyzingMissing] = useState(false)
+
+  const handleAnalyzeMissing = useCallback(async () => {
+    setAnalyzingMissing(true)
+    try {
+      const res = await analysisApi.analyzeMissing()
+      if ('job_id' in res) {
+        upsertJob({
+          job_id: res.job_id, status: 'PENDING', type: 'analyze',
+          progress: 0, message: `Analyzing ${missingCount} song(s) missing data…`,
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        })
+      }
+    } catch { /* surfaced via job store / toast elsewhere */ } finally {
+      setAnalyzingMissing(false)
+    }
+  }, [upsertJob, missingCount])
+
   // Sync header checkbox indeterminate state
   useEffect(() => {
     if (!headerCheckboxRef.current) return
@@ -705,6 +730,20 @@ export default function LibraryAtlas() {
             </button>
           )}
         </div>
+
+        {missingCount > 0 && (
+          <button
+            className="la-filter-chip la-filter-chip--missing"
+            onClick={handleAnalyzeMissing}
+            disabled={analyzingMissing}
+            title={`${missingCount} song(s) have no BPM/key/energy data`}
+          >
+            {analyzingMissing
+              ? <Loader2 size={10} className="la-spin" />
+              : <BarChart2 size={10} />}
+            Analyze missing ({missingCount})
+          </button>
+        )}
       </div>
 
       {/* Table + drawer */}

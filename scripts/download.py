@@ -107,6 +107,7 @@ class TrackSpec:
     query: str                        # search query or URL
     name: Optional[str] = None        # desired output name (no extension)
     separate: bool = False            # run Demucs after download?
+    auto_analyze: bool = True         # run BPM/key/structure analysis after stems?
 
 
 @dataclass
@@ -118,6 +119,8 @@ class DownloadResult:
     error: Optional[str] = None
     license: Optional[LicenseInfo] = None       # licence metadata for the track
     license_warning: Optional[str] = None       # pre-formatted human-readable warning
+    analyzed: bool = False                      # BPM/key/structure analysis completed?
+    evicted: List[str] = field(default_factory=list)  # other songs auto-evicted (over cap)
 
 
 # ---------------------------------------------------------------------------
@@ -301,11 +304,19 @@ def search_track(query: str, limit: int = 5, source: str = "auto") -> List[Dict]
 # ---------------------------------------------------------------------------
 
 def _sanitize(name: str) -> str:
-    """Return a filesystem-safe version of a track name."""
-    name = name.strip()
-    name = re.sub(r"\s+", " ", name)
-    name = re.sub(r'[\\/:*?"<>|]+', "_", name)
-    return name[:120].strip("._ ")
+    """
+    Return a filesystem-safe version of a track name.
+
+    Delegates to scripts.core.paths.sanitize_song_name() — the single
+    source of truth shared with _SAFE_SONG_NAME_RE (routers/_helpers.py).
+    This used to be its own independent blocklist (only stripping
+    Windows-reserved chars), which let punctuation through that the API's
+    stricter allowlist then permanently rejected on every subsequent
+    request for that song. Keeping one shared definition means a name
+    written to disk here can never become unreadable later.
+    """
+    from scripts.core.paths import sanitize_song_name
+    return sanitize_song_name(name)
 
 
 def _resolve_url(spec: TrackSpec) -> tuple[str, str]:
@@ -455,6 +466,20 @@ def download_track(spec: TrackSpec, progress_cb: Optional[ProgressCb] = None) ->
             progress_cb=(lambda p, m: _emit(0.50 + 0.45 * p, m)) if progress_cb else None,
         )
 
+    # --- Auto-analyze (BPM/key/structure) — MUST run before the prune step
+    # below. prune_on_download defaults to True and deletes full.wav right
+    # after stems are produced; analysis needs full.wav, so it has to run
+    # first or it would fail for every single download.
+    analyzed = False
+    if stems and spec.auto_analyze:
+        _emit(0.95, "Analyzing…")
+        try:
+            from scripts.core.analysis_pipeline import run_song_analysis
+            run_song_analysis(name)
+            analyzed = True
+        except Exception as exc:
+            print(f"⚠️  Auto-analyze failed for '{name}' (non-critical): {exc}")
+
     # --- Smart storage: prune raw WAV if stems were produced ---
     if stems and _PRUNE_ON_DL:
         try:
@@ -465,12 +490,17 @@ def download_track(spec: TrackSpec, progress_cb: Optional[ProgressCb] = None) ->
 
     # --- Register in library index + store fingerprint ---
     _emit(0.96, "Registering in library…")
+    evicted: List[str] = []
     try:
         mgr = get_library_manager()
         mgr.register(name, source=_source_from_url(url))
         mgr.store_fingerprint(name, wav_dest if wav_dest.exists() else dest_dir / "vocals.wav")
-        # Evict LRU songs if library is over cap
-        mgr.evict_lru()
+        # Evict LRU songs if library is over cap — this can delete OTHER,
+        # older songs' full.wav (or whole song dirs) without the caller
+        # asking for it. Surfaced via DownloadResult.evicted so the API/UI
+        # can tell the user what happened instead of it being invisible.
+        if _AUTO_EVICT:
+            evicted = mgr.evict_lru() or []
     except Exception:
         pass
 
@@ -489,6 +519,8 @@ def download_track(spec: TrackSpec, progress_cb: Optional[ProgressCb] = None) ->
         stems=stems,
         license=lic_info,
         license_warning=warn_str,
+        analyzed=analyzed,
+        evicted=evicted,
     )
 
 
@@ -576,9 +608,11 @@ def download_from_csv(csv_path: Path, separate: bool = False) -> List[DownloadRe
 # Read pruning preference from config (same default as library.py)
 try:
     from scripts.core.config import cfg as _cfg_dl
-    _PRUNE_ON_DL: bool = getattr(getattr(_cfg_dl, "library", None), "prune_on_download", True)
+    _PRUNE_ON_DL: bool   = getattr(getattr(_cfg_dl, "library", None), "prune_on_download", True)
+    _AUTO_EVICT: bool    = getattr(getattr(_cfg_dl, "library", None), "auto_evict_on_download", True)
 except Exception:
     _PRUNE_ON_DL = True
+    _AUTO_EVICT  = True
 
 
 def _source_from_url(url: str) -> str:

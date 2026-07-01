@@ -29,6 +29,7 @@ def task_download(
     query: str,
     name: Optional[str] = None,
     separate: bool = True,   # always True now — Demucs is automatic
+    auto_analyze: bool = True,
 ) -> Dict[str, Any]:
     from scripts.download import download_track, TrackSpec
 
@@ -36,37 +37,47 @@ def task_download(
     update_job(job_id, progress=0.01, message="Starting download…")
 
     def _progress(frac: float, msg: str) -> None:
-        # download_track covers 0–1 of its own pipeline; reserve the final
-        # few percent of the job for music-index upsert below.
-        update_job(job_id, progress=round(0.01 + 0.92 * frac, 3), message=msg)
+        # download_track's own pipeline (download → stems → auto-analyze →
+        # prune → register) covers the full 0–1 range; auto_analyze runs
+        # *inside* it, before the raw WAV is pruned, so it actually has a
+        # full.wav to read. Don't try to re-run analysis after the fact here
+        # — by then prune_on_download may have already deleted full.wav.
+        update_job(job_id, progress=round(0.01 + 0.95 * frac, 3), message=msg)
 
     # Force separate=True — every download gets Demucs automatically
-    spec = TrackSpec(query=query, name=name, separate=True)
+    spec = TrackSpec(query=query, name=name, separate=True, auto_analyze=auto_analyze)
     result = download_track(spec, progress_cb=_progress)
 
     if not result.success:
         log_audit("download_failed", resource=query, job_id=job_id, metadata={"error": result.error})
         raise RuntimeError(result.error or "Download failed")
 
-    update_job(job_id, progress=0.94, message="Stems ready — indexing song…")
+    update_job(job_id, progress=0.97, message="Indexing song…")
 
     # ── Upsert into music index (non-blocking) ─────────────────────────────
     _index_upsert(result.name)
 
-    update_job(job_id, progress=0.95, message="Finalising…")
-
     out: Dict[str, Any] = {
-        "name":    result.name,
-        "wav":     str(result.wav) if result.wav else None,
-        "stems":   {k: str(v) for k, v in result.stems.items()},
-        "indexed": True,
-        "success": True,
+        "name":     result.name,
+        "wav":      str(result.wav) if result.wav else None,
+        "stems":    {k: str(v) for k, v in result.stems.items()},
+        "indexed":  True,
+        "success":  True,
+        "analyzed": result.analyzed,
     }
     if result.license_warning:
         out["license_warning"] = result.license_warning
+    if result.evicted:
+        # Storage cap was exceeded — these OTHER songs got their full.wav
+        # (or whole directory) auto-removed to make room. Surface it so
+        # it's never a silent surprise.
+        out["evicted"] = result.evicted
+
+    update_job(job_id, progress=1.0, message="Finalising…")
 
     log_audit("download_complete", resource=result.name, job_id=job_id,
-              metadata={"query": query, "stems": list(result.stems.keys())})
+              metadata={"query": query, "stems": list(result.stems.keys()),
+                        "analyzed": result.analyzed})
     return out
 
 
@@ -75,6 +86,7 @@ def task_playlist_download(
     url: str,
     separate: bool,
     limit: Optional[int],
+    auto_analyze: bool = True,
 ) -> Dict[str, Any]:
     """
     Download all tracks from a playlist URL.
@@ -137,15 +149,18 @@ def task_playlist_download(
                 message=f"[{i+1}/{total}] {title[:40]}: {msg}",
             )
 
-        spec   = TrackSpec(query=track_url, name=title, separate=separate)
+        # auto_analyze runs inside download_track(), before the raw WAV gets
+        # pruned — see task_download's comment for why ordering matters here.
+        spec   = TrackSpec(query=track_url, name=title, separate=separate, auto_analyze=auto_analyze)
         result = download_track(spec, progress_cb=_track_progress)
 
         if result.success:
             results.append({
-                "name":    result.name,
-                "wav":     str(result.wav) if result.wav else None,
-                "stems":   {k: str(v) for k, v in result.stems.items()},
-                "success": True,
+                "name":     result.name,
+                "wav":      str(result.wav) if result.wav else None,
+                "stems":    {k: str(v) for k, v in result.stems.items()},
+                "success":  True,
+                "analyzed": result.analyzed,
             })
         else:
             failed.append({"name": title, "error": result.error})

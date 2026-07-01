@@ -37,12 +37,66 @@ class JobType(str, Enum):
 
 class SongInfo(BaseModel):
     name: str
+    path: str = ""
     size_mb: float
     has_full_wav: bool
+    has_stems: bool = False
     stems: List[str] = []
+    has_analysis: bool = False
     license_type: Optional[str] = None
     source: Optional[str] = None
     last_accessed: Optional[float] = None
+    # Populated from meta.json when has_analysis is True — these are what
+    # Mix Deck / Library Atlas actually render (BPM, Key, Camelot, Energy).
+    # Previously absent from this model entirely, so the frontend's
+    # songInfo?.bpm / .key / .camelot / .energy / .has_stems always read
+    # undefined regardless of whether the song had been analyzed.
+    bpm: Optional[float] = None
+    key: Optional[str] = None
+    mode: Optional[str] = None
+    camelot: Optional[str] = None
+    energy: Optional[float] = None
+    genre: Optional[str] = None
+    duration: Optional[float] = None
+
+
+class StorageStatusResponse(BaseModel):
+    """Backs the Storage panel — wraps scripts/core/library.py:LibraryManager,
+    which already implements pruning + LRU eviction but was previously never
+    exposed through the API."""
+    library_dir: str
+    outputs_dir: str
+    total_songs: int
+    total_size_gb: float
+    cap_gb: float
+    within_cap: bool
+    songs_with_full_wav: int       # still have the un-pruned source WAV
+    songs_stems_only: int          # already pruned — stems only
+    prune_on_download: bool
+    keep_raw_after_separation: bool
+    auto_evict_on_download: bool   # whether downloads can silently evict OTHER songs
+
+
+class StoragePruneResponse(BaseModel):
+    pruned: List[str] = []
+    freed_mb: float = 0.0
+
+
+class StorageEvictResponse(BaseModel):
+    evicted: List[str] = []
+    dry_run: bool = False
+    size_before_gb: float = 0.0
+    size_after_gb: float = 0.0
+
+
+class ProcessingStatusResponse(BaseModel):
+    """Segregates the library into processing buckets for the live Operations panel."""
+    fully_processed: List[str] = []   # stems + analysis both done
+    stems_only: List[str] = []        # stems done, analysis not run yet
+    analysis_only: List[str] = []     # analysis done but stems missing (unusual — re-download)
+    unprocessed: List[str] = []       # neither stems nor analysis
+    total: int = 0
+    generated_at: float = 0.0
 
 
 class CompatibilityResult(BaseModel):
@@ -53,6 +107,9 @@ class CompatibilityResult(BaseModel):
     bpm_score: float = Field(..., ge=0.0, le=1.0)
     key_score: float = Field(..., ge=0.0, le=1.0)
     energy_score: float = Field(..., ge=0.0, le=1.0)
+    genre_proximity: float = Field(0.5, ge=0.0, le=1.0)
+    timbral_similarity: float = Field(0.5, ge=0.0, le=1.0)
+    vocal_clash_penalty: float = Field(0.0, ge=0.0, le=1.0)
     bpm_a: float
     bpm_b: float
     camelot_a: Optional[str] = None
@@ -98,6 +155,11 @@ class DownloadRequest(BaseModel):
         True,
         description="Run Demucs after download — always True by default (auto-stem pipeline)",
     )
+    auto_analyze: bool = Field(
+        True,
+        description="Run BPM/key/structure analysis right after stems finish, so the song "
+                     "is fully remix-ready (stemmed + analyzed) the moment it lands in the library.",
+    )
 
 
 class BatchDownloadRequest(BaseModel):
@@ -108,6 +170,10 @@ class BatchDownloadRequest(BaseModel):
     separate: bool = Field(
         True,
         description="Run Demucs on every track after download (default: True)",
+    )
+    auto_analyze: bool = Field(
+        True,
+        description="Run BPM/key/structure analysis on every track right after its stems finish.",
     )
 
 
@@ -120,6 +186,10 @@ class PlaylistDownloadRequest(BaseModel):
     limit: Optional[int] = Field(
         None, ge=1, le=200,
         description="Max number of tracks to download (default: all)",
+    )
+    auto_analyze: bool = Field(
+        True,
+        description="Run BPM/key/structure analysis on every track right after its stems finish.",
     )
 
 

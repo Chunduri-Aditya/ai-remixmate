@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/effectState.schema.json",
+  "title": "EffectState",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "type",
+    "enabled",
+    "wet"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "filter",
+        "echo",
+        "reverb",
+        "gate",
+        "delay",
+        "none"
+      ]
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "wet": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Wet/dry effect amount."
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      }
+    }
+  }
+}

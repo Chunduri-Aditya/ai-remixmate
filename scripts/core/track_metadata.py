@@ -91,6 +91,14 @@ class TrackMetadata:
     loudness_lufs: float              = -14.0       # integrated loudness
     duration_seconds: float           = 0.0
 
+    # Timbral / vocal features — used by compatibility_score() for
+    # genre_proximity, timbral_similarity, and vocal_clash_penalty
+    # (docs/DJ_THEORY.md section 3 SetFlow formula). 0.0 means "unknown",
+    # not "silent" — compatibility_score() treats 0.0 as missing data and
+    # falls back to a neutral score rather than penalizing the pair.
+    vocal_density: float              = 0.0         # 0–1, source-separation energy ratio
+    spectral_centroid_hz: float       = 0.0         # brightness proxy for timbral_similarity
+
     # Genre
     genres: List[str]                 = field(default_factory=list)
 
@@ -120,7 +128,8 @@ class TrackMetadata:
         for f_name, f_val in asdict(other).items():
             current = getattr(result, f_name)
             # Fill only if current is empty/zero/unknown
-            if f_name in ("bpm", "energy", "danceability", "valence", "duration_seconds"):
+            if f_name in ("bpm", "energy", "danceability", "valence", "duration_seconds",
+                          "vocal_density", "spectral_centroid_hz"):
                 if current == 0.0 and f_val != 0.0:
                     setattr(result, f_name, f_val)
             elif f_name in ("key", "mode", "camelot", "isrc", "mb_id",
@@ -510,9 +519,17 @@ class LocalAnalysisProvider:
             y, sr = librosa.load(str(wav_path), sr=self.sr, mono=True,
                                  duration=self.analysis_duration)
 
-            # BPM
+            # BPM — octave-corrected (see beat_tracker.resolve_bpm_octave).
+            # This was a third independent raw librosa.beat.beat_track() call
+            # with no octave handling, same bug class as music_index.py's
+            # _quick_features() (REMIX_QUALITY_INSIGHTS.md finding #2).
             tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
             bpm = float(tempo)
+            try:
+                from scripts.core.beat_tracker import resolve_bpm_octave
+                bpm = resolve_bpm_octave(bpm, y, sr, hop_length=512)
+            except Exception:
+                pass
 
             # Key
             chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
@@ -548,6 +565,32 @@ class LocalAnalysisProvider:
 
             camelot = key_to_camelot(key, mode)
 
+            # Spectral centroid (brightness) — feeds timbral_similarity in
+            # compatibility_score(). docs/DJ_THEORY.md section 7.
+            spectral_centroid_hz = 0.0
+            try:
+                centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
+                spectral_centroid_hz = float(np.mean(centroid))
+            except Exception:
+                pass
+
+            # Vocal presence — spectral proxy (no stem separation available
+            # at this stage): ratio of vocal-band (300-3400 Hz) energy to
+            # total energy, per docs/DJ_THEORY.md section 7's documented
+            # fallback when source-separation isn't available. Demucs-stem
+            # based vocal_density (more accurate) is written separately by
+            # analysis_pipeline.run_song_analysis() when stems exist.
+            vocal_density = 0.0
+            try:
+                stft = np.abs(librosa.stft(y))
+                freqs = librosa.fft_frequencies(sr=sr)
+                vocal_band = (freqs >= 300) & (freqs <= 3400)
+                vocal_energy = float(np.sum(stft[vocal_band, :] ** 2))
+                total_energy = float(np.sum(stft ** 2)) + 1e-10
+                vocal_density = float(np.clip(vocal_energy / total_energy, 0.0, 1.0))
+            except Exception:
+                pass
+
             meta = TrackMetadata(
                 title=title or wav_path.parent.name,
                 artist=artist,
@@ -559,6 +602,8 @@ class LocalAnalysisProvider:
                 energy=energy,
                 loudness_lufs=lufs,
                 duration_seconds=float(len(y) / sr),
+                vocal_density=vocal_density,
+                spectral_centroid_hz=spectral_centroid_hz,
                 source="librosa",
             )
             log.info("Local analysis: %s BPM, key %s %s, energy %.2f",
@@ -745,11 +790,37 @@ class MetadataClient:
         Returns a dict with individual scores (0–1, higher = more compatible)
         and a combined "overall" score.
 
+        Implements the SetFlow formula from docs/DJ_THEORY.md section 3
+        (validated against 1,557 mixes / 24,202 tracks from 1001Tracklists):
+
+            compatibility = 0.35 * harmonic_match
+                          + 0.25 * beat_alignment
+                          + 0.15 * energy_smoothness
+                          + 0.15 * genre_proximity
+                          + 0.10 * timbral_similarity
+                          - vocal_clash_penalty
+
+        Previously this method implemented a different, undocumented formula
+        (key*0.45 + bpm*0.40 + energy*0.15) with no genre_proximity,
+        timbral_similarity, or vocal_clash_penalty term at all — see
+        REMIX_QUALITY_INSIGHTS.md finding #1. That formula over-weighted BPM
+        relative to the project's own research and had no mechanism for
+        catching the single most audible DJ-mixing failure mode: two vocals
+        playing over each other.
+
         Dimensions:
-          - key_score   : harmonic compatibility (Camelot wheel distance)
-          - bpm_score   : tempo compatibility (ratio closeness to 1.0)
-          - energy_score: energy difference
-          - overall     : weighted combination
+          - key_score (harmonic_match)     : Camelot wheel distance
+          - bpm_score (beat_alignment)     : tempo ratio closeness to 1.0
+          - energy_score (energy_smoothness): energy difference
+          - genre_proximity                : overlap between genre tags
+          - timbral_similarity             : spectral-centroid closeness
+          - vocal_clash_penalty            : both tracks having strong,
+                                              simultaneous vocal presence
+
+        genre_proximity, timbral_similarity, and vocal_clash_penalty default
+        to neutral values (0.5, 0.5, 0.0 respectively) when the underlying
+        data (genres list, spectral_centroid_hz, vocal_density) is missing —
+        a pair is never penalized purely for lacking metadata.
         """
         # Key compatibility (Camelot distance)
         key_score = 0.5  # default: unknown
@@ -787,22 +858,84 @@ class MetadataClient:
         # Energy difference
         energy_score = 1.0 - abs(meta_a.energy - meta_b.energy)
 
-        # Overall (weighted)
+        # Genre proximity — Jaccard overlap of genre tag sets.
+        # Neutral 0.5 when either track has no genre data (don't penalize
+        # for missing metadata, but don't reward it either).
+        genres_a = {g.strip().lower() for g in meta_a.genres if g.strip()}
+        genres_b = {g.strip().lower() for g in meta_b.genres if g.strip()}
+        if genres_a and genres_b:
+            union = genres_a | genres_b
+            genre_proximity = len(genres_a & genres_b) / len(union) if union else 0.5
+        else:
+            genre_proximity = 0.5
+
+        # Timbral similarity — closeness of spectral centroid (brightness).
+        # Neutral 0.5 when either track lacks the feature.
+        sc_a, sc_b = meta_a.spectral_centroid_hz, meta_b.spectral_centroid_hz
+        if sc_a > 0.0 and sc_b > 0.0:
+            timbral_similarity = 1.0 - min(1.0, abs(sc_a - sc_b) / max(sc_a, sc_b))
+        else:
+            timbral_similarity = 0.5
+
+        # Vocal clash penalty — the single most audible DJ-mixing failure
+        # mode (two vocals overlapping) and, until now, the one dimension in
+        # the documented SetFlow formula with zero implementation anywhere
+        # in the codebase (REMIX_QUALITY_INSIGHTS.md finding #1). Penalty
+        # scales with how strongly *both* tracks carry simultaneous vocal
+        # presence; 0.0 (no penalty) when either track's vocal_density is
+        # unknown, since we'd rather under-penalize than flag a clash on
+        # missing data.
+        vd_a, vd_b = meta_a.vocal_density, meta_b.vocal_density
+        if vd_a > 0.0 and vd_b > 0.0:
+            vocal_clash_penalty = min(0.30, vd_a * vd_b)
+        else:
+            vocal_clash_penalty = 0.0
+
+        # Overall — SetFlow weighted combination (docs/DJ_THEORY.md section 3)
         overall = (
-            key_score    * 0.45 +
-            bpm_score    * 0.40 +
-            energy_score * 0.15
+            key_score           * 0.35 +   # harmonic_match
+            bpm_score           * 0.25 +   # beat_alignment
+            energy_score        * 0.15 +   # energy_smoothness
+            genre_proximity     * 0.15 +
+            timbral_similarity  * 0.10
+            - vocal_clash_penalty
+        )
+        overall = max(0.0, min(1.0, overall))
+
+        # "compatible" used to be a flat overall>=0.55 threshold on the
+        # WEIGHTED AVERAGE — which let a hard dealbreaker on one dimension
+        # get diluted into a "compatible" verdict by a perfect score on the
+        # others. Confirmed live with two real library pairs: a tritone key
+        # clash (key_score=0.0, the worst possible harmonic relationship)
+        # scored overall=0.55 with bpm/energy both perfect -> "compatible".
+        # A 63.8 vs 156.6 BPM pair (~2.45x stretch, way outside even the
+        # double-time window) scored overall=0.60 with key/energy perfect ->
+        # also "compatible". Both are exactly the cases this tool exists to
+        # warn a DJ away from. A hard zero on key or BPM now vetoes
+        # "compatible" outright, independent of the weighted average.
+        # vocal_clash_penalty >= 0.25 means both tracks carry strong,
+        # near-certain-to-overlap vocals (e.g. vd_a=vd_b=0.5 -> 0.25) — added
+        # as a fourth veto condition since this is the exact failure mode
+        # finding #1 named as having zero detection anywhere in the codebase.
+        compatible = (
+            overall >= 0.55
+            and key_score > 0.0
+            and bpm_score > 0.0
+            and vocal_clash_penalty < 0.25
         )
 
         return {
-            "key_score":    round(key_score, 3),
-            "bpm_score":    round(bpm_score, 3),
-            "energy_score": round(energy_score, 3),
-            "overall":      round(overall, 3),
+            "key_score":           round(key_score, 3),
+            "bpm_score":           round(bpm_score, 3),
+            "energy_score":        round(energy_score, 3),
+            "genre_proximity":     round(genre_proximity, 3),
+            "timbral_similarity":  round(timbral_similarity, 3),
+            "vocal_clash_penalty": round(vocal_clash_penalty, 3),
+            "overall":             round(overall, 3),
             # Human-readable summary
             "key_info":     f"{meta_a.key_full} → {meta_b.key_full}",
             "bpm_info":     f"{meta_a.bpm:.1f} → {meta_b.bpm:.1f} BPM",
-            "compatible":   overall >= 0.55,
+            "compatible":   compatible,
         }
 
     # ------------------------------------------------------------------

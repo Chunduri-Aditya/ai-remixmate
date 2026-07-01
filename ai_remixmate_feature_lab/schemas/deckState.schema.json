@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/deckState.schema.json",
+  "title": "DeckState",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "status",
+    "currentTimeSec",
+    "tempoPercent",
+    "volume"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "trackId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "empty",
+        "loaded",
+        "playing",
+        "paused",
+        "cueing"
+      ]
+    },
+    "currentTimeSec": {
+      "type": "number",
+      "minimum": 0
+    },
+    "tempoPercent": {
+      "type": "number",
+      "minimum": -50,
+      "maximum": 50
+    },
+    "pitchSemitones": {
+      "type": "number",
+      "minimum": -12,
+      "maximum": 12
+    },
+    "volume": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "keyLock": {
+      "type": "boolean"
+    },
+    "syncEnabled": {
+      "type": "boolean"
+    },
+    "selectedCueId": {
+      "type": "string"
+    },
+    "loop": {
+      "$ref": "loopState.schema.json"
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/neuralFeatureModel.schema.json",
+  "title": "NeuralFeatureModel",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "inputSize", "hiddenSize", "outputSize", "learningRate", "version"],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "inputSize": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 128
+    },
+    "hiddenSize": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 128
+    },
+    "outputSize": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16
+    },
+    "learningRate": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "examplesSeen": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "lastLoss": {
+      "type": "number",
+      "minimum": 0
+    },
+    "weights": {
+      "type": "object",
+      "description": "JSON-serializable model weights. Shape validation is handled by implementation code."
+    }
+  }
+}

@@ -89,6 +89,18 @@ class LibraryConfig:
     max_size_gb: float              = 20.0   # GB cap before LRU eviction
     keep_raw_after_separation: bool = False  # keep full.wav after stems produced
     prune_on_download: bool         = True   # auto-prune after each separation
+    auto_evict_on_download: bool    = True   # run evict_lru() after every download (can
+                                              # silently delete OTHER old songs — surfaced
+                                              # in download job results either way)
+    library_dir: str                = ""     # "" = default <project_root>/library.
+                                              # Set to an absolute path to store the
+                                              # library on an external drive or NAS mount
+                                              # (e.g. "/Volumes/MusicDrive/remixmate-library").
+                                              # NOT object storage (S3/GCS) — every script
+                                              # in this codebase opens stems with plain
+                                              # pathlib/soundfile calls, so this only
+                                              # supports filesystem-mounted locations.
+    outputs_dir: str                = ""     # "" = default <project_root>/outputs.
 
 
 @dataclass

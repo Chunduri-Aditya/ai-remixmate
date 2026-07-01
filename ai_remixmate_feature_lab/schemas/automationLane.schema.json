@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/automationLane.schema.json",
+  "title": "AutomationLane",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "target",
+    "points"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "interpolation": {
+      "type": "string",
+      "enum": [
+        "linear",
+        "hold"
+      ],
+      "default": "linear"
+    },
+    "points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "timeSec",
+          "value"
+        ],
+        "properties": {
+          "timeSec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "value": {
+            "type": "number"
+          }
+        }
+      },
+      "description": "Automation points must be sorted by non-negative timeSec."
+    }
+  }
+}

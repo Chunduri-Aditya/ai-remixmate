@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/stemManifest.schema.json",
+  "title": "StemManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "trackId",
+    "stems"
+  ],
+  "properties": {
+    "trackId": {
+      "type": "string"
+    },
+    "sourcePath": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "stems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "path",
+          "available"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "vocals",
+              "drums",
+              "bass",
+              "other",
+              "instrumental",
+              "full"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "durationSec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "sampleRate": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "channels": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "quality": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    }
+  }
+}

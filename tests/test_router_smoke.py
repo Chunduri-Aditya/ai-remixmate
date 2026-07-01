@@ -168,14 +168,15 @@ class TestLibraryRouter:
     def test_list_library_schema_keys(self):
         r = self._client.get("/library")
         body = r.json()
-        # LibraryListResponse must have songs + total + stats
+        # LibraryListResponse must have songs + stats (stats.total_songs)
         assert "songs" in body
-        assert "total" in body
+        assert "stats" in body
+        assert "total_songs" in body["stats"]
         assert isinstance(body["songs"], list)
 
     def test_list_library_empty_when_dir_empty(self):
         r = self._client.get("/library")
-        assert r.json()["total"] == 0
+        assert r.json()["stats"]["total_songs"] == 0
 
     def test_get_nonexistent_song_404(self):
         r = self._client.get("/library/this-song-does-not-exist")

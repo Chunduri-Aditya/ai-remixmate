@@ -125,10 +125,13 @@ function JobResultBanner({ jobId }: JobResultBannerProps) {
 export default function AILab() {
   const [mode, setMode]         = useState<Mode>('style-transfer')
   const [song, setSong]         = useState('')
-  const [styleSong, setStyleSong] = useState('')
+  const [styleDescription, setStyleDescription] = useState('')
+  const [songB, setSongB]       = useState('')
   const [model, setModel]       = useState('')
-  const [inpaintStart, setInpaintStart] = useState('0')
-  const [inpaintEnd, setInpaintEnd]     = useState('10')
+  const [maskType, setMaskType]         = useState('prefix_suffix')
+  const [prefixBars, setPrefixBars]     = useState('4')
+  const [suffixBars, setSuffixBars]     = useState('4')
+  const [codec, setCodec]               = useState('encodec')
   const [temperature, setTemperature]   = useState(0.8)
   const [jobId, setJobId]       = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -160,18 +163,18 @@ export default function AILab() {
       const opts: Record<string, unknown> = {}
       if (model) opts.model = model
       if (mode === 'style-transfer') {
-        if (!styleSong) throw new Error('Pick a style reference track.')
-        res = await aiApi.styleTransfer(song, styleSong)
+        if (!styleDescription.trim()) throw new Error('Describe the target style (text prompt for MusicGen).')
+        res = await aiApi.styleTransfer(song, styleDescription, { ...opts, temperature })
       } else if (mode === 'inpaint') {
-        res = await aiApi.inpaint(song, {
+        if (!songB) throw new Error('Pick an incoming track.')
+        res = await aiApi.inpaint(song, songB, {
           ...opts,
-          start: parseFloat(inpaintStart),
-          end: parseFloat(inpaintEnd),
-          temperature,
+          mask_type: maskType,
+          prefix_bars: parseInt(prefixBars, 10),
+          suffix_bars: parseInt(suffixBars, 10),
         })
       } else {
-        // tokenize — use inpaint endpoint with tokenize flag
-        res = await aiApi.inpaint(song, { ...opts, tokenize: true })
+        res = await aiApi.tokenize(song, { codec })
       }
       setJobId(res.job_id)
       upsertJob({
@@ -241,16 +244,31 @@ export default function AILab() {
               </select>
             </div>
 
-            {/* Style reference (style-transfer only) */}
+            {/* Style description (style-transfer only) — MusicGen is text-conditioned,
+                not track-conditioned, so this is a free-text prompt, not a song picker. */}
             {mode === 'style-transfer' && (
               <div className="al-field">
-                <label className="al-label">Style reference</label>
+                <label className="al-label">Style description</label>
+                <textarea
+                  className="al-select"
+                  rows={3}
+                  placeholder="e.g. dark melodic techno 128 BPM heavy sub-bass melancholic chords"
+                  value={styleDescription}
+                  onChange={(e) => setStyleDescription(e.target.value)}
+                />
+              </div>
+            )}
+
+            {/* Incoming track (inpaint only) */}
+            {mode === 'inpaint' && (
+              <div className="al-field">
+                <label className="al-label">Incoming track</label>
                 <select
                   className="al-select"
-                  value={styleSong}
-                  onChange={(e) => setStyleSong(e.target.value)}
+                  value={songB}
+                  onChange={(e) => setSongB(e.target.value)}
                 >
-                  <option value="">— select style source —</option>
+                  <option value="">— select incoming track —</option>
                   {songNames.filter((n) => n !== song).map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
@@ -286,41 +304,71 @@ export default function AILab() {
                   {mode === 'inpaint' && (
                     <>
                       <div className="al-field">
-                        <label className="al-label">Start (s)</label>
+                        <label className="al-label">Mask type</label>
+                        <select
+                          className="al-select"
+                          value={maskType}
+                          onChange={(e) => setMaskType(e.target.value)}
+                        >
+                          <option value="prefix_suffix">prefix_suffix</option>
+                          <option value="periodic">periodic</option>
+                          <option value="beat_driven">beat_driven</option>
+                          <option value="compression">compression</option>
+                        </select>
+                      </div>
+                      <div className="al-field">
+                        <label className="al-label">Prefix bars</label>
                         <input
                           className="al-input"
                           type="number"
-                          min={0}
-                          step={0.5}
-                          value={inpaintStart}
-                          onChange={(e) => setInpaintStart(e.target.value)}
+                          min={1}
+                          max={16}
+                          step={1}
+                          value={prefixBars}
+                          onChange={(e) => setPrefixBars(e.target.value)}
                         />
                       </div>
                       <div className="al-field">
-                        <label className="al-label">End (s)</label>
+                        <label className="al-label">Suffix bars</label>
                         <input
                           className="al-input"
                           type="number"
-                          min={0}
-                          step={0.5}
-                          value={inpaintEnd}
-                          onChange={(e) => setInpaintEnd(e.target.value)}
+                          min={1}
+                          max={16}
+                          step={1}
+                          value={suffixBars}
+                          onChange={(e) => setSuffixBars(e.target.value)}
                         />
                       </div>
                     </>
                   )}
-                  <div className="al-field">
-                    <label className="al-label">Temperature</label>
-                    <div className="al-slider-row">
-                      <input
-                        type="range" min={0} max={2} step={0.05}
-                        value={temperature}
-                        onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                        className="al-slider"
-                      />
-                      <span className="al-slider-val font-mono">{temperature.toFixed(2)}</span>
+                  {mode === 'tokenize' && (
+                    <div className="al-field">
+                      <label className="al-label">Codec</label>
+                      <select
+                        className="al-select"
+                        value={codec}
+                        onChange={(e) => setCodec(e.target.value)}
+                      >
+                        <option value="encodec">EnCodec (24kHz)</option>
+                        <option value="dac">DAC (44.1kHz)</option>
+                      </select>
                     </div>
-                  </div>
+                  )}
+                  {mode === 'style-transfer' && (
+                    <div className="al-field">
+                      <label className="al-label">Temperature</label>
+                      <div className="al-slider-row">
+                        <input
+                          type="range" min={0.1} max={2} step={0.05}
+                          value={temperature}
+                          onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                          className="al-slider"
+                        />
+                        <span className="al-slider-val font-mono">{temperature.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -329,7 +377,11 @@ export default function AILab() {
 
             <button
               className="al-run-btn"
-              disabled={!song || submitting || (mode === 'style-transfer' && !styleSong)}
+              disabled={
+                !song || submitting ||
+                (mode === 'style-transfer' && !styleDescription.trim()) ||
+                (mode === 'inpaint' && !songB)
+              }
               onClick={launch}
             >
               {submitting

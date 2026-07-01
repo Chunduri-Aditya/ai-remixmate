@@ -27,9 +27,13 @@ from scripts.api.schemas import (
     JobType,
     LibraryListResponse,
     LibraryStats,
+    ProcessingStatusResponse,
     SongInfo,
+    StorageEvictResponse,
+    StoragePruneResponse,
+    StorageStatusResponse,
 )
-from scripts.api.tasks import task_initialize_library
+from scripts.api.tasks import task_analyze_missing, task_initialize_library
 from scripts.core.paths import LIBRARY_DIR, OUTPUTS_DIR
 
 router = APIRouter()
@@ -107,6 +111,141 @@ def list_library_names(
     return {"names": names, "count": len(names)}
 
 
+@router.get("/library/processing-status", response_model=ProcessingStatusResponse, tags=["library"])
+def processing_status():
+    """
+    Segregates every song in the library into one of four processing buckets,
+    for the live "Processing Queue" panel on the Operations page (polled
+    every ~1s). Cheap — just file-existence checks, no audio decoding.
+    """
+    import time
+    from scripts.api.routers._helpers import _stem_file
+    from scripts.core.analysis_pipeline import has_analysis as _has_analysis
+
+    fully_processed: List[str] = []
+    stems_only: List[str] = []
+    analysis_only: List[str] = []
+    unprocessed: List[str] = []
+
+    for d in sorted(LIBRARY_DIR.iterdir(), key=lambda p: p.name.lower()):
+        if not d.is_dir():
+            continue
+        has_stems = any(_stem_file(d, s) is not None for s in ("vocals", "drums", "bass", "other"))
+        analyzed = _has_analysis(d)
+        if has_stems and analyzed:
+            fully_processed.append(d.name)
+        elif has_stems:
+            stems_only.append(d.name)
+        elif analyzed:
+            analysis_only.append(d.name)
+        else:
+            unprocessed.append(d.name)
+
+    total = len(fully_processed) + len(stems_only) + len(analysis_only) + len(unprocessed)
+    return ProcessingStatusResponse(
+        fully_processed=fully_processed,
+        stems_only=stems_only,
+        analysis_only=analysis_only,
+        unprocessed=unprocessed,
+        total=total,
+        generated_at=time.time(),
+    )
+
+
+@router.post("/library/analyze-missing", response_model=JobResponse, status_code=202, tags=["library", "analysis"])
+def analyze_missing(
+    key_profile: str = Query(
+        "auto",
+        description="Tonal profile for key detection: 'ks', 'edma', 'edmm', or 'auto'",
+    ),
+):
+    """
+    Batch-analyze every library song currently missing BPM/key/energy data.
+
+    Scans the library for songs where `has_analysis()` is False, then runs
+    `run_song_analysis()` on each as a single background job (poll /jobs/{id}
+    or subscribe to SSE for live per-song progress). Best-effort — one
+    song's failure doesn't stop the rest.
+    """
+    _check_job_cap()
+    job_id = job_store.create_job(JobType.ANALYZE, {"type": "analyze_missing", "key_profile": key_profile})
+    job_store.submit_job(job_id, task_analyze_missing, key_profile=key_profile)
+    return job_store.job_to_response(job_store.get_job(job_id))
+
+
+@router.get("/library/storage", response_model=StorageStatusResponse, tags=["library", "storage"])
+def storage_status():
+    """
+    Storage overview backed by scripts/core/library.py:LibraryManager — pruning
+    and LRU eviction logic that already existed but was never exposed via the API.
+    """
+    from scripts.core.library import get_library_manager
+    from scripts.core.config import cfg
+
+    mgr = get_library_manager()
+    songs = mgr.list_songs()
+    with_raw = sum(1 for s in songs if s.has_full_wav)
+
+    return StorageStatusResponse(
+        library_dir=str(LIBRARY_DIR),
+        outputs_dir=str(OUTPUTS_DIR),
+        total_songs=len(songs),
+        total_size_gb=round(mgr.get_size_gb(), 2),
+        cap_gb=mgr.max_size_gb,
+        within_cap=mgr.get_size_gb() <= mgr.max_size_gb,
+        songs_with_full_wav=with_raw,
+        songs_stems_only=len(songs) - with_raw,
+        prune_on_download=cfg.library.prune_on_download,
+        keep_raw_after_separation=cfg.library.keep_raw_after_separation,
+        auto_evict_on_download=cfg.library.auto_evict_on_download,
+    )
+
+
+@router.post("/library/storage/prune", response_model=StoragePruneResponse, tags=["library", "storage"])
+def storage_prune():
+    """
+    Delete full.wav for every song that already has all 4 stems — they're
+    redundant once stems exist. Synchronous: it's just file deletes, fast
+    even across a large library.
+    """
+    from scripts.core.library import get_library_manager
+
+    mgr = get_library_manager()
+    pruned: List[str] = []
+    freed_bytes = 0
+    for entry in mgr.list_songs():
+        if not entry.has_full_wav:
+            continue
+        full_wav = Path(entry.path) / "full.wav"
+        size = full_wav.stat().st_size if full_wav.exists() else 0
+        if mgr.prune_raw(entry.name, force=True):
+            pruned.append(entry.name)
+            freed_bytes += size
+    return StoragePruneResponse(pruned=pruned, freed_mb=round(freed_bytes / 1_048_576, 1))
+
+
+@router.post("/library/storage/evict", response_model=StorageEvictResponse, tags=["library", "storage"])
+def storage_evict(
+    target_gb: Optional[float] = Query(None, description="Evict until under this size (default: configured cap)"),
+    dry_run: bool = Query(True, description="Preview without deleting — defaults True for safety"),
+):
+    """
+    Manually trigger LRU eviction (oldest-accessed songs lose full.wav first,
+    then whole song directories if still over budget). Defaults to a dry run
+    so you can see what would be deleted before committing to it.
+    """
+    from scripts.core.library import get_library_manager
+
+    mgr = get_library_manager()
+    size_before = mgr.get_size_gb()
+    evicted = mgr.evict_lru(target_gb=target_gb, dry_run=dry_run)
+    size_after = mgr.get_size_gb() if not dry_run else size_before
+    return StorageEvictResponse(
+        evicted=evicted, dry_run=dry_run,
+        size_before_gb=round(size_before, 2), size_after_gb=round(size_after, 2),
+    )
+
+
 @router.get("/library/{name}", response_model=SongInfo, tags=["library"])
 def get_song(name: str):
     return _song_info(_require_song(name))
@@ -115,8 +254,15 @@ def get_song(name: str):
 @router.delete("/library/{name}", tags=["library"])
 def delete_song(name: str):
     import shutil
+    from scripts.core.library import get_library_manager
+
     d = _require_song(name)
     shutil.rmtree(d)
+    # Without this, LibraryManager's separate .index.json keeps a phantom
+    # entry for the deleted song forever — inflating /library/storage's
+    # total_songs count and corrupting evict_lru()'s LRU ordering, since
+    # both read from this same index rather than scanning LIBRARY_DIR live.
+    get_library_manager().unregister(name)
     return {"deleted": name}
 
 

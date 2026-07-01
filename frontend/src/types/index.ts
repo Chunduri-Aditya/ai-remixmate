@@ -44,6 +44,43 @@ export interface LibraryStats {
   total_size_mb: number
 }
 
+// Matches scripts/api/schemas.py:ProcessingStatusResponse
+export interface ProcessingStatus {
+  fully_processed: string[]
+  stems_only: string[]
+  analysis_only: string[]
+  unprocessed: string[]
+  total: number
+  generated_at: number
+}
+
+// Matches scripts/api/schemas.py:StorageStatusResponse / StoragePruneResponse / StorageEvictResponse
+export interface StorageStatus {
+  library_dir: string
+  outputs_dir: string
+  total_songs: number
+  total_size_gb: number
+  cap_gb: number
+  within_cap: boolean
+  songs_with_full_wav: number
+  songs_stems_only: number
+  prune_on_download: boolean
+  keep_raw_after_separation: boolean
+  auto_evict_on_download: boolean
+}
+
+export interface StoragePruneResult {
+  pruned: string[]
+  freed_mb: number
+}
+
+export interface StorageEvictResult {
+  evicted: string[]
+  dry_run: boolean
+  size_before_gb: number
+  size_after_gb: number
+}
+
 // --- Analysis ---
 
 export interface TransitionPlan {
@@ -64,6 +101,9 @@ export interface CompatibilityResult {
   bpm_score: number         // 0–1
   key_score: number         // 0–1
   energy_score: number      // 0–1
+  genre_proximity?: number      // 0–1, neutral 0.5 when genre data missing
+  timbral_similarity?: number   // 0–1, neutral 0.5 when spectral data missing
+  vocal_clash_penalty?: number  // 0–1 subtracted from overall, 0 when vocal data missing
   bpm_a: number
   bpm_b: number
   camelot_a?: string

@@ -8,8 +8,6 @@ task_initialize_library — one-shot pipeline (stem split → compress → index
 
 from typing import Any, Dict, List, Optional
 
-import librosa
-
 from scripts.api.jobs import update_job
 from scripts.core.audit import log_audit
 from scripts.core.logging_utils import get_logger
@@ -32,100 +30,67 @@ def task_analyze(
     song: str,
     key_profile: str = "auto",
 ) -> Dict[str, Any]:
-    from scripts.core.genre import detect_genre
-    from scripts.core.dj_analysis import analyze_structure
+    from scripts.core.analysis_pipeline import run_song_analysis
 
     log_audit("analyze_start", resource=song, job_id=job_id)
-    update_job(job_id, progress=0.1, message="Loading audio…")
 
-    wav = song_dir(song) / "full.wav"
-    if not wav.exists():
-        raise FileNotFoundError(f"Song not in library: {song}")
+    def _cb(frac: float, msg: str) -> None:
+        update_job(job_id, progress=frac, message=msg)
 
-    sr = 44100
-    audio, _ = librosa.load(str(wav), sr=sr, mono=True, duration=120.0)
-
-    update_job(job_id, progress=0.4, message="Detecting genre…")
-    genre = detect_genre(audio, sr)
-
-    update_job(job_id, progress=0.7, message="Analysing structure…")
-    struct = analyze_structure(audio, sr, key_profile=key_profile)
-
-    # ── Persist BPM + genre to meta.json cache for the recommendation engine ──
-    try:
-        from scripts.core.recommend import write_meta_cache
-        write_meta_cache(song_dir(song), bpm=struct.bpm, genre=genre.genre)
-    except Exception:
-        pass  # Non-critical — recommendation engine will fall back to quick BPM
-
-    # ── Persist full music intelligence fields to meta.json for RAG index ──
-    try:
-        import json as _json
-        _meta_path = song_dir(song) / "meta.json"
-        _meta = {}
-        if _meta_path.exists():
-            _meta = _json.loads(_meta_path.read_text())
-        _meta.update({
-            "bpm":                   round(struct.bpm, 1),
-            "genre":                 genre.genre,
-            "key":                   struct.key_name,
-            "mode":                  struct.mode,
-            "camelot":               struct.camelot,
-            "energy_mean":           round(struct.energy_mean, 4)     if hasattr(struct, "energy_mean") else None,
-            "energy_std":            round(struct.energy_std,  4)     if hasattr(struct, "energy_std")  else None,
-            "danceability":          round(struct.danceability, 4)    if hasattr(struct, "danceability") else None,
-            "beat_strength":         round(struct.beat_strength, 4)   if hasattr(struct, "beat_strength") else None,
-            "tempo_stability":       round(struct.tempo_stability, 4) if hasattr(struct, "tempo_stability") else None,
-            "vocal_density":         round(struct.vocal_density, 4)   if hasattr(struct, "vocal_density") else None,
-            "spectral_centroid_hz":  round(struct.spectral_centroid_hz, 1) if hasattr(struct, "spectral_centroid_hz") else None,
-            "chroma_vector":         struct.chord_sequence if hasattr(struct, "chroma_vector") else None,
-        })
-        # Remove None values
-        _meta = {k: v for k, v in _meta.items() if v is not None}
-        _meta_path.write_text(_json.dumps(_meta))
-    except Exception:
-        pass
-
-    # ── Upsert into RAG music index ────────────────────────────────────────
-    _index_upsert(song)
-
-    result: dict = {
-        "song":       song,
-        "genre":      genre.genre,
-        "confidence": round(genre.confidence, 3),
-        "runner_up":  genre.runner_up,
-        "bpm":        round(struct.bpm, 1),
-        "total_bars": struct.total_bars,
-        "duration":   round(struct.duration, 1),
-        "sections":   [
-            {
-                "type":       s.type,
-                "start_bar":  s.start_bar,
-                "end_bar":    s.end_bar,
-                "start_time": round(s.start_time, 2),
-                "end_time":   round(s.end_time, 2),
-            }
-            for s in struct.sections
-        ],
-    }
-
-    # Music intelligence fields (populated by _analyze_impl enrichment)
-    if struct.key_name:
-        result["key"]              = struct.key_name
-        result["mode"]             = struct.mode
-        result["camelot"]          = struct.camelot
-        result["key_confidence"]   = round(struct.key_confidence, 3)
-        result["danceability"]     = round(struct.danceability, 3)
-        result["vocal_density"]    = round(struct.vocal_density, 3)
-        result["spectral_centroid_hz"] = round(struct.spectral_centroid_hz, 1)
-        result["chord_sequence"]   = struct.chord_sequence
-        if struct.drop_position is not None:
-            result["drop_position_sec"] = round(struct.drop_position, 1)
+    result = run_song_analysis(song, key_profile=key_profile, progress_cb=_cb)
 
     log_audit("analyze_complete", resource=song, job_id=job_id,
-              metadata={"genre": genre.genre, "bpm": round(struct.bpm, 1),
-                        "key": struct.key_name, "camelot": struct.camelot})
+              metadata={"genre": result.get("genre"), "bpm": result.get("bpm"),
+                        "key": result.get("key"), "camelot": result.get("camelot")})
     return result
+
+
+def task_analyze_missing(job_id: str, key_profile: str = "auto") -> Dict[str, Any]:
+    """
+    Batch-analyze every library song that's missing BPM/key/energy data
+    (i.e. ``has_analysis(song_dir)`` is False — no usable ``meta.json`` yet).
+
+    Best-effort: one song failing doesn't abort the batch. This is the
+    backend for the "Analyze all missing" button on Library Atlas — before
+    this, filling gaps meant clicking Analyze per-row, one song at a time.
+    """
+    from scripts.core.analysis_pipeline import has_analysis, run_song_analysis
+
+    targets = [
+        d.name for d in sorted(LIBRARY_DIR.iterdir())
+        if d.is_dir() and not has_analysis(d)
+    ]
+    total = len(targets)
+    done = 0
+    failed: List[Dict[str, str]] = []
+
+    log_audit("analyze_missing_start", resource=f"{total} songs", job_id=job_id)
+    update_job(job_id, progress=0.01, message=f"Analyzing {total} song(s) missing data…")
+
+    for i, name in enumerate(targets):
+        base = i / max(total, 1)
+        step = 1.0 / max(total, 1)
+
+        def _cb(frac: float, msg: str, _base=base, _step=step, _i=i, _name=name) -> None:
+            prog = _base + _step * frac
+            update_job(job_id, progress=round(min(prog, 0.99), 3),
+                       message=f"[{_i + 1}/{total}] {_name[:40]} — {msg}")
+
+        try:
+            run_song_analysis(name, key_profile=key_profile, progress_cb=_cb)
+            _index_upsert(name)
+            done += 1
+        except Exception as exc:
+            failed.append({"song": name, "error": str(exc)})
+            _log.warning(f"analyze_missing: '{name}' failed (non-critical): {exc}")
+
+    summary = f"Done — {done}/{total} analyzed"
+    if failed:
+        summary += f", {len(failed)} failed"
+    update_job(job_id, progress=1.0, message=summary)
+    log_audit("analyze_missing_complete", resource=f"{total} songs", job_id=job_id,
+              metadata={"done": done, "failed": len(failed)})
+    return {"total": total, "done": done, "failed": failed, "success": True}
 
 
 def task_rebuild_index(job_id: str) -> Dict[str, Any]:

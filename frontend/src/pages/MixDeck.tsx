@@ -126,9 +126,9 @@ function DeckCard({
           <div className="md-meta-row">
             <span className="md-meta-key text-muted">Energy</span>
             <span className="md-meta-val font-mono">
-              {loadingSongInfo && songInfo?.energy === undefined
+              {loadingSongInfo && songInfo?.energy == null
                 ? <Loader2 size={11} className="md-spin" />
-                : songInfo?.energy !== undefined
+                : songInfo?.energy != null
                   ? (
                     <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {Math.round(songInfo.energy * 100)}
@@ -251,10 +251,10 @@ function JobStatusBadge({ jobId }: { jobId: string }) {
       <span style={{ color, fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)' }}>
         {job.status === 'RUNNING' ? `${job.progress}% — ${job.message}` : job.status.toLowerCase()}
       </span>
-      {job.status === 'COMPLETED' && job.result && (
+      {job.status === 'COMPLETED' && job.result && (job.result as { stream_url?: string }).stream_url && (
         <a
           className="md-job-link"
-          href={`${import.meta.env.VITE_API_BASE || '/api'}${(job.result as { stream_url?: string }).stream_url ?? ''}`}
+          href={`${import.meta.env.VITE_API_BASE || '/api'}${(job.result as { stream_url?: string }).stream_url}`}
           target="_blank"
           rel="noopener noreferrer"
         >

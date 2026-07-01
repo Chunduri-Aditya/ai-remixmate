@@ -4,13 +4,28 @@
    Updates in real-time from Zustand (fed by SSE).
    ============================================================ */
 
-import { X, Activity, ListOrdered, Cpu } from 'lucide-react'
+import { X, Activity, ListOrdered, Cpu, RotateCcw } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore, selectRecentJobs, type ActivityEntry } from '@/stores/appStore'
 import { useJobTimer } from '@/hooks/useJobTimer'
 import { remixApi } from '@/lib/api'
 import type { Job } from '@/types'
 import './RightInspector.css'
+
+// Where clicking a job card should take you, based on job.type. Substring
+// match rather than exact — backend job types aren't a single closed enum
+// (style_transfer/inpaint/tokenize/index_rebuild jobs are tagged loosely),
+// so this stays correct even if a new job type is added later.
+function jobDestination(type: string): string {
+  const t = type.toLowerCase()
+  if (t.includes('remix') || t.includes('chain'))               return '/mix-vault'
+  if (t.includes('download') || t.includes('playlist'))         return '/operations'
+  if (t.includes('stem'))                                        return '/library-atlas'
+  if (t.includes('style') || t.includes('inpaint') || t.includes('tokeniz')) return '/ai-lab'
+  if (t.includes('analy') || t.includes('index') || t.includes('clap'))     return '/library-atlas'
+  return '/library-atlas'
+}
 
 // --- Job card ---
 
@@ -45,6 +60,27 @@ function RunningTimer({ job }: { job: Job }) {
 
 function JobCard({ job }: { job: Job }) {
   const cancelJob = useAppStore((s) => s.removeJob)
+  const navigate = useNavigate()
+
+  function handleCardClick(e: React.MouseEvent) {
+    // Don't hijack clicks on the cancel/retry buttons inside the card.
+    if ((e.target as HTMLElement).closest('button')) return
+    const dest = jobDestination(job.type)
+    if (job.status === 'RUNNING' || job.status === 'PENDING') {
+      // Navigating away doesn't stop the job (it keeps running server-side),
+      // but it does drop this live progress view and the in-flight upload
+      // state some pages hold (e.g. a bridge-beat file picked on Mix Deck).
+      // Warn before doing that instead of silently yanking the user off an
+      // in-progress screen.
+      const ok = window.confirm(
+        `This ${job.type} job is still running. Redirecting now won't stop ` +
+        `it, but you'll lose this live progress view — it might break ` +
+        `whatever you were doing on this page. Redirect anyway?`,
+      )
+      if (!ok) return
+    }
+    navigate(dest)
+  }
 
   async function handleRetry() {
     const meta = (job.meta as Record<string, unknown>) ?? {}
@@ -69,7 +105,14 @@ function JobCard({ job }: { job: Job }) {
   }
 
   return (
-    <div className={`inspector-job-card ${job.status === 'RUNNING' ? 'inspector-job-card--running' : ''}`}>
+    <div
+      className={`inspector-job-card inspector-job-card--clickable ${job.status === 'RUNNING' ? 'inspector-job-card--running' : ''}`}
+      onClick={handleCardClick}
+      role="button"
+      tabIndex={0}
+      title={`Go to ${jobDestination(job.type).replace('/', '').replace('-', ' ')}`}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleCardClick(e as unknown as React.MouseEvent) }}
+    >
       <div className="inspector-job-card__header">
         <span className="inspector-job-card__type font-mono">{job.type}</span>
         <span className={`badge ${jobStatusClass(job.status)}`}>
@@ -220,14 +263,18 @@ function SystemTab() {
 // --- Main component ---
 
 export function RightInspector() {
-  const { inspectorTab, setInspectorTab, toggleInspector, activityLog, clearActivity } =
-    useAppStore(
+  const {
+    inspectorTab, setInspectorTab, toggleInspector,
+    activityLog, clearActivity, clearJobs, restartSession,
+  } = useAppStore(
       useShallow((s) => ({
         inspectorTab:    s.inspectorTab,
         setInspectorTab: s.setInspectorTab,
         toggleInspector: s.toggleInspector,
         activityLog:     s.activityLog,
         clearActivity:   s.clearActivity,
+        clearJobs:       s.clearJobs,
+        restartSession:  s.restartSession,
       })),
     )
 
@@ -235,6 +282,9 @@ export function RightInspector() {
   const activeJobCount = recentJobs.filter(
     (j) => j.status === 'RUNNING' || j.status === 'PENDING',
   ).length
+  const hasDismissableJobs = recentJobs.some(
+    (j) => j.status !== 'RUNNING' && j.status !== 'PENDING',
+  )
 
   return (
     <aside className="right-inspector">
@@ -289,6 +339,25 @@ export function RightInspector() {
       <div className="right-inspector__content scroll-y">
         {inspectorTab === 'jobs' && (
           <div className="inspector-jobs">
+            {(hasDismissableJobs) && (
+              <div className="inspector-jobs__toolbar">
+                <button
+                  className="inspector-activity__clear"
+                  onClick={clearJobs}
+                  title="Dismiss finished job cards (keeps anything still running)"
+                >
+                  Clear
+                </button>
+                <button
+                  className="inspector-activity__clear"
+                  onClick={restartSession}
+                  title="Start a fresh session — hides stale jobs from before now (use after restarting the backend)"
+                >
+                  <RotateCcw size={10} style={{ marginRight: 3, verticalAlign: '-1px' }} />
+                  Restart session
+                </button>
+              </div>
+            )}
             {recentJobs.length === 0 ? (
               <div className="inspector-empty">
                 <span className="text-muted">No recent jobs</span>

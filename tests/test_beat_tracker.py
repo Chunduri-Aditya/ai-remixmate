@@ -207,6 +207,70 @@ class TestLibrosaBeatTracker:
 
 
 # ---------------------------------------------------------------------------
+# resolve_bpm_octave — REMIX_QUALITY_INSIGHTS.md finding #2 regression guard
+#
+# Confirmed root cause: music_index.py's _quick_features() called raw
+# librosa.beat.beat_track() with zero octave handling, while the real
+# analysis pipeline (analyze_structure -> beat_tracker.py) is a separate
+# code path that can independently land on a different octave for the same
+# song -- this is exactly what produced the reported 63.8 (cached) vs 129.2
+# (render-time) mismatch on "I Remember". resolve_bpm_octave() is the fix;
+# these tests lock in both directions so it can't silently regress.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.dj_analysis
+class TestResolveBpmOctave:
+    @staticmethod
+    def _click_track(true_bpm: float, sr: int = 22050, duration: float = 30.0,
+                      noise: float = 0.01, seed: int = 0):
+        rng = np.random.default_rng(seed)
+        n = int(sr * duration)
+        period = 60.0 / true_bpm
+        audio = np.zeros(n, dtype=np.float32)
+        click_len = int(0.01 * sr)
+        click = (np.hanning(click_len * 2)[click_len:] * 0.9).astype(np.float32)
+        for beat_t in np.arange(0, duration, period):
+            i = int(beat_t * sr)
+            if i + click_len <= n:
+                audio[i:i + click_len] += click
+        audio += (rng.standard_normal(n) * noise).astype(np.float32)
+        return audio, sr
+
+    def test_corrects_half_tempo_misread(self):
+        """A track truly at 130 BPM, misread as 65 BPM, should resolve back to ~130."""
+        from scripts.core.beat_tracker import resolve_bpm_octave
+        audio, sr = self._click_track(130.0)
+        resolved = resolve_bpm_octave(65.0, audio, sr, hop_length=512)
+        assert abs(resolved - 130.0) < 5.0, f"expected ~130, got {resolved}"
+
+    def test_leaves_correct_estimate_unchanged(self):
+        """An already-correct estimate must not get flipped to its octave neighbour.
+
+        This is the failure mode the prior-weighted scoring exists to prevent:
+        plain autocorrelation peak-picking on a clean periodic click train can
+        score the half-tempo neighbour *higher* than the true tempo (verified
+        directly during development), which would silently break correct
+        readings while trying to fix wrong ones.
+        """
+        from scripts.core.beat_tracker import resolve_bpm_octave
+        audio, sr = self._click_track(120.0)
+        resolved = resolve_bpm_octave(120.0, audio, sr, hop_length=512)
+        assert abs(resolved - 120.0) < 5.0, f"expected ~120, got {resolved}"
+
+    def test_reproduces_session_finding(self):
+        """Direct reproduction of the reported numbers: cached=63.8 on a track
+        whose real tempo is ~129.2 should resolve into that neighbourhood."""
+        from scripts.core.beat_tracker import resolve_bpm_octave
+        audio, sr = self._click_track(129.2, noise=0.02)
+        resolved = resolve_bpm_octave(63.8, audio, sr, hop_length=512)
+        assert abs(resolved - 129.2) < 6.0, f"expected ~129.2, got {resolved}"
+
+    # Wiring of resolve_bpm_octave() into LibrosaBeatTracker.track() itself
+    # is covered by TestLibrosaBeatTracker.test_bpm_near_120, which uses the
+    # class-scoped metronome_120bpm fixture.
+
+
+# ---------------------------------------------------------------------------
 # BeatThisTracker fallback (beat-this not installed in sandbox)
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/exportManifest.schema.json",
+  "title": "ExportManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "createdAt",
+    "schemaVersion",
+    "sourceTrackIds",
+    "recipe"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "schemaVersion": {
+      "type": "string"
+    },
+    "sourceTrackIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "recipe": {
+      "$ref": "remixRecipe.schema.json"
+    },
+    "renderedFiles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

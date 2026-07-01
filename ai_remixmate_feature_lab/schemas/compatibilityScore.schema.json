@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/compatibilityScore.schema.json",
+  "title": "CompatibilityScore",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "overall",
+    "bpmScore",
+    "keyScore",
+    "energyScore",
+    "timbreScore",
+    "vocalClashPenalty",
+    "explanation",
+    "warnings"
+  ],
+  "properties": {
+    "overall": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "bpmScore": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "keyScore": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "energyScore": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "timbreScore": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "vocalClashPenalty": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "explanation": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

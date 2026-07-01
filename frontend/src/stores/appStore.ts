@@ -28,6 +28,14 @@ interface AppState {
   removeJob: (id: string) => void
   setJobs: (jobs: Job[]) => void
 
+  // --- Session boundary — resets on every page load. Terminal-status jobs
+  // (COMPLETED/FAILED/CANCELLED) created before this timestamp are hidden
+  // from the Jobs tab by default, so a backend restart's pile of stale
+  // "process restarted" failures doesn't clutter every future session.
+  sessionStartedAt: number
+  clearJobs: () => void
+  restartSession: () => void
+
   // --- Completion log (timestamps of COMPLETED jobs, last 60 min) ---
   completionLog: number[]
   logCompletion: () => void
@@ -101,6 +109,34 @@ export const useAppStore = create<AppState>((set) => ({
   setJobs: (jobs) =>
     set({ jobs: Object.fromEntries(jobs.map((j) => [j.job_id, j])) }),
 
+  sessionStartedAt: Date.now(),
+  clearJobs: () =>
+    set((s) => {
+      const next: Record<string, Job> = {}
+      for (const [id, job] of Object.entries(s.jobs)) {
+        if (job.status === 'RUNNING' || job.status === 'PENDING') next[id] = job
+      }
+      return { jobs: next }
+    }),
+  restartSession: () => {
+    const now = Date.now()
+    set((s) => {
+      const next: Record<string, Job> = {}
+      for (const [id, job] of Object.entries(s.jobs)) {
+        if (job.status === 'RUNNING' || job.status === 'PENDING') next[id] = job
+      }
+      return { jobs: next, sessionStartedAt: now }
+    })
+    const id = `act_${++_activitySeq}`
+    const entry: ActivityEntry = {
+      id, ts: new Date().toISOString(), level: 'info',
+      message: 'Session restarted — showing jobs from now on',
+    }
+    set((s) => ({
+      activityLog: [entry, ...s.activityLog].slice(0, 200),
+    }))
+  },
+
   // Activity
   activityLog: [],
   pushActivity: (entry) => {
@@ -127,5 +163,12 @@ export const selectActiveJobs = (s: AppState) =>
 
 export const selectRecentJobs = (s: AppState) =>
   Object.values(s.jobs)
+    .filter((j) => {
+      // Always show live work regardless of session boundary.
+      if (j.status === 'RUNNING' || j.status === 'PENDING') return true
+      // Hide terminal jobs that predate this session (e.g. backend-restart
+      // "process restarted" failures from a previous run of the app).
+      return new Date(j.created_at).getTime() >= s.sessionStartedAt
+    })
     .sort((a, b) => (b.updated_at > a.updated_at ? 1 : -1))
     .slice(0, 20)

@@ -24,7 +24,7 @@ import re
 import shutil
 
 # Local paths
-from scripts.core.paths import AUDIO_IN, SEPARATED, ensure_directories
+from scripts.core.paths import AUDIO_IN, SEPARATED, ensure_directories, sanitize_song_name
 
 
 def _have_module(name: str) -> bool:
@@ -40,10 +40,10 @@ def _run(cmd: str) -> subprocess.CompletedProcess:
 
 
 def sanitize_name(name: str) -> str:
-    name = name.strip()
-    name = re.sub(r"\s+", " ", name)
-    name = re.sub(r"[^\w\-\s\(\)\[\]\&]+", "", name)
-    return name[:120]
+    """Kept for backward compatibility — delegates to the single shared
+    naming policy in scripts.core.paths so this and download.py:_sanitize()
+    can never drift apart again (see paths.py:SONG_NAME_SAFE_CHARS)."""
+    return sanitize_song_name(name)
 
 
 @dataclass

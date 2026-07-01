@@ -121,6 +121,21 @@
   color: var(--color-crimson-500);
 }
 
+.la-filter-chip--missing {
+  margin-left: auto;
+  border-color: var(--color-ice-400);
+  color: var(--color-ice-400);
+}
+
+.la-filter-chip--missing:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.la-filter-chip--missing:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* Refresh button */
 .la-refresh-btn {
   background: none;

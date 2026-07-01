@@ -11,7 +11,7 @@ POST /index/rebuild                    — rebuild RAG index (queued job)
 POST /library/build-clap-index         — build / update CLAP embedding index (queued job)
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
@@ -25,7 +25,10 @@ from scripts.api.schemas import (
     JobType,
 )
 from scripts.api.tasks import task_analyze, task_rebuild_index
+from scripts.core.logging_utils import get_logger
 from scripts.core.paths import LIBRARY_DIR
+
+_log = get_logger(__name__)
 
 router = APIRouter()
 
@@ -34,31 +37,91 @@ router = APIRouter()
 def check_compatibility(req: CompatibilityRequest):
     """
     Instant Camelot + BPM compatibility check.
-    Uses local audio analysis if songs are in the library,
-    otherwise falls back to metadata API lookup.
+
+    Order of preference per song:
+      1. Cached analysis (meta.json, written by POST /analyze or an
+         auto-analyzed download) — fast, no audio decode.
+      2. Live analysis on whatever audio exists in the library — full.wav
+         if present, or the Demucs stems summed back together if it was
+         already pruned (prune_on_download deletes full.wav by default,
+         right after stems are produced, which is the common case).
+      3. External metadata API (getsongbpm/last.fm), only for songs that
+         aren't in the local library at all.
+
+    Previously this only checked full.wav, which prune_on_download deletes
+    almost immediately — so virtually every library song fell through to
+    the external API. With no API key configured by default, that returns
+    an all-defaults TrackMetadata (bpm=0.0, camelot=None), and the score
+    computed from two of those looks like a real result (e.g. "57/100")
+    while actually being a comparison of two empty objects.
     """
-    import librosa
     from scripts.core.track_metadata import TrackMetadata, MetadataClient
-    from scripts.core.dj_engine import _analyze_impl
-    from scripts.core.genre import detect_genre
+    from scripts.core.analysis_pipeline import has_analysis, run_song_analysis
 
     client = MetadataClient()
-    sr = 22050
 
     def _meta_for(name: str, artist: str) -> tuple[TrackMetadata, Optional[str]]:
         d = LIBRARY_DIR / name
-        if d.exists() and (d / "full.wav").exists():
-            audio, _ = librosa.load(str(d / "full.wav"), sr=sr, mono=True, duration=60.0)
-            struct = _analyze_impl(audio, sr)
-            genre_r = detect_genre(audio, sr)
-            meta = TrackMetadata(
-                title=name,
-                artist=artist,
-                bpm=struct.bpm,
-                genres=[genre_r.genre],
-            )
-            return meta, genre_r.genre
-        # Fall back to API
+        if d.exists():
+            # 1. Cached analysis — fast path.
+            if has_analysis(d):
+                try:
+                    import json as _json
+                    cached = _json.loads((d / "meta.json").read_text())
+                    meta = TrackMetadata(
+                        title=name, artist=artist,
+                        bpm=float(cached.get("bpm") or 0.0),
+                        key=cached.get("key") or "",
+                        mode=cached.get("mode") or "",
+                        camelot=cached.get("camelot"),
+                        genres=[cached["genre"]] if cached.get("genre") else [],
+                        # energy_mean/vocal_density/spectral_centroid_hz are
+                        # written to meta.json by run_song_analysis() but were
+                        # never read back here — energy defaulted to 0.5 for
+                        # every library song, silently making energy_score
+                        # compare 0.5-vs-0.5 (always 1.0) for any pair, and
+                        # genre_proximity/timbral_similarity/vocal_clash_penalty
+                        # had no data to work with at all. Fixed alongside
+                        # wiring those three into compatibility_score()
+                        # (REMIX_QUALITY_INSIGHTS.md finding #1).
+                        energy=float(cached["energy_mean"]) if cached.get("energy_mean") is not None else 0.5,
+                        vocal_density=float(cached.get("vocal_density") or 0.0),
+                        spectral_centroid_hz=float(cached.get("spectral_centroid_hz") or 0.0),
+                    )
+                    return meta, cached.get("genre")
+                except Exception as exc:
+                    _log.warning(f"compatibility: cached meta.json unreadable for '{name}': {exc}")
+
+            # 2. No usable cache — analyze now (stem-aware fallback covers
+            #    the post-prune case) and cache the result for next time.
+            try:
+                result = run_song_analysis(name)
+                # run_song_analysis()'s return dict doesn't carry
+                # energy_mean/vocal_density/spectral_centroid_hz (it writes
+                # them straight to meta.json instead) — re-read the cache it
+                # just wrote rather than duplicating that computation here.
+                cached_extra: Dict[str, Any] = {}
+                try:
+                    import json as _json
+                    cached_extra = _json.loads((d / "meta.json").read_text())
+                except Exception:
+                    pass
+                meta = TrackMetadata(
+                    title=name, artist=artist,
+                    bpm=float(result.get("bpm") or 0.0),
+                    key=result.get("key") or "",
+                    mode=result.get("mode") or "",
+                    camelot=result.get("camelot"),
+                    genres=[result["genre"]] if result.get("genre") else [],
+                    energy=float(cached_extra["energy_mean"]) if cached_extra.get("energy_mean") is not None else 0.5,
+                    vocal_density=float(cached_extra.get("vocal_density") or 0.0),
+                    spectral_centroid_hz=float(cached_extra.get("spectral_centroid_hz") or 0.0),
+                )
+                return meta, result.get("genre")
+            except Exception as exc:
+                _log.warning(f"compatibility: live analysis failed for '{name}' (non-critical): {exc}")
+
+        # 3. Not in the library (or analysis failed) — external API.
         meta = client.lookup(name, artist=artist)
         return meta, (meta.genres[0] if meta.genres else None)
 
@@ -74,6 +137,9 @@ def check_compatibility(req: CompatibilityRequest):
         bpm_score=round(score.get("bpm_score", 0.0), 3),
         key_score=round(score.get("key_score", 0.0), 3),
         energy_score=round(score.get("energy_score", 0.0), 3),
+        genre_proximity=round(score.get("genre_proximity", 0.5), 3),
+        timbral_similarity=round(score.get("timbral_similarity", 0.5), 3),
+        vocal_clash_penalty=round(score.get("vocal_clash_penalty", 0.0), 3),
         bpm_a=round(meta_a.bpm, 1),
         bpm_b=round(meta_b.bpm, 1),
         camelot_a=meta_a.camelot,

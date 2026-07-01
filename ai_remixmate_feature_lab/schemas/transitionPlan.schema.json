@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/transitionPlan.schema.json",
+  "title": "TransitionPlan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "fromTrackId",
+    "toTrackId",
+    "entryTimeSec",
+    "exitTimeSec",
+    "transitionLengthBars",
+    "compatibility"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "fromTrackId": {
+      "type": "string"
+    },
+    "toTrackId": {
+      "type": "string"
+    },
+    "entryTimeSec": {
+      "type": "number",
+      "minimum": 0
+    },
+    "exitTimeSec": {
+      "type": "number",
+      "minimum": 0
+    },
+    "transitionLengthBars": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64
+    },
+    "compatibility": {
+      "$ref": "compatibilityScore.schema.json"
+    },
+    "eqAutomationNotes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "filterAutomationNotes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cueSuggestions": {
+      "type": "array",
+      "items": {
+        "$ref": "cuePoint.schema.json"
+      }
+    },
+    "loopSuggestions": {
+      "type": "array",
+      "items": {
+        "$ref": "loopState.schema.json"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

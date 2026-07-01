@@ -40,6 +40,19 @@ vi.mock('@/lib/api', () => ({
     delete: async () => undefined,
     stats: async () => ({ total_songs: 0, indexed_songs: 0, stems_split: 0, total_size_mb: 0 }),
     initRun: async () => ({ job_id: 'job-init' }),
+    processingStatus: async () => ({
+      fully_processed: [], stems_only: [], analysis_only: [], unprocessed: [],
+      total: 0, generated_at: 0,
+    }),
+  },
+  storageApi: {
+    status: async () => ({
+      library_dir: '', outputs_dir: '', total_songs: 0, total_size_gb: 0, cap_gb: 50,
+      within_cap: true, songs_with_full_wav: 0, songs_stems_only: 0,
+      prune_on_download: true, keep_raw_after_separation: false, auto_evict_on_download: true,
+    }),
+    prune: async () => ({ pruned: [], freed_mb: 0 }),
+    evict: async () => ({ evicted: [], dry_run: true, size_before_gb: 0, size_after_gb: 0 }),
   },
   jobsApi: {
     list: async () => [],
@@ -135,6 +148,7 @@ vi.mock('@/lib/api', () => ({
     models: async () => [],
     styleTransfer: async () => ({ job_id: 'job-style' }),
     inpaint: async () => ({ job_id: 'job-inpaint' }),
+    tokenize: async () => ({ job_id: 'job-tokenize' }),
   },
 }))
 

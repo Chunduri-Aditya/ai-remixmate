@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/loopState.schema.json",
+  "title": "LoopState",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "active",
+    "startSec",
+    "endSec",
+    "lengthBeats"
+  ],
+  "properties": {
+    "active": {
+      "type": "boolean"
+    },
+    "startSec": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Loop start in seconds."
+    },
+    "endSec": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Loop end in seconds. Must be greater than loop start."
+    },
+    "lengthBeats": {
+      "type": "number",
+      "minimum": 0.0625,
+      "maximum": 32
+    },
+    "quantized": {
+      "type": "boolean"
+    },
+    "sourceCueId": {
+      "type": "string"
+    }
+  }
+}

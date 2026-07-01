@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/modelRegistry.schema.json",
+  "title": "ModelRegistry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "models"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string"
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "neuralFeatureModel.schema.json"
+      }
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "eventCount": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

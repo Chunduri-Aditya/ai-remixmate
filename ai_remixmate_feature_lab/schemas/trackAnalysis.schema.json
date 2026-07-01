@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-remixmate.local/schemas/trackAnalysis.schema.json",
+  "title": "TrackAnalysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "durationSec",
+    "bpm",
+    "beatgrid",
+    "energyCurve"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "artist": {
+      "type": "string"
+    },
+    "durationSec": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "bpm": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "key": {
+      "type": "string"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "major",
+        "minor",
+        "unknown"
+      ]
+    },
+    "camelot": {
+      "type": "string"
+    },
+    "keyConfidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "beatgrid": {
+      "$ref": "beatgrid.schema.json"
+    },
+    "energyCurve": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "timbreVector": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      }
+    },
+    "vocalActivity": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "label",
+          "startSec",
+          "endSec"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "startSec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "endSec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    "cuePoints": {
+      "type": "array",
+      "items": {
+        "$ref": "cuePoint.schema.json"
+      }
+    },
+    "stemManifest": {
+      "$ref": "stemManifest.schema.json"
+    }
+  }
+}
