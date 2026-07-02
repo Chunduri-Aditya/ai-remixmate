@@ -24,8 +24,9 @@ import {
   HardDrive,
   Trash2,
   Eye,
+  BarChart3,
 } from 'lucide-react'
-import { downloadApi, jobsApi, libraryApi, storageApi } from '@/lib/api'
+import { analysisApi, downloadApi, jobsApi, libraryApi, storageApi } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
 import { useJobTimer } from '@/hooks/useJobTimer'
 import type { Job, ProcessingStatus, StorageStatus } from '@/types'
@@ -349,6 +350,70 @@ function StoragePanel() {
   )
 }
 
+// --- Maintenance panel (index builds, calibration, re-analysis) ---
+
+function MaintenancePanel() {
+  const [busy, setBusy] = useState<'clap' | 'lufs' | 'reanalyze' | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  async function run(kind: 'clap' | 'lufs' | 'reanalyze') {
+    if (kind === 'reanalyze' && !window.confirm(
+      'Re-analyze the ENTIRE library? This refreshes stale BPM/key values ' +
+      '(e.g. from before the octave-error fix) but can take a long time on ' +
+      'large libraries. Continue?',
+    )) return
+    setBusy(kind)
+    setNotice(null)
+    try {
+      const r =
+        kind === 'clap' ? await analysisApi.buildClapIndex()
+        : kind === 'lufs' ? await analysisApi.calibrateLufs()
+        : await analysisApi.analyzeMissing(true)
+      setNotice(`Job started (${r.job_id.slice(0, 8)}…) — track progress in the Inspector panel.`)
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : 'Failed to start job.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <section className="ops-processing">
+      <div className="ops-queue__header">
+        <h2 className="ops-queue__label">
+          <Sparkles size={11} style={{ marginRight: 4, verticalAlign: '-1px' }} />
+          Library Maintenance
+        </h2>
+      </div>
+
+      <div className="ops-storage">
+        <p className="ops-note text-muted">
+          One-off jobs that improve remix and search quality. Build the CLAP index to enable
+          text search on Signal Search; calibrate stem LUFS so remixes use loudness targets
+          measured from your own library; re-analyze to refresh stale cached BPM/key data.
+        </p>
+
+        {notice && <div className="ops-storage__notice">{notice}</div>}
+
+        <div className="ops-storage__actions">
+          <button className="ops-job__btn" disabled={busy !== null} onClick={() => run('clap')}>
+            <Sparkles size={12} />
+            {busy === 'clap' ? 'Starting…' : 'Build CLAP search index'}
+          </button>
+          <button className="ops-job__btn" disabled={busy !== null} onClick={() => run('lufs')}>
+            <BarChart3 size={12} />
+            {busy === 'lufs' ? 'Starting…' : 'Calibrate stem loudness (LUFS)'}
+          </button>
+          <button className="ops-job__btn" disabled={busy !== null} onClick={() => run('reanalyze')}>
+            <RotateCcw size={12} />
+            {busy === 'reanalyze' ? 'Starting…' : 'Re-analyze entire library'}
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // --- Main page ---
 
 export default function Operations() {
@@ -594,6 +659,7 @@ export default function Operations() {
 
         <ProcessingQueuePanel />
         <StoragePanel />
+        <MaintenancePanel />
       </div>
     </div>
   )

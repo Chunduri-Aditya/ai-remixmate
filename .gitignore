@@ -92,3 +92,6 @@ pipeline.log
 github_files/
 .claude/
 AI_RemixMate_Launch_Plan.md
+
+# Vitest cache (feature lab runs vitest with a local cache dir)
+.vitest-cache/

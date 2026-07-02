@@ -134,6 +134,18 @@ export interface SimilarTrack {
   breakdown?: Record<string, number>
 }
 
+/** Result row from /library/crate-search — CLAP 512-D semantic search
+    (or the 35-D fallback when laion_clap isn't installed server-side). */
+export interface CrateSearchResult {
+  name: string
+  score: number
+  bpm?: number | null
+  key?: string | null
+  camelot?: string | null
+  energy?: number | null
+  backend: string
+}
+
 // --- Remix ---
 
 export interface DJRemixRequest {

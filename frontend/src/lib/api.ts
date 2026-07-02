@@ -15,6 +15,7 @@ import type {
   CompatibilityResult,
   Recommendation,
   SimilarTrack,
+  CrateSearchResult,
   DJRemixRequest,
   DJPreviewRequest,
   Crate,
@@ -136,8 +137,10 @@ export const libraryApi = {
     get<{ songs: SongInfo[] }>('/library?per_page=5000').then((r) => r.songs ?? []),
   get:     (name: string) => get<SongInfo>(`/library/${encodeURIComponent(name)}`),
   delete:  (name: string) => del<void>(`/library/${encodeURIComponent(name)}`),
-  stats:   ()           => get<LibraryStats>('/library/init'),   // reuses init endpoint for stats
-  initRun: (opts: Record<string, unknown>) => post<{ job_id: string }>('/library/init', opts),
+  // GET /library returns { stats, songs } — grab the stats without paging songs.
+  stats:   ()           =>
+    get<{ stats: LibraryStats }>('/library?per_page=1').then((r) => r.stats),
+  initRun: (opts: Record<string, unknown>) => post<{ job_id: string }>('/library/initialize', opts),
   // Segregates the library into fully-processed / stems-only / analysis-only /
   // unprocessed buckets. Cheap file-existence scan — safe to poll every ~1s.
   processingStatus: () => get<ProcessingStatus>('/library/processing-status'),
@@ -179,6 +182,9 @@ export const downloadApi = {
 export const audioApi = {
   streamUrl: (name: string) =>
     `${BASE}/library/${encodeURIComponent(name)}/audio`,
+  // Download URL for DJ-software cue export (rekordbox XML or Serato MP3).
+  exportCuesUrl: (name: string, fmt: 'rekordbox' | 'serato' = 'rekordbox') =>
+    `${BASE}/library/${encodeURIComponent(name)}/export-cues?fmt=${fmt}`,
 }
 
 // --- Stems ---
@@ -213,11 +219,41 @@ export const analysisApi = {
     ).then((r) => r.similar),
   rebuildIndex:  () =>
     post<{ job_id: string }>('/index/rebuild', {}),
+  // CLAP 512-D semantic search (falls back to 35-D index server-side when
+  // laion_clap isn't installed). Provide q (free text) and/or name (song).
+  crateSearch: (opts: {
+    q?: string
+    name?: string
+    k?: number
+    camelot?: string
+    bpmMin?: number
+    bpmMax?: number
+  }) => {
+    const p = new URLSearchParams()
+    if (opts.q) p.set('q', opts.q)
+    if (opts.name) p.set('name', opts.name)
+    if (opts.k) p.set('k', String(opts.k))
+    if (opts.camelot) p.set('camelot', opts.camelot)
+    if (opts.bpmMin != null) p.set('bpm_min', String(opts.bpmMin))
+    if (opts.bpmMax != null) p.set('bpm_max', String(opts.bpmMax))
+    return get<{ results: CrateSearchResult[]; backend: string }>(
+      `/library/crate-search?${p.toString()}`,
+    )
+  },
+  // Build / update the CLAP embedding index (queued job).
+  buildClapIndex: (force = false) =>
+    post<{ job_id: string }>(`/library/build-clap-index?force=${force}`, {}),
+  // Compute per-stem-type LUFS corpus targets (queued job). Run once after
+  // library setup so remixes use corpus-derived loudness targets.
+  calibrateLufs: () =>
+    post<{ job_id: string }>('/library/calibrate-lufs', {}),
   // Batch-analyzes every library song that's missing BPM/key/energy data —
   // backs the "Analyze missing" button on Library Atlas. No payload needed;
   // the backend scans has_analysis() across the whole library itself.
-  analyzeMissing: () =>
-    post<{ job_id: string }>('/library/analyze-missing', {}),
+  // force=true re-analyzes the whole library (refreshes stale cached
+  // BPM/key values from before analysis-algorithm fixes).
+  analyzeMissing: (force = false) =>
+    post<{ job_id: string }>(`/library/analyze-missing${force ? '?force=true' : ''}`, {}),
 }
 
 // --- Remix ---

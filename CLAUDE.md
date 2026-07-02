@@ -186,6 +186,39 @@ curl http://localhost:8000/jobs | python3 -m json.tool
 
 ---
 
+# Session Update: July 2, 2026 — Full-Stack Sweep: wiring fixes + UI hookups ✅
+
+Thorough sweep of frontend/backend/UI/player/mixing logic. 462 backend + 25 frontend tests pass;
+frontend builds clean; live smoke test ran end-to-end (health, library, audio streaming with
+range requests, SSE, Vite proxy, compatibility, preview render through the job queue).
+
+| Item | What |
+|---|---|
+| **Route shadowing bug (real)** | `GET /library/crate-search` was dead — shadowed by `GET /library/{name}` because library.router registered first. Fixed include order in `routes.py`; added `tests/test_route_shadowing.py` (6 tests, incl. a generic static-vs-dynamic guard) |
+| **Broken api.ts endpoints** | `libraryApi.stats`/`initRun` hit nonexistent `/library/init` — now `GET /library?per_page=1 → .stats` and `POST /library/initialize` |
+| **Library index self-heal (both directions)** | `list_songs()` now *adopts* unregistered on-disk song dirs (e.g. `Walking_playlist`), fixing the residual 587-vs-588 storage count drift |
+| **Force re-analysis** | `POST /library/analyze-missing?force=true` re-analyzes everything — needed because stale pre-octave-fix BPMs (63.8 = half of 129.2) are widespread in cached meta.json |
+| **UI wiring: crate search** | Signal Search got a "By text" mode → `GET /library/crate-search` (CLAP), friendly hint when index unbuilt |
+| **UI wiring: cue export** | Library Atlas row action downloads rekordbox XML via `/library/{name}/export-cues` |
+| **UI wiring: maintenance** | Operations page "Library Maintenance" panel: Build CLAP index · Calibrate stem LUFS · Re-analyze entire library (confirm-gated) |
+
+**Verified already fixed (post-handoff, no action needed):** limiter attack/release split
+(`_smooth_gain_envelope`, tested), BPM octave resolver (`resolve_bpm_octave`, wired into both
+trackers — confirmed live: cached 63.8 → render detected 129.2 with ~1.0 tempo ratio),
+compatibility formula now has genre/timbre/vocal-clash terms + key/bpm veto (confirmed live:
+8B↔1A pair → `compatible: false`), naming unification (original failing song sanitizes clean +
+idempotent), storage phantom-entry `unregister()`.
+
+**Feature lab (`ai_remixmate_feature_lab/`)** is intentionally isolated (own tests: 12 py +
+21 ts, all pass). Nothing in it imports production code or vice versa — integration is a
+deliberate future step per its README. Not wired to the UI *by design*.
+
+**Recommended next step:** run "Re-analyze entire library" from the Operations page — a large
+share of cached BPMs predate the octave fix (multiple songs cached at exactly 63.8), which
+skews compatibility scoring and Set Builder ordering until refreshed.
+
+---
+
 # Session Update: June 29, 2026 (session 3) — Stage 3 Improvements + Library Atlas Bug Fix ✅
 
 ## What Happened

@@ -24,8 +24,9 @@ import {
   BarChart2,
   Layers,
   ArrowRight,
+  FileDown,
 } from 'lucide-react'
-import { libraryApi, analysisApi, stemsApi, favoritesApi, cratesApi } from '@/lib/api'
+import { libraryApi, analysisApi, stemsApi, favoritesApi, cratesApi, audioApi } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
 import type { SongInfo, Recommendation, SimilarTrack } from '@/types'
 import { StemsPlayerRow } from '@/components/StemsPlayerRow'
@@ -151,6 +152,17 @@ function SongRow({ song, isFav, expandedStems, selected, onFav, onAnalyze, onSte
           >
             <Scissors size={12} />
           </button>
+          <a
+            className={`la-action-btn ${!song.has_analysis ? 'la-action-btn--disabled' : ''}`}
+            href={song.has_analysis ? audioApi.exportCuesUrl(song.name, 'rekordbox') : undefined}
+            download
+            onClick={(e) => { if (!song.has_analysis) e.preventDefault() }}
+            title={song.has_analysis
+              ? 'Export cue points (rekordbox XML — also imports into VirtualDJ / djay Pro)'
+              : 'Analyze first to export cue points'}
+          >
+            <FileDown size={12} />
+          </a>
           <button
             className="la-action-btn la-action-btn--danger"
             onClick={() => onDelete(song.name)}

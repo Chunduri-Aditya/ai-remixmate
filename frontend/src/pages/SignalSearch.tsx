@@ -104,31 +104,37 @@ function ResultCard({ track, rank, refSong }: ResultCardProps) {
       )}
 
       <div className="ss-card__actions">
-        <button
-          className="ss-card__action-btn"
-          onClick={() => navigate(`/mix-deck?song_a=${encodeURIComponent(refSong)}`)}
-        >
-          → A
-        </button>
+        {refSong && (
+          <button
+            className="ss-card__action-btn"
+            onClick={() => navigate(`/mix-deck?song_a=${encodeURIComponent(refSong)}`)}
+          >
+            → A
+          </button>
+        )}
         <button
           className="ss-card__action-btn"
           onClick={() => navigate(`/mix-deck?song_b=${encodeURIComponent(track.name)}`)}
         >
           → B
         </button>
-        <button
-          className="ss-card__action-btn ss-card__action-btn--mix"
-          onClick={() => navigate(`/mix-deck?song_a=${encodeURIComponent(refSong)}&song_b=${encodeURIComponent(track.name)}`)}
-        >
-          ⚡ Mix
-        </button>
+        {refSong && (
+          <button
+            className="ss-card__action-btn ss-card__action-btn--mix"
+            onClick={() => navigate(`/mix-deck?song_a=${encodeURIComponent(refSong)}&song_b=${encodeURIComponent(track.name)}`)}
+          >
+            ⚡ Mix
+          </button>
+        )}
       </div>
     </div>
   )
 }
 
 export default function SignalSearch() {
+  const [mode, setMode]               = useState<'track' | 'text'>('track')
   const [refSong, setRefSong]         = useState('')
+  const [textQuery, setTextQuery]     = useState('')
   const [k, setK]                     = useState(10)
   const [results, setResults]         = useState<SimilarTrack[] | null>(null)
   const [loading, setLoading]         = useState(false)
@@ -147,14 +153,33 @@ export default function SignalSearch() {
   const songNames = useMemo(() => songs.map((s) => s.name).sort(), [songs])
 
   async function runSearch() {
-    if (!refSong) return
+    if (mode === 'track' ? !refSong : !textQuery.trim()) return
     setError(null)
     setLoading(true)
     try {
-      const raw = await analysisApi.similar(refSong, k)
-      setResults(raw)
+      if (mode === 'track') {
+        const raw = await analysisApi.similar(refSong, k)
+        setResults(raw)
+      } else {
+        // Crate Digger: CLAP semantic text search — map into the same
+        // SimilarTrack card shape the results list already renders.
+        const raw = await analysisApi.crateSearch({ q: textQuery.trim(), k })
+        setResults(
+          raw.results.map((r) => ({
+            name: r.name,
+            score: r.score,
+            bpm: r.bpm ?? undefined,
+            key: r.key ?? undefined,
+            camelot: r.camelot ?? undefined,
+          })),
+        )
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Search failed')
+      let msg = e instanceof Error ? e.message : 'Search failed'
+      if (msg.includes('CLAP index is empty')) {
+        msg = 'Crate index not built yet — run "Build CLAP index" on the Operations page first.'
+      }
+      setError(msg)
     } finally {
       setLoading(false)
     }
@@ -201,29 +226,61 @@ export default function SignalSearch() {
         {/* Left: controls */}
         <aside className="ss-panel">
           <div className="ss-panel__section">
-            <label className="ss-label">Reference track</label>
-            <div className="ss-select-wrap">
-              <Music2 size={13} className="ss-select-icon" />
-              <select
-                className="ss-select"
-                value={refSong}
-                onChange={(e) => { setRefSong(e.target.value); setResults(null) }}
+            <label className="ss-label">Search mode</label>
+            <div className="ss-k-row">
+              <button
+                className={`ss-k-btn ${mode === 'track' ? 'ss-k-btn--active' : ''}`}
+                onClick={() => { setMode('track'); setResults(null); setError(null) }}
               >
-                <option value="">— pick a song —</option>
-                {songNames.map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
+                By track
+              </button>
+              <button
+                className={`ss-k-btn ${mode === 'text' ? 'ss-k-btn--active' : ''}`}
+                onClick={() => { setMode('text'); setResults(null); setError(null) }}
+                title="CLAP semantic search — describe a vibe in words"
+              >
+                By text
+              </button>
             </div>
-
-            {refSongInfo && (
-              <div className="ss-ref-meta">
-                {refSongInfo.bpm && <span className="ss-chip ss-chip--amber">{refSongInfo.bpm.toFixed(1)} bpm</span>}
-                {refSongInfo.key && <span className="ss-chip ss-chip--ice">{refSongInfo.key}</span>}
-                {refSongInfo.camelot && <span className="ss-chip ss-chip--violet">{refSongInfo.camelot}</span>}
-              </div>
-            )}
           </div>
+
+          {mode === 'track' ? (
+            <div className="ss-panel__section">
+              <label className="ss-label">Reference track</label>
+              <div className="ss-select-wrap">
+                <Music2 size={13} className="ss-select-icon" />
+                <select
+                  className="ss-select"
+                  value={refSong}
+                  onChange={(e) => { setRefSong(e.target.value); setResults(null) }}
+                >
+                  <option value="">— pick a song —</option>
+                  {songNames.map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </div>
+
+              {refSongInfo && (
+                <div className="ss-ref-meta">
+                  {refSongInfo.bpm && <span className="ss-chip ss-chip--amber">{refSongInfo.bpm.toFixed(1)} bpm</span>}
+                  {refSongInfo.key && <span className="ss-chip ss-chip--ice">{refSongInfo.key}</span>}
+                  {refSongInfo.camelot && <span className="ss-chip ss-chip--violet">{refSongInfo.camelot}</span>}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="ss-panel__section">
+              <label className="ss-label">Describe the vibe</label>
+              <input
+                className="ss-mini-input ss-mini-input--full"
+                placeholder="e.g. dark minimal techno"
+                value={textQuery}
+                onChange={(e) => setTextQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') runSearch() }}
+              />
+            </div>
+          )}
 
           <div className="ss-panel__section">
             <label className="ss-label">Results to fetch</label>
@@ -242,13 +299,13 @@ export default function SignalSearch() {
 
           <button
             className="ss-run-btn"
-            disabled={!refSong || loading}
+            disabled={(mode === 'track' ? !refSong : !textQuery.trim()) || loading}
             onClick={runSearch}
           >
             {loading
               ? <RefreshCw size={14} className="ss-spin" />
               : <Zap size={14} />}
-            {loading ? 'Searching…' : 'Find Similar'}
+            {loading ? 'Searching…' : mode === 'track' ? 'Find Similar' : 'Dig Crates'}
           </button>
 
           {/* Post-fetch filters */}
@@ -310,7 +367,9 @@ export default function SignalSearch() {
                     : ''}
                 </span>
                 <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
-                  Reference: <strong>{refSong}</strong>
+                  {mode === 'track'
+                    ? <>Reference: <strong>{refSong}</strong></>
+                    : <>Query: <strong>{textQuery}</strong></>}
                 </span>
               </div>
 
@@ -319,7 +378,7 @@ export default function SignalSearch() {
                   <div className="ss-empty">No tracks match your filters</div>
                 ) : (
                   filteredResults.map((t, i) => (
-                    <ResultCard key={t.name} track={t} rank={i + 1} refSong={refSong} />
+                    <ResultCard key={t.name} track={t} rank={i + 1} refSong={mode === 'track' ? refSong : ''} />
                   ))
                 )}
               </div>

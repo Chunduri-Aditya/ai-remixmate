@@ -426,6 +426,19 @@
   cursor: not-allowed;
 }
 
+/* Anchor variant (cue export) — same look as buttons, no underline */
+a.la-action-btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.la-action-btn--disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+
 /* Amber chip (used in drawer similar list) */
 .la-chip--amber {
   background: var(--color-amber-glow);

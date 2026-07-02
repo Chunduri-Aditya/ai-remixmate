@@ -45,10 +45,13 @@ def task_analyze(
     return result
 
 
-def task_analyze_missing(job_id: str, key_profile: str = "auto") -> Dict[str, Any]:
+def task_analyze_missing(job_id: str, key_profile: str = "auto", force: bool = False) -> Dict[str, Any]:
     """
     Batch-analyze every library song that's missing BPM/key/energy data
     (i.e. ``has_analysis(song_dir)`` is False — no usable ``meta.json`` yet).
+    With ``force=True``, re-analyzes every song regardless — the escape
+    hatch for refreshing values cached before an analysis-algorithm fix
+    (e.g. the BPM octave-error fix in beat_tracker.resolve_bpm_octave).
 
     Best-effort: one song failing doesn't abort the batch. This is the
     backend for the "Analyze all missing" button on Library Atlas — before
@@ -58,7 +61,7 @@ def task_analyze_missing(job_id: str, key_profile: str = "auto") -> Dict[str, An
 
     targets = [
         d.name for d in sorted(LIBRARY_DIR.iterdir())
-        if d.is_dir() and not has_analysis(d)
+        if d.is_dir() and (force or not has_analysis(d))
     ]
     total = len(targets)
     done = 0

@@ -24,10 +24,13 @@ from scripts.api.routers import (
 
 router = APIRouter()
 router.include_router(system.router)
+# analysis must come before library: its static GET /library/crate-search
+# would otherwise be shadowed by library's dynamic GET /library/{name}
+# (FastAPI matches in registration order).
+router.include_router(analysis.router)
 router.include_router(library.router)
 router.include_router(downloads.router)
 router.include_router(stems.router)
-router.include_router(analysis.router)
 router.include_router(remix.router)
 router.include_router(generative.router)
 router.include_router(spotify.router)

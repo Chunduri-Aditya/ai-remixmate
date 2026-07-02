@@ -158,6 +158,12 @@ def analyze_missing(
         "auto",
         description="Tonal profile for key detection: 'ks', 'edma', 'edmm', or 'auto'",
     ),
+    force: bool = Query(
+        False,
+        description="Re-analyze every song, including ones that already have "
+        "analysis data. Use after analysis-algorithm fixes (e.g. the BPM "
+        "octave-error fix) to refresh stale cached values.",
+    ),
 ):
     """
     Batch-analyze every library song currently missing BPM/key/energy data.
@@ -165,11 +171,15 @@ def analyze_missing(
     Scans the library for songs where `has_analysis()` is False, then runs
     `run_song_analysis()` on each as a single background job (poll /jobs/{id}
     or subscribe to SSE for live per-song progress). Best-effort — one
-    song's failure doesn't stop the rest.
+    song's failure doesn't stop the rest. With `force=true`, re-analyzes
+    the entire library instead (refreshes stale cached BPM/key values).
     """
     _check_job_cap()
-    job_id = job_store.create_job(JobType.ANALYZE, {"type": "analyze_missing", "key_profile": key_profile})
-    job_store.submit_job(job_id, task_analyze_missing, key_profile=key_profile)
+    job_id = job_store.create_job(
+        JobType.ANALYZE,
+        {"type": "analyze_missing", "key_profile": key_profile, "force": force},
+    )
+    job_store.submit_job(job_id, task_analyze_missing, key_profile=key_profile, force=force)
     return job_store.job_to_response(job_store.get_job(job_id))
 
 

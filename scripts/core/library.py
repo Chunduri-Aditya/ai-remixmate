@@ -202,11 +202,15 @@ class LibraryManager:
         """
         Return all songs currently in the library.
 
-        Self-heals stale index entries: anything whose directory was deleted
-        outside of evict_lru() (e.g. the pre-fix DELETE /library/{name},
-        which never touched the index) gets dropped here and the index
-        rewritten, instead of permanently inflating total_songs / corrupting
-        eviction's LRU ordering.
+        Self-heals the index in both directions:
+        - stale entries: anything whose directory was deleted outside of
+          evict_lru() (e.g. the pre-fix DELETE /library/{name}, which never
+          touched the index) gets dropped, instead of permanently inflating
+          total_songs / corrupting eviction's LRU ordering.
+        - orphans: on-disk song directories that never got registered
+          (e.g. copied in manually, or downloaded by a code path that
+          predates register()) get adopted, so storage counts match what
+          GET /library reports from the filesystem.
         """
         index = self._load_index()
         entries = []
@@ -228,6 +232,25 @@ class LibraryManager:
                       ", ".join(stale_names[:10]) + (", …" if len(stale_names) > 10 else ""))
             for name in stale_names:
                 index.pop(name, None)
+
+        # Adopt on-disk song dirs the index doesn't know about
+        adopted = []
+        if self.library_dir.exists():
+            for song_path in self.library_dir.iterdir():
+                if not song_path.is_dir() or song_path.name.startswith("."):
+                    continue
+                if song_path.name in index:
+                    continue
+                entry = self._scan_song_dir(song_path.name, song_path)
+                index[song_path.name] = asdict(entry)
+                entries.append(entry)
+                adopted.append(song_path.name)
+        if adopted:
+            log.info("list_songs: adopted %d unregistered on-disk song(s): %s",
+                      len(adopted),
+                      ", ".join(adopted[:10]) + (", …" if len(adopted) > 10 else ""))
+
+        if stale_names or adopted:
             self._save_index(index)
 
         return sorted(entries, key=lambda e: e.last_accessed, reverse=True)
