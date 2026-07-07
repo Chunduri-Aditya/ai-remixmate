@@ -511,6 +511,29 @@
 
 .md-result-card__vault-link:hover { text-decoration: underline; }
 
+.md-result-card__feedback {
+  margin-left: auto;
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+/* When both feedback and vault link render, only feedback pushes right */
+.md-result-card__feedback + .md-result-card__vault-link { margin-left: 0; }
+
+.md-fb-btn {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: 1px 7px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.md-fb-btn:hover:not(:disabled) { border-color: var(--color-green-500); }
+.md-fb-btn:disabled { opacity: 0.45; cursor: default; }
+.md-fb-btn--active { opacity: 1 !important; border-color: var(--color-green-500); }
+
 .md-result-card__stats {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -144,6 +144,16 @@ export const libraryApi = {
   // Segregates the library into fully-processed / stems-only / analysis-only /
   // unprocessed buckets. Cheap file-existence scan — safe to poll every ~1s.
   processingStatus: () => get<ProcessingStatus>('/library/processing-status'),
+  // Health-scans every song for damage (no playable audio, undecodable
+  // audio, or corrupt meta.json/analysis.json) — read-only, deletes
+  // nothing. Poll the returned job_id and read result.broken once COMPLETED.
+  scanBroken: () => post<{ job_id: string }>('/library/scan-broken', {}),
+  // Bulk-delete counterpart to libraryApi.delete — one request instead of N.
+  deleteBatch: (names: string[]) =>
+    post<{ deleted: string[]; failed: { name: string; error: string }[] }>(
+      '/library/delete-batch',
+      { names },
+    ),
 }
 
 // --- Storage (size cap, pruning, eviction, library location) ---
@@ -265,6 +275,12 @@ export const remixApi = {
     post<{ job_id: string }>('/dj-remix/preview', req),
   chain:   (songs: string[], opts?: Record<string, unknown>) =>
     post<{ job_id: string }>('/dj-chain', { songs, ...opts }),
+  // 👍/👎 on a rendered mix/preview — trains the spectral cue-matching weights
+  feedback: (sessionId: string, liked: boolean) =>
+    post<{ updated: boolean; n_updates?: number }>('/dj-remix/feedback', {
+      session_id: sessionId,
+      liked,
+    }),
 }
 
 // --- Jobs ---

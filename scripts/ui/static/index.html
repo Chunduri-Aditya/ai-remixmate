@@ -767,7 +767,13 @@ select.ctrl-select:focus { border-color: var(--accent); }
       <div class="result-player" id="remix-result">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <span style="font-size:.9rem;font-weight:600">🎉 Mix Ready!</span>
-          <button class="btn btn-outline" id="remix-play-btn" onclick="playResult('remix')">▶ Play</button>
+          <span style="display:flex;gap:6px;align-items:center">
+            <button class="btn btn-outline" id="remix-fb-up" onclick="sendRemixFeedback(true)"
+                    title="Good mix — the spectral matcher learns from this">👍</button>
+            <button class="btn btn-outline" id="remix-fb-down" onclick="sendRemixFeedback(false)"
+                    title="Bad mix — the spectral matcher learns from this">👎</button>
+            <button class="btn btn-outline" id="remix-play-btn" onclick="playResult('remix')">▶ Play</button>
+          </span>
         </div>
         <div id="remix-result-meta" style="font-size:.72rem;color:var(--text2);margin-bottom:8px"></div>
         <audio id="remix-audio" controls style="width:100%;height:36px"></audio>
@@ -1097,6 +1103,7 @@ const S = {
   liked: new Set(),
   chainSongs: [],
   remixJobId: null,
+  lastRemixSession: null,   // session_id of the last rated-able render (👍/👎)
   chainJobId: null,
   dlJobs: {},
   currentPage: 'library',
@@ -1504,8 +1511,11 @@ async function pollJob(jobId, onProgress, onDone, onFail) {
     try {
       const j = await api('GET', `/jobs/${jobId}`);
       onProgress(j.progress, j.message, j);   // pass full job as 3rd arg
-      if (j.status === 'done') { clearInterval(iv); onDone(j.result); }
-      if (j.status === 'failed') { clearInterval(iv); onFail(j.error || 'Job failed'); }
+      // REST normalizes statuses to uppercase (COMPLETED/FAILED/CANCELLED);
+      // accept legacy lowercase 'done'/'failed' too so this never regresses.
+      const st = String(j.status || '').toUpperCase();
+      if (st === 'COMPLETED' || st === 'DONE') { clearInterval(iv); onDone(j.result); }
+      if (st === 'FAILED' || st === 'CANCELLED') { clearInterval(iv); onFail(j.error || 'Job ' + st.toLowerCase()); }
     } catch(e) { clearInterval(iv); onFail(e.message); }
   }, 1200);
 }
@@ -1665,15 +1675,22 @@ async function startRemix() {
       (result) => {
         $('remix-progress').style.display = 'none';
         $('remix-result').classList.add('show');
-        const url = result.output ? `/outputs/${result.output.split('/outputs/')[1]}` : null;
+        const url = result.stream_url
+          || (result.output ? `/outputs/${result.output.split('/outputs/')[1]}` : null);
         if (url) $('remix-audio').src = url;
         const meta = [
           result.key_a  ? `🎼 ${result.key_a} → ${result.key_b}` : '',
           result.harmonic_score != null ? `🎹 Harmony ${Math.round(result.harmonic_score * 100)}%` : '',
           result.lufs   ? `📊 ${result.lufs} LUFS` : '',
+          result.spectral_match ? `🎛 Spectral fit ${Math.round(result.spectral_match.score * 100)}% @ bar ${result.spectral_match.entry_bar}` : '',
           result.ts_overall != null ? `🤖 Score ${Math.round(result.ts_overall * 100)}%` : '',
         ].filter(Boolean).join('   ');
         $('remix-result-meta').textContent = meta;
+        // Arm the 👍/👎 buttons for this render (spectral matcher training)
+        S.lastRemixSession = result.spectral_match ? result.session_id : null;
+        const canRate = !!S.lastRemixSession;
+        $('remix-fb-up').disabled = !canRate;
+        $('remix-fb-down').disabled = !canRate;
         toast('Mix ready! 🎉', 'success');
       },
       (err) => {
@@ -1684,6 +1701,21 @@ async function startRemix() {
   } catch(e) {
     $('remix-progress').style.display = 'none';
     toast(e.message, 'error');
+  }
+}
+
+async function sendRemixFeedback(liked) {
+  if (!S.lastRemixSession) { toast('Nothing to rate for this mix', 'error'); return; }
+  try {
+    await api('POST', '/dj-remix/feedback', { session_id: S.lastRemixSession, liked });
+    toast(liked ? 'Thanks — matcher nudged toward this 👍' : 'Noted — matcher will avoid this 👎', 'success');
+  } catch(e) {
+    toast('Feedback failed: ' + e.message, 'error');
+  } finally {
+    // One verdict per render — the server consumes the record either way
+    S.lastRemixSession = null;
+    $('remix-fb-up').disabled = true;
+    $('remix-fb-down').disabled = true;
   }
 }
 

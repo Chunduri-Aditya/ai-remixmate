@@ -393,6 +393,62 @@ class TestJobStore:
         assert "Deliberate test failure" in (job["error"] or "")
         assert job["finished_at"] is not None
 
+    def _run_job_capturing_sse(self, task_fn, job_type):
+        """Run a job to a terminal state with a capture hook installed;
+        return the list of (event_type, payload) the store emitted."""
+        import scripts.api.jobs as jobs_mod
+        from scripts.api.jobs import create_job, submit_job, get_job, register_sse_hook
+        from scripts.api.schemas import JobStatus
+
+        events: list = []
+        prev_hook = jobs_mod._sse_hook
+        register_sse_hook(lambda et, payload: events.append((et, payload)))
+        try:
+            job_id = create_job(job_type)
+            submit_job(job_id, task_fn)
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                if get_job(job_id)["status"] in (JobStatus.DONE, JobStatus.FAILED):
+                    break
+                time.sleep(0.05)
+            # Terminal emit happens after the status flips — give it a beat
+            time.sleep(0.2)
+        finally:
+            register_sse_hook(prev_hook)
+        return job_id, events
+
+    def test_sse_emits_job_completed_on_success(self):
+        """The executor wrapper (not update_job) writes the DONE transition,
+        so it must emit the terminal frame itself — without it the SSE stream
+        ends at the last progress % and job cards stay RUNNING forever."""
+        from scripts.api.schemas import JobType
+
+        def _task(job_id: str, **kwargs):
+            from scripts.api.jobs import update_job
+            update_job(job_id, progress=0.5, message="Halfway")
+            return {"ok": True}
+
+        job_id, events = self._run_job_capturing_sse(_task, JobType.ANALYZE)
+        types = [et for et, _ in events]
+        assert "job_completed" in types, f"no job_completed frame, got {types}"
+        completed = [p for et, p in events if et == "job_completed"][-1]
+        assert completed["job_id"] == job_id
+        assert completed["status"] == "COMPLETED"
+        assert completed["result"] == {"ok": True}
+
+    def test_sse_emits_job_failed_on_exception(self):
+        from scripts.api.schemas import JobType
+
+        def _task(job_id: str, **kwargs):
+            raise RuntimeError("Deliberate test failure — do not alarm")
+
+        job_id, events = self._run_job_capturing_sse(_task, JobType.ANALYZE)
+        types = [et for et, _ in events]
+        assert "job_failed" in types, f"no job_failed frame, got {types}"
+        failed = [p for et, p in events if et == "job_failed"][-1]
+        assert failed["job_id"] == job_id
+        assert failed["status"] == "FAILED"
+
 
 # ===========================================================================
 # 4. DJEngine input validation

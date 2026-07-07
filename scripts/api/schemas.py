@@ -239,6 +239,21 @@ class DJRemixRequest(BaseModel):
     )
 
 
+class RemixFeedbackRequest(BaseModel):
+    """One verdict on a rendered mix/preview — trains the spectral match weights."""
+    session_id: str = Field(..., description="session_id from a dj_remix/preview job result")
+    liked: bool = Field(..., description="True = good mix (👍), False = bad mix (👎)")
+
+
+class RemixFeedbackResponse(BaseModel):
+    updated: bool
+    reason: Optional[str] = None
+    liked: Optional[bool] = None
+    n_updates: Optional[int] = None
+    weights_min: Optional[float] = None
+    weights_max: Optional[float] = None
+
+
 class DJChainRequest(BaseModel):
     songs: List[str] = Field(
         ...,
@@ -408,6 +423,13 @@ class InitializeLibraryRequest(BaseModel):
     delete_wav:   bool = Field(True,        description="Delete WAV stems after FLAC encode")
     run_compress: bool = Field(True,        description="Run FLAC compression after splitting")
     run_index:    bool = Field(True,        description="Rebuild RAG index after compression")
+
+
+class DeleteBatchRequest(BaseModel):
+    """Body for POST /library/delete-batch — the bulk-delete counterpart to
+    DELETE /library/{name}, used by the "Scan for broken songs" results panel
+    so confirming N deletions doesn't require N sequential requests."""
+    names: List[str] = Field(..., description="Song names to delete from the library")
 
 
 # ---------------------------------------------------------------------------

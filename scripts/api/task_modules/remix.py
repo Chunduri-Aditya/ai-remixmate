@@ -8,18 +8,102 @@ task_remix_preview     — render only the transition window for fast audition
 
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, NamedTuple, Optional
 
 import librosa
 import numpy as np
 import soundfile as sf
 
 from scripts.api.jobs import update_job
-from scripts.core.audit import log_audit
 from scripts.core.audio_source import load_source_audio
-from scripts.core.dj_engine import _analyze_impl, plan_transition, DJEngine
-from scripts.core.genre import auto_preset
+from scripts.core.audit import log_audit
 from scripts.core.paths import OUTPUTS_DIR, song_dir
+
+
+class MixEngine(NamedTuple):
+    """One render path: analysis, planning, rendering, and mastering together.
+
+    The four callables must come from the same engine generation — mixing a
+    classic plan with the current renderer (or vice versa) is unsupported.
+    """
+    analyze: Callable            # audio, sr → SongStructure
+    plan_transition: Callable    # struct_a, struct_b, … → TransitionPlan
+    DJEngine: type
+    master_mix: Callable
+    dj_target_lufs: float        # LUFS target for full remix renders
+    name: str                    # "classic" | "current"
+
+
+def _resolve_engine() -> MixEngine:
+    """Pick the transition engine per config `dj.mixing_engine`.
+
+    "classic" (default) — the vendored AI_REMIXMATE_BEST_MIXING_ALGO path
+    (scripts/core/classic_engine/), mastered at −8 LUFS like the reference
+    renders that path was judged on. "current" — the live engine
+    (scripts/core/dj_engine.py) with its config-driven loudness target
+    (audio.target_lufs, default −14). Resolved per job so a config change
+    takes effect on API restart without touching code.
+    """
+    try:
+        from scripts.core.config import cfg
+        name = str(getattr(getattr(cfg, "dj", None), "mixing_engine", "classic")).lower()
+    except Exception:
+        name = "classic"
+    if name not in ("classic", "current"):
+        name = "classic"
+
+    if name == "classic":
+        from scripts.core.classic_engine import (
+            CLASSIC_DJ_TARGET_LUFS,
+            DJEngine,
+            _analyze_impl,
+            master_mix,
+            plan_transition,
+        )
+        return MixEngine(_analyze_impl, plan_transition, DJEngine,
+                         master_mix, CLASSIC_DJ_TARGET_LUFS, name)
+
+    from scripts.core.dj_engine import DJEngine, _analyze_impl, plan_transition
+    from scripts.core.mastering import master_mix
+    # Loudness target comes from config (audio.target_lufs, default −14 —
+    # the Spotify/Apple normalization level). The old hardcoded −8 "club
+    # loud" target forced ~+10 dB of gain into the true-peak limiter,
+    # crushing dynamics for zero audible benefit on streaming playback,
+    # which turns everything back down to ~−14 anyway. Set
+    # audio.target_lufs: -8.0 in config.local.yaml for club/PA use.
+    try:
+        from scripts.core.config import cfg
+        target_lufs = float(getattr(getattr(cfg, "audio", None), "target_lufs", -14.0))
+    except Exception:
+        target_lufs = -14.0
+    return MixEngine(_analyze_impl, plan_transition, DJEngine,
+                     master_mix, target_lufs, name)
+
+
+def _transition_timeline(plan, struct_b) -> Dict[str, Any]:
+    """Key transition moments in OUTPUT seconds, for UI timelines.
+
+    B-local times map to the output via the stretch ratio: B is tempo-matched
+    to A, so an event at B-local time t lands at
+    exit_time_a + (t − entry_time_b) / tempo_shift_ratio.
+    """
+    exit_s = float(plan.exit_time_a)
+    trans_s = float(plan.transition_seconds)
+    bars = max(int(plan.transition_bars), 1)
+    swap_bar = int(getattr(getattr(plan, "eq", None), "bass_swap_bar", bars // 2) or bars // 2)
+
+    ratio = float(plan.tempo_shift_ratio or 1.0) or 1.0
+    drop_b = getattr(struct_b, "drop_position", None)
+    drop_out = None
+    if drop_b is not None and float(drop_b) >= float(plan.entry_time_b):
+        drop_out = exit_s + (float(drop_b) - float(plan.entry_time_b)) / ratio
+
+    return {
+        "overlap_start_s": round(exit_s, 2),
+        "bass_swap_s":     round(exit_s + swap_bar * (trans_s / bars), 2),
+        "overlap_end_s":   round(exit_s + trans_s, 2),
+        "drop_b_s":        round(drop_out, 2) if drop_out is not None else None,
+    }
 
 
 def task_dj_remix(
@@ -38,6 +122,8 @@ def task_dj_remix(
               metadata={"transition_bars": transition_bars, "preset": preset, "effect": transition_effect})
     update_job(job_id, progress=0.05, message="Loading audio…")
 
+    eng = _resolve_engine()
+
     # Resolve source audio per song: full.wav → full_enhanced.wav → stem sum.
     # Raises FileNotFoundError(song name) if the song has no usable audio.
     sr = 44100
@@ -46,12 +132,18 @@ def task_dj_remix(
 
     update_job(job_id, progress=0.25, message="Analysing structure…")
 
-    struct_a = _analyze_impl(audio_a, sr)
-    struct_b = _analyze_impl(audio_b, sr)
+    struct_a = eng.analyze(audio_a, sr)
+    struct_b = eng.analyze(audio_b, sr)
 
     update_job(job_id, progress=0.45, message="Planning transition…")
 
-    plan = plan_transition(struct_a, struct_b, transition_bars=transition_bars)
+    plan = eng.plan_transition(struct_a, struct_b, transition_bars=transition_bars)
+
+    # Learned spectrogram matching — may move B's entry cue to the phrase
+    # whose spectrum best fits A's outro (dj.spectral_matching; band weights
+    # train on 👍/👎 via POST /dj-remix/feedback). None → plan untouched.
+    from scripts.core.spectral_matching import apply_spectral_matching, record_render
+    spectral_info = apply_spectral_matching(plan, audio_a, audio_b, struct_b, sr)
 
     # ── Bridge beat ──────────────────────────────────────────────────────────
     bridge_audio: Optional[np.ndarray] = None
@@ -107,7 +199,7 @@ def task_dj_remix(
     else:
         update_job(job_id, progress=0.55, message="Rendering DJ mix…")
 
-    engine = DJEngine(sr=sr)
+    engine = eng.DJEngine(sr=sr)
 
     if use_stem_blend:
         mix = engine.render_stem_blend(
@@ -128,10 +220,20 @@ def task_dj_remix(
             transition_effect=transition_effect,
         )
 
+    # Dynamic spectral sync — time-varying multiband EQ over the overlap
+    # window easing the mix's spectrum from A's outro to B's profile
+    # (dj.spectral_sync; bass band stays the engine's authority). Runs on the
+    # rendered output, so both engines get it without modification.
+    update_job(job_id, progress=0.78, message="Syncing transition spectrum…")
+    from scripts.core.spectral_sync import apply_spectral_sync
+    mix, sync_info = apply_spectral_sync(mix, sr, plan)
+
     update_job(job_id, progress=0.80, message="Mastering output…")
 
-    from scripts.core.mastering import master_mix
-    mix_mastered, quality_report = master_mix(mix, sr=sr, target_lufs=-8.0)   # DJ mix target
+    # Engine-matched mastering: classic → vendored chain at −8 LUFS (the
+    # reference-render sound); current → live chain at audio.target_lufs
+    # (default −14, the streaming normalization level — see _resolve_engine).
+    mix_mastered, quality_report = eng.master_mix(mix, sr=sr, target_lufs=eng.dj_target_lufs)
 
     update_job(job_id, progress=0.90, message="Saving output…")
 
@@ -142,12 +244,20 @@ def task_dj_remix(
 
     sf.write(str(out_path), mix_mastered, sr, subtype="PCM_24")
 
+    if spectral_info:
+        record_render(session_id, spectral_info)
+
     # Compute AI transition score if music intelligence features are available
     ts_data: dict = {}
     try:
         from scripts.core.music_intelligence import compute_track_vector, compute_transition_score
-        vec_a = compute_track_vector(audio_a, sr, bpm=struct_a.bpm)
-        vec_b = compute_track_vector(audio_b, sr, bpm=struct_b.bpm)
+        # analyze_structure() already computed both MusicVectors and stashed
+        # them on the structures — recomputing here from raw audio cost ~5 s
+        # per render and could disagree with the key the plan was built on.
+        # getattr: the classic engine's SongStructure predates the
+        # music_vector field, so classic renders recompute here.
+        vec_a = getattr(struct_a, "music_vector", None) or compute_track_vector(audio_a, sr, bpm=struct_a.bpm)
+        vec_b = getattr(struct_b, "music_vector", None) or compute_track_vector(audio_b, sr, bpm=struct_b.bpm)
         ts    = compute_transition_score(vec_a, vec_b)
         ts_data = {
             "ts_overall":       round(ts.overall, 3),
@@ -158,7 +268,7 @@ def task_dj_remix(
             "ts_notes":         ts.notes,
             "ts_recommended_bars": ts.recommended_transition_bars,
         }
-    except Exception as exc:
+    except Exception:
         pass   # non-critical
 
     log_audit("dj_remix_complete", resource=str(out_path), job_id=job_id,
@@ -170,6 +280,7 @@ def task_dj_remix(
         # NOTE: out_dir is named "dj_{session_id}", not bare session_id, so the
         # path segment here must match out_dir.name, not the raw session_id.
         "stream_url":        f"/outputs/{out_dir.name}/{out_path.name}",
+        "engine":            eng.name,
         "song_a":            song_a,
         "song_b":            song_b,
         "bpm_a":             round(plan.bpm_a, 1),
@@ -190,6 +301,17 @@ def task_dj_remix(
         "dr":                round(quality_report.dynamic_range_db, 1),
         "quality_passed":    quality_report.passed,
         "quality_notes":     quality_report.notes,
+        # Spectral cue matching outcome (None when disabled/inapplicable);
+        # sims stay server-side in the history store — clients get the summary.
+        "spectral_match":    (
+            {k: spectral_info.get(k)
+             for k in ("score", "spectral", "drop_delta_s", "entry_bar", "original_entry_bar")}
+            if spectral_info else None
+        ),
+        # Dynamic in-transition spectral sync (None when disabled/inapplicable)
+        "spectral_sync":     sync_info,
+        # Transition timeline in output seconds — what happens when
+        "timeline":          _transition_timeline(plan, struct_b),
         **ts_data,
     }
 
@@ -212,6 +334,8 @@ def task_dj_chain(
                         "preset": preset, "effect": transition_effect})
     update_job(job_id, progress=0.02, message=f"Loading {n} songs…")
 
+    eng = _resolve_engine()
+
     # ── Load audio (full.wav → full_enhanced.wav → stem sum per song) ──────
     # load_source_audio raises FileNotFoundError(name) for any unusable song.
     sr = 44100
@@ -227,14 +351,19 @@ def task_dj_chain(
     for idx, audio in enumerate(audios):
         prog = 0.20 + 0.25 * (idx / n)
         update_job(job_id, progress=prog, message=f"Analysing structure {idx+1}/{n}…")
-        structures.append(_analyze_impl(audio, sr))
+        structures.append(eng.analyze(audio, sr))
 
     # ── Plan transitions ─────────────────────────────────────────────────
     update_job(job_id, progress=0.45, message="Planning transitions…")
+    from scripts.core.spectral_matching import apply_spectral_matching
     plans = []
     for i in range(n - 1):
-        plans.append(plan_transition(structures[i], structures[i + 1],
-                                     transition_bars=transition_bars))
+        plan = eng.plan_transition(structures[i], structures[i + 1],
+                                   transition_bars=transition_bars)
+        # Learned cue matching per adjacent pair (no feedback history for
+        # chains — one 👍 can't be attributed to a single transition).
+        apply_spectral_matching(plan, audios[i], audios[i + 1], structures[i + 1], sr)
+        plans.append(plan)
 
     # ── Bridge beats (one per transition) ───────────────────────────────
     bridge_audios: list = []
@@ -262,7 +391,7 @@ def task_dj_chain(
 
     # ── Render ───────────────────────────────────────────────────────────
     update_job(job_id, progress=0.55, message="Rendering chain mix…")
-    engine = DJEngine(sr=sr)
+    engine = eng.DJEngine(sr=sr)
     mix = engine.render_chain(
         tracks=audios,
         plans=plans,
@@ -273,8 +402,9 @@ def task_dj_chain(
 
     update_job(job_id, progress=0.85, message="Mastering chain mix…")
 
-    from scripts.core.mastering import master_mix as _master_mix
-    mix_mastered, quality_report = _master_mix(mix, sr=sr, target_lufs=-8.0)
+    # Chain mixes always master to −8 LUFS (club-set loudness) on both
+    # engines — only the mastering implementation follows dj.mixing_engine.
+    mix_mastered, quality_report = eng.master_mix(mix, sr=sr, target_lufs=-8.0)
 
     update_job(job_id, progress=0.92, message="Saving output…")
 
@@ -316,6 +446,7 @@ def task_dj_chain(
         # Browser-playable URL — out_dir is "chain_{session_id}", so the path
         # segment must match out_dir.name, not the raw session_id.
         "stream_url":      f"/outputs/{out_dir.name}/{out_path.name}",
+        "engine":          eng.name,
         "songs":           songs,
         "n_songs":         n,
         "n_transitions":   n - 1,
@@ -356,6 +487,8 @@ def task_remix_preview(
               metadata={"transition_bars": transition_bars, "effect": transition_effect})
     update_job(job_id, progress=0.05, message="Loading audio for preview…")
 
+    eng = _resolve_engine()
+
     update_job(job_id, progress=0.15, message="Analysing tracks…")
     # full.wav → full_enhanced.wav → stem sum; A sets the sample rate, B matches.
     audio_a, sr = load_source_audio(song_a, sr=None, mono=True)
@@ -365,12 +498,19 @@ def task_remix_preview(
     audio_b = audio_b.astype(np.float32)
 
     update_job(job_id, progress=0.35, message="Planning transition…")
-    struct_a = _analyze_impl(audio_a, sr)
-    struct_b = _analyze_impl(audio_b, sr)
-    plan = plan_transition(struct_a, struct_b, transition_bars=transition_bars)
+    struct_a = eng.analyze(audio_a, sr)
+    struct_b = eng.analyze(audio_b, sr)
+    plan = eng.plan_transition(struct_a, struct_b, transition_bars=transition_bars)
+
+    # Same learned cue matching as the full render, so what you audition is
+    # what the full remix will do. (Dynamic spectral sync is full-render-only:
+    # it profiles the material before/after the overlap, and a preview segment
+    # IS the overlap — there's no surrounding context to profile.)
+    from scripts.core.spectral_matching import apply_spectral_matching, record_render
+    spectral_info = apply_spectral_matching(plan, audio_a, audio_b, struct_b, sr)
 
     update_job(job_id, progress=0.55, message="Rendering preview segment…")
-    engine = DJEngine(sr=sr)
+    engine = eng.DJEngine(sr=sr)
     preview_audio = engine.render(
         audio_a,
         audio_b,
@@ -391,6 +531,9 @@ def task_remix_preview(
     out_path = out_dir / "preview.wav"
     sf.write(str(out_path), preview_audio, sr, subtype="PCM_16")
 
+    if spectral_info:
+        record_render(session_id, spectral_info)
+
     duration_sec = round(len(preview_audio) / sr, 1)
     log_audit("remix_preview_complete", resource=str(out_path), job_id=job_id,
               metadata={"duration_sec": duration_sec, "transition_bars": transition_bars})
@@ -399,6 +542,7 @@ def task_remix_preview(
         "output":         str(out_path),
         "session_id":     session_id,
         "filename":       "preview.wav",
+        "engine":         eng.name,
         "song_a":         song_a,
         "song_b":         song_b,
         "transition_bars": plan.transition_bars,
@@ -412,5 +556,9 @@ def task_remix_preview(
         "camelot_a":      struct_a.camelot if hasattr(struct_a, "camelot") else None,
         "camelot_b":      struct_b.camelot if hasattr(struct_b, "camelot") else None,
         "tempo_ratio":    round(plan.tempo_shift_ratio, 4),
+        "spectral_match": (
+            {k: spectral_info[k] for k in ("score", "entry_bar", "original_entry_bar")}
+            if spectral_info else None
+        ),
         "stream_url":     f"/outputs/{session_id}/preview.wav",
     }

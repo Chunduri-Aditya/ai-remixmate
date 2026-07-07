@@ -78,10 +78,28 @@ class MetadataConfig:
 
 @dataclass
 class DJConfig:
+    # "classic" = vendored AI_REMIXMATE_BEST_MIXING_ALGO render path
+    # (scripts/core/classic_engine/); "current" = live engine. Consumed by
+    # scripts/api/task_modules/remix.py::_resolve_engine().
+    mixing_engine: str           = "classic"
     default_transition_bars: int = 16
     hp_filter_start_hz: float    = 400.0
     hp_filter_end_hz: float      = 80.0
     bass_crossover_hz: float     = 150.0
+    # Masking-aware multiband EQ (scripts/core/spectral_mixing.py), read by
+    # dj_engine.py. masking_eq_enabled is the A/B kill switch.
+    masking_eq_enabled: bool         = True
+    masking_eq_strength: float       = 0.0
+    masking_eq_max_atten_db: float   = 6.0
+    # Learned spectrogram cue matching (scripts/core/spectral_matching.py) —
+    # picks B's entry phrase by mel-band fit to A's outro; band weights train
+    # on POST /dj-remix/feedback verdicts at spectral_matching_lr per step.
+    spectral_matching: bool          = True
+    spectral_matching_lr: float      = 0.2
+    # Dynamic in-transition spectral sync (scripts/core/spectral_sync.py) —
+    # post-render multiband EQ easing the overlap's spectrum A→B over time.
+    spectral_sync: bool              = True
+    spectral_sync_max_db: float      = 4.0
 
 
 @dataclass
@@ -133,6 +151,46 @@ class LoggingConfig:
 
 
 @dataclass
+class GenerativeConfig:
+    # Consumed via model_manager._get_cfg_value("generative", ...).
+    max_vram_gb: float                = 12.0
+    strategy: str                     = "sequential"   # sequential | greedy
+    musicgen_model: str               = "facebook/musicgen-melody"
+    musicgen_offload_after_use: bool  = True
+    vampnet_offload_after_use: bool   = True
+    encodec_model: str                = "facebook/encodec_24khz"
+    encodec_bandwidth: float          = 6.0
+    dac_model: str                    = "44khz"
+    max_generation_sec: float         = 30.0
+    default_guidance_scale: float     = 3.0
+    default_temperature: float        = 1.0
+
+
+@dataclass
+class SpotifyConfig:
+    # scripts/core/spotify.py reads the raw YAML itself (plus SPOTIFY_* env
+    # vars); declared here so the section survives _dict_to_config() and the
+    # drift guard in tests/test_config_drift.py covers it.
+    client_id: str     = ""
+    client_secret: str = ""
+    redirect_uri: str  = "http://127.0.0.1:8000/spotify/callback"
+
+
+@dataclass
+class AnalysisConfig:
+    # Read by beat_tracker.py / energy_profiler.py via guarded getattr.
+    beat_backend: str   = "auto"
+    energy_backend: str = "auto"
+
+
+@dataclass
+class ModelsConfig:
+    # Read by crate_digger.py / energy_profiler.py via guarded getattr.
+    clap_model: Optional[str]   = None
+    musicnn_path: Optional[str] = None
+
+
+@dataclass
 class AppConfig:
     """Root config object — access via  cfg.<section>.<key>"""
     audio:      AudioConfig      = field(default_factory=AudioConfig)
@@ -145,6 +203,10 @@ class AppConfig:
     database:   DatabaseConfig   = field(default_factory=DatabaseConfig)
     api:        ApiConfig        = field(default_factory=ApiConfig)
     logging:    LoggingConfig    = field(default_factory=LoggingConfig)
+    generative: GenerativeConfig = field(default_factory=GenerativeConfig)
+    spotify:    SpotifyConfig    = field(default_factory=SpotifyConfig)
+    analysis:   AnalysisConfig   = field(default_factory=AnalysisConfig)
+    models:     ModelsConfig     = field(default_factory=ModelsConfig)
 
 
 # ---------------------------------------------------------------------------

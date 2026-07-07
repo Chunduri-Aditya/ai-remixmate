@@ -49,10 +49,29 @@ metadata:                       # Metadata API clients
 
 # ---------------------------------------------------------------------------
 dj:                             # DJ-style transition engine
+  mixing_engine: classic        # "classic" = vendored AI_REMIXMATE_BEST_MIXING_ALGO path
+                                #   (scripts/core/classic_engine/ — old analysis, renderer,
+                                #   and −8 LUFS mastering, faithful to the reference renders);
+                                #   "current" = latest engine (masking EQ, stem bass ramp,
+                                #   per-stem LUFS, config-driven audio.target_lufs)
   default_transition_bars: 16   # 8 | 16 | 32 — transition overlap length
   hp_filter_start_hz: 400.0     # HP cutoff on incoming track at mix start
   hp_filter_end_hz: 80.0        # HP cutoff at bass handover point
   bass_crossover_hz: 150.0      # Bass/mid crossover for the bass swap
+  masking_eq_enabled: true      # Masking-aware multiband EQ during stem transitions
+                                #   (scripts/core/spectral_mixing.py) — disable to A/B
+                                #   against the pre-masking-EQ baseline
+  masking_eq_strength: 0.0      # Hafezi & Reiss Eq.(2) S: 0 = duck exactly the detected
+                                #   masking; >0 harder, <0 gentler
+  masking_eq_max_atten_db: 6.0  # Cap on per-band masking attenuation
+  spectral_matching: true       # Learned spectrogram cue matching — B enters at the phrase
+                                #   whose mel-band trajectory best tracks A's outro; weights
+                                #   train on 👍/👎 (POST /dj-remix/feedback)
+  spectral_matching_lr: 0.2     # Online learning rate per feedback verdict
+  spectral_sync: true           # Dynamic in-transition spectral sync — time-varying multiband
+                                #   EQ easing the mix's spectrum from A's outro to B's profile
+                                #   across the overlap (bass band untouched)
+  spectral_sync_max_db: 4.0     # Per-band gain cap for the sync EQ
 
 # ---------------------------------------------------------------------------
 library:                        # Smart storage management

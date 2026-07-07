@@ -266,24 +266,53 @@ function JobStatusBadge({ jobId }: { jobId: string }) {
 }
 
 function RemixResultCard({ job }: { job: import('@/types').Job }) {
+  const [verdict, setVerdict] = useState<'up' | 'down' | 'unavailable' | null>(null)
   const r = job.result as {
     stream_url?: string
+    session_id?: string
     lufs?: number
     duration?: number
     bpm_a?: number
     bpm_b?: number
     harmonic_score?: number
     tempo_ratio?: number
+    spectral_match?: { score: number; entry_bar: number; original_entry_bar: number } | null
   } | undefined
   if (!r) return null
   const BASE = import.meta.env.VITE_API_BASE || '/api'
   const audioUrl = r.stream_url ? `${BASE}${r.stream_url}` : null
+
+  async function sendVerdict(liked: boolean) {
+    if (!r?.session_id || verdict) return
+    setVerdict(liked ? 'up' : 'down')
+    try {
+      await remixApi.feedback(r.session_id, liked)
+    } catch {
+      // 404 = no spectral record (matching off or already rated) — keep the
+      // chosen state visually but mark it inert
+      setVerdict('unavailable')
+    }
+  }
 
   return (
     <div className="md-result-card">
       <div className="md-result-card__header">
         <CheckCircle2 size={14} className="md-result-card__icon" />
         <span className="font-display">Mix Ready</span>
+        {r.session_id && r.spectral_match && (
+          <span className="md-result-card__feedback" title="Rate this transition — the spectral matcher learns from it">
+            <button
+              className={`md-fb-btn ${verdict === 'up' ? 'md-fb-btn--active' : ''}`}
+              disabled={verdict !== null}
+              onClick={() => sendVerdict(true)}
+            >👍</button>
+            <button
+              className={`md-fb-btn ${verdict === 'down' ? 'md-fb-btn--active' : ''}`}
+              disabled={verdict !== null}
+              onClick={() => sendVerdict(false)}
+            >👎</button>
+          </span>
+        )}
         {audioUrl && (
           <a className="md-result-card__vault-link" href="/mix-vault">
             Open in Vault →
@@ -302,6 +331,9 @@ function RemixResultCard({ job }: { job: import('@/types').Job }) {
         )}
         {r.harmonic_score !== undefined && (
           <><span className="text-muted">Key match</span><span className="font-mono">{Math.round(r.harmonic_score * 100)}%</span></>
+        )}
+        {r.spectral_match && (
+          <><span className="text-muted">Spectral fit</span><span className="font-mono">{Math.round(r.spectral_match.score * 100)}% @ bar {r.spectral_match.entry_bar}</span></>
         )}
       </div>
       {audioUrl && (

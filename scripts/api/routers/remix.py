@@ -24,6 +24,8 @@ from scripts.api.schemas import (
     InstrumentLabRequest,
     JobResponse,
     JobType,
+    RemixFeedbackRequest,
+    RemixFeedbackResponse,
 )
 from scripts.api.tasks import (
     task_dj_chain,
@@ -62,6 +64,26 @@ def dj_remix(req: DJRemixRequest, background_tasks: BackgroundTasks = None):
         transition_effect=req.transition_effect,
     )
     return job_store.job_to_response(job_store.get_job(job_id))
+
+
+# ---------------------------------------------------------------------------
+# DJ Remix feedback — trains the spectral cue-matching band weights
+# ---------------------------------------------------------------------------
+
+@router.post("/dj-remix/feedback", response_model=RemixFeedbackResponse, tags=["remix"])
+def dj_remix_feedback(req: RemixFeedbackRequest):
+    """Record a 👍/👎 verdict on a rendered mix or preview.
+
+    Synchronous — one deterministic weight update against the band
+    similarities stashed at render time (see scripts/core/spectral_matching).
+    404 when the session has no spectral record (matching disabled, chain
+    render, or feedback already given — records are one-shot).
+    """
+    from scripts.core.spectral_matching import apply_feedback
+    summary = apply_feedback(req.session_id, liked=req.liked)
+    if not summary.get("updated"):
+        raise HTTPException(status_code=404, detail=summary.get("reason", "no record"))
+    return RemixFeedbackResponse(**summary)
 
 
 # ---------------------------------------------------------------------------

@@ -434,7 +434,9 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
                     _upsert_row(conn, job)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"Could not persist job start to SQLite: {exc}")
+            job_snapshot = dict(job)
 
+        _emit("job_updated", job_snapshot)
         logger.info("Job started", extra={"job_id": job_id})
 
         try:
@@ -457,7 +459,13 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
                         _upsert_row(conn, job)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(f"Could not persist job completion to SQLite: {exc}")
+                job_snapshot = dict(job)
             _cancelled.discard(job_id)   # completed jobs no longer need the cancel flag
+
+            # Terminal SSE frame. update_job() only fires for task-driven
+            # progress calls, so without this the stream ends at the last
+            # progress % and clients (job cards, toasts) never see COMPLETED.
+            _emit("job_completed", job_snapshot)
 
             logger.info(
                 "Job completed successfully",
@@ -476,7 +484,10 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
                         _upsert_row(conn, job)
                 except Exception as db_exc:  # noqa: BLE001
                     logger.warning(f"Could not persist job failure to SQLite: {db_exc}")
+                job_snapshot = dict(job)
             _cancelled.discard(job_id)   # failed jobs no longer need the cancel flag
+
+            _emit("job_failed", job_snapshot)
 
             logger.error(
                 "Job failed with exception",
