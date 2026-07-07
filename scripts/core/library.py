@@ -330,6 +330,73 @@ class LibraryManager:
         return False
 
     # ------------------------------------------------------------------
+    # Health check — "is this song actually usable?"
+    # ------------------------------------------------------------------
+
+    def check_song_health(self, name: str) -> List[str]:
+        """
+        Return a list of reasons this song is broken, or [] if it's healthy.
+
+        A song counts as broken when:
+          - its directory doesn't exist at all, or
+          - it has no playable audio source — checked via
+            scripts.core.audio_source.resolve_source_file()/stem_files(),
+            the same resolution order (full.wav → full_enhanced.wav →
+            Demucs stems) the render/analysis path actually uses. A naive
+            check for just full.wav + stems would wrongly flag every song
+            that kept only full_enhanced.wav after pruning — which, with
+            prune_on_download enabled, is most of the library, or
+          - the audio source that IS present fails to decode (corrupt or
+            truncated file — soundfile raises, or reports zero frames), or
+          - meta.json / analysis.json exists on disk but isn't valid JSON
+            (a partial/corrupted write — e.g. a process killed mid-analysis).
+
+        Deliberately does NOT flag a song merely for never having been
+        analyzed (meta.json/analysis.json simply absent) — that's a normal
+        pending state already surfaced by has_analysis()/"Analyze missing",
+        not damage. Conflating "never analyzed" with "broken" would make
+        every unanalyzed song in the library look like a deletion candidate.
+        """
+        from scripts.core.audio_source import resolve_source_file, stem_files
+
+        reasons: List[str] = []
+        song_path = self._dir(name)
+        if not song_path.exists():
+            return ["song directory does not exist"]
+
+        source = resolve_source_file(name)
+        if source is None:
+            stems = stem_files(name)
+            source = stems[0] if stems else None
+
+        if source is None:
+            reasons.append("no playable audio source (no full.wav, full_enhanced.wav, or stems)")
+        elif _AUDIO_AVAILABLE:
+            try:
+                info = sf.info(str(source))
+                if info.frames <= 0:
+                    reasons.append(f"'{source.name}' has zero audio frames (empty/corrupt file)")
+                else:
+                    # Cheap decode probe — read a small window from the END of
+                    # the file rather than the start: the common damage mode
+                    # (download/write killed partway) truncates the tail while
+                    # the header and opening seconds still decode fine.
+                    win = min(info.frames, 44100)
+                    sf.read(str(source), frames=win, start=info.frames - win, always_2d=False)
+            except Exception as e:
+                reasons.append(f"'{source.name}' failed to decode: {e}")
+
+        for meta_name in ("meta.json", "analysis.json"):
+            p = song_path / meta_name
+            if p.exists():
+                try:
+                    json.loads(p.read_text())
+                except Exception as e:
+                    reasons.append(f"{meta_name} is corrupt/unparsable: {e}")
+
+        return reasons
+
+    # ------------------------------------------------------------------
     # Deduplication via audio fingerprinting
     # ------------------------------------------------------------------
 

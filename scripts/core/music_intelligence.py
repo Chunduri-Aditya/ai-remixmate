@@ -415,6 +415,7 @@ def compute_track_vector(
     sr:         int,
     bpm:        float = 0.0,
     stems_dir:  Optional[Path] = None,
+    key:        Optional[Tuple[str, str, str, float]] = None,
 ) -> MusicVector:
     """
     Compute a complete MusicVector for a track.
@@ -443,7 +444,16 @@ def compute_track_vector(
             vec.bpm = 120.0
 
     # ── Key + Camelot ─────────────────────────────────────────────────────────
-    vec.key_name, vec.mode, vec.camelot, vec.key_confidence = detect_key(audio, sr)
+    # A caller that already ran the authoritative profile-aware detector
+    # (scripts.core.key_detection.detect_key, Gap 2C) passes its result via
+    # `key` — re-detecting here with this module's quick Krumhansl-only
+    # variant would waste ~1-2 s per track AND could disagree with the
+    # profile-aware result, feeding a different key into the transition
+    # score than the one the plan was built on.
+    if key is not None:
+        vec.key_name, vec.mode, vec.camelot, vec.key_confidence = key
+    else:
+        vec.key_name, vec.mode, vec.camelot, vec.key_confidence = detect_key(audio, sr)
 
     # ── Energy curve + drop ───────────────────────────────────────────────────
     hop_s = 0.5

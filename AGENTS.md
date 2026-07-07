@@ -162,3 +162,17 @@ curl http://localhost:8000/jobs | python3 -m json.tool
 - `config.local.yaml` is gitignored. Never commit API keys to `config.yaml`.
 - The React Vite proxy rewrites `/api/*` → `http://localhost:8000/*` in dev. In production (GitHub Pages), set `VITE_API_BASE=http://localhost:8000`.
 - Job progress is 0–100 in SSE frames and in the normalized frontend `Job` type. The REST `/jobs` endpoint returns 0–1 — `normalizeJob()` in `api.ts` handles the conversion.
+
+## Agentic Integration
+Distilled operating rules from the master agent knowledge base. Prune if stale.
+
+- **Read before edit:** Always read a file's current state before overwriting. For widespread changes, one cohesive write beats 20 sequential line edits.
+- **Plan mode first:** For any multi-file feature, produce a short architecture plan (routes, schema, UI) and confirm before generating code. A minute of planning saves ten of building.
+- **Push logic to code:** Keep deterministic work (sorting, math, normalization like `normalizeJob()`) in code, not model reasoning.
+- **Verification loops:** Never mark UI work done without a visual check; never mark backend work done without running tests / the API health check. Iterate the delta.
+- **Secrets & config:** Keys live in `config.local.yaml` / `.env` (gitignored). Never commit keys to `config.yaml`. Never echo keys in chat.
+- **Dependency audit:** Verify exact npm/pip package names before install; LLMs hallucinate typosquatted packages.
+- **DB / auth security:** If any endpoint or table gains multi-user access, add auth/row-level checks before shipping. Do not ship open data paths.
+- **MCP -> Skills:** If a tool bloats context (>10%), convert the proven workflow into a lightweight local script/skill.
+- **Parallel builds:** Use git worktrees/branches for independent features so agents don't clobber shared files (mirrors the improvement-branch flow above).
+- **Self-annealing (max 3):** On failure, diagnose -> fix -> retry <=3, then escalate; log the fix in a session update.

@@ -57,6 +57,15 @@ from scripts.core.dj_analysis import (
 from scripts.core.mastering import normalize_stems_to_target, normalize_stems_to_corpus_targets, load_stem_targets
 from scripts.core.key_detection import pitch_shift_audio
 
+# Masking-aware multiband EQ (mids/highs only) — see render_stem_blend()'s use
+# of unmask_stem_pair(). Imported defensively: this is an additive feature on
+# top of the proven bass-clash fix below, so a missing/broken dependency here
+# must degrade to "skip the new EQ", never break rendering entirely.
+try:
+    from scripts.core.spectral_mixing import unmask_stem_pair
+except Exception:
+    unmask_stem_pair = None
+
 # _analyze_impl was renamed to analyze_structure during the dj_analysis module split.
 # This alias preserves backward compatibility for all existing callers.
 _analyze_impl = analyze_structure
@@ -72,10 +81,21 @@ try:
     _HP_START_HZ: float     = getattr(getattr(_cfg, "dj", None), "hp_filter_start_hz", 400.0)
     _HP_END_HZ: float       = getattr(getattr(_cfg, "dj", None), "hp_filter_end_hz", 80.0)
     _BASS_CROSSOVER: float  = getattr(getattr(_cfg, "dj", None), "bass_crossover_hz", 150.0)
+    # "Strength" (S) in Hafezi & Reiss (2015) Eq.(2): B = -2**S * M. Default 0
+    # attenuates exactly as much masking as is detected; raise to duck harder,
+    # lower (negative) to duck more gently. See scripts/core/spectral_mixing.py.
+    # masking_eq_enabled is the explicit kill switch for A/B-ing renders
+    # against the pre-masking-EQ baseline.
+    _MASKING_EQ_ENABLED: bool = bool(getattr(getattr(_cfg, "dj", None), "masking_eq_enabled", True))
+    _MASKING_EQ_STRENGTH: float = getattr(getattr(_cfg, "dj", None), "masking_eq_strength", 0.0)
+    _MASKING_EQ_MAX_ATTEN_DB: float = getattr(getattr(_cfg, "dj", None), "masking_eq_max_atten_db", 6.0)
 except Exception:
     _HP_START_HZ     = 400.0
     _HP_END_HZ       = 80.0
     _BASS_CROSSOVER  = 150.0
+    _MASKING_EQ_ENABLED = True
+    _MASKING_EQ_STRENGTH = 0.0
+    _MASKING_EQ_MAX_ATTEN_DB = 6.0
 
 
 # ---------------------------------------------------------------------------
@@ -575,7 +595,7 @@ def _stem_crossfade_curves(
 
     High similarity  (> 0.75): long blend — both stems are audible for most
                                 of the transition ("extend the loop" feel)
-    Medium (0.40-0.75):        standard cosine crossfade
+    Medium (0.40-0.75):        standard equal-power (constant-power) crossfade
     Low    (< 0.40):           quick handoff — A exits fast, B enters late
                                 to create contrast rather than mud
 
@@ -595,9 +615,16 @@ def _stem_crossfade_curves(
                      ).astype(np.float32)
 
     elif similarity >= 0.40:
-        # Standard cosine crossfade
-        fade_out_a = (0.5 * (1.0 + np.cos(np.pi * t))).astype(np.float32)
-        fade_in_b  = (0.5 * (1.0 - np.cos(np.pi * t))).astype(np.float32)
+        # Standard EQUAL-POWER crossfade: cos/sin quarter-cycle, so
+        # fade_out² + fade_in² = 1 at every sample. The previous curves
+        # (raised-cosine, summing to 1.0 in *amplitude*) are equal-gain —
+        # correct for correlated signals, but two different songs are
+        # uncorrelated, so their powers add and the mix dipped ~3 dB at the
+        # midpoint of every standard transition. Constant-power is what
+        # DJ mixers and streaming automix crossfades use for exactly this
+        # reason.
+        fade_out_a = np.cos(0.5 * np.pi * t).astype(np.float32)
+        fade_in_b  = np.sin(0.5 * np.pi * t).astype(np.float32)
 
     else:
         # Sharp handoff: A exits by 50%, B enters after 50%
@@ -1371,6 +1398,77 @@ class DJEngine:
         elif correction < -half_bar: correction += bar_samples
         entry_sample_b = max(0, entry_sample_b + correction)
 
+        # ── Masking-aware multiband EQ (Hafezi & Reiss 2015 offline variant) ─
+        #
+        # Runs BEFORE the crossfade envelope / _stem_bass_ramp() below, on the
+        # vocals/drums/other stem pairs only — never bass. protect_bands=[0]
+        # additionally guarantees this never touches the sub/bass range even
+        # within those non-bass stems (e.g. kick fundamental bleeding into the
+        # drums stem), so _stem_bass_ramp() and the existing dynamic low-shelf
+        # remain the sole authority over low end, unchanged.
+        #
+        # Reduces mid/high-band masking BIDIRECTIONALLY (each stem can duck
+        # the other where it wastes a band the other needs — see
+        # unmask_stem_pair()'s docstring for why a single fixed masker/maskee
+        # assignment doesn't fit a crossfade, where dominance flips over time).
+        #
+        # Best-effort: any failure here falls back to the unprocessed stems
+        # rather than aborting the whole render — this is an additive
+        # refinement on top of the proven bass-clash fix, not a dependency of it.
+        if unmask_stem_pair is not None and _MASKING_EQ_ENABLED:
+            _masked_stems: List[str] = []
+            for _s in ("vocals", "drums", "other"):
+                _a_full = stems_a.get(_s)
+                _b_full = stretched_b.get(_s)
+                if _a_full is None or _b_full is None:
+                    continue
+
+                _a_start, _a_end = exit_sample_a, min(exit_sample_a + trans_samples, len(_a_full))
+                _b_start, _b_end = entry_sample_b, min(entry_sample_b + trans_samples, len(_b_full))
+                if _a_end <= _a_start or _b_end <= _b_start:
+                    continue
+
+                _a_window = _pad_or_trim(_a_full[_a_start:_a_end], trans_samples)
+                _b_window = _pad_or_trim(_b_full[_b_start:_b_end], trans_samples)
+
+                try:
+                    _proc_a, _proc_b = unmask_stem_pair(
+                        _a_window, _b_window, sr,
+                        strength=_MASKING_EQ_STRENGTH,
+                        max_atten_db=_MASKING_EQ_MAX_ATTEN_DB,
+                        protect_bands=[0],
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "Masking-aware EQ failed for stem '%s' (non-critical, "
+                        "using unprocessed stem): %s", _s, exc,
+                    )
+                    continue
+
+                # Write the processed window back into a COPY of the full stem
+                # — only within the original array's bounds, so audio outside
+                # the transition window is never touched.
+                _a_write_len = _a_end - _a_start
+                if _a_write_len > 0 and _proc_a is not None:
+                    _a_full = _a_full.copy()
+                    _a_full[_a_start:_a_end] = _proc_a[:_a_write_len]
+                    stems_a[_s] = _a_full
+
+                _b_write_len = _b_end - _b_start
+                if _b_write_len > 0 and _proc_b is not None:
+                    _b_full = _b_full.copy()
+                    _b_full[_b_start:_b_end] = _proc_b[:_b_write_len]
+                    stretched_b[_s] = _b_full
+
+                _masked_stems.append(_s)
+
+            if _masked_stems:
+                log.info(
+                    "Masking-aware EQ applied (strength=%.1f, max_atten=%.1f dB): %s",
+                    _MASKING_EQ_STRENGTH, _MASKING_EQ_MAX_ATTEN_DB,
+                    ", ".join(_masked_stems),
+                )
+
         # ── Per-stem similarity + crossfade curves ─────────────────────────
         similarities: Dict[str, float] = {}
         for s in _STEM_NAMES:
@@ -1466,17 +1564,19 @@ class DJEngine:
                     b_contrib = padded * fade_in
                     transition_mix += b_contrib
 
-        # ── Normalise transition window (sum of 4 stems can clip) ─────────
-        peak = float(np.abs(transition_mix).max())
-        if peak > 1.0:
-            transition_mix /= peak
-
         # ── Bridge beat layer ─────────────────────────────────────────────
         if bridge_beat is not None and len(bridge_beat) > 0:
             reps = int(np.ceil(trans_samples / len(bridge_beat)))
             tiled_beat = np.tile(bridge_beat, reps)[:trans_samples]
             bell = np.sin(np.pi * np.linspace(0, 1, trans_samples, dtype=np.float32))
             transition_mix += tiled_beat * bell * bridge_gain
+
+        # ── Normalise transition window (stem sum + bridge beat can clip) ──
+        # Must run AFTER the bridge-beat layer: normalizing first let the
+        # bridge beat push an already-normalized window back past 1.0.
+        peak = float(np.abs(transition_mix).max())
+        if peak > 1.0:
+            transition_mix /= peak
 
         # ── Assemble full output ───────────────────────────────────────────
         if not full_output:
@@ -1489,6 +1589,26 @@ class DJEngine:
         post_b_start = entry_sample_b + trans_samples
         post_b = track_b_stretched[post_b_start:] if len(track_b_stretched) > post_b_start \
                  else np.zeros(0, dtype=np.float32)
+
+        # ── Seam smoothing ─────────────────────────────────────────────────
+        # The transition window is a Demucs stem sum, FxNorm-renormalized and
+        # possibly peak-scaled — none of which exactly equals the original
+        # full mixes it butts against (stems never sum bit-exactly to the
+        # source, and the window-local gain isn't applied to pre_a/post_b).
+        # A hard concatenate therefore steps in level/timbre at both seams.
+        # Blend each seam over ~30 ms: original A → window at entry,
+        # window → stretched B at exit.
+        seam = min(int(0.030 * sr), trans_samples // 8)
+        if seam > 1:
+            a_cont = track_a[exit_sample_a : exit_sample_a + seam]
+            if len(a_cont) == seam:
+                transition_mix[:seam] = _seam_blend(a_cont, transition_mix[:seam])
+            b_tail_start = entry_sample_b + trans_samples - seam
+            if b_tail_start >= 0 and b_tail_start + seam <= len(track_b_stretched):
+                transition_mix[-seam:] = _seam_blend(
+                    transition_mix[-seam:],
+                    track_b_stretched[b_tail_start : b_tail_start + seam],
+                )
 
         mix = np.concatenate([pre_a, transition_mix, post_b]).astype(np.float32)
 
@@ -1512,6 +1632,24 @@ class DJEngine:
 # ---------------------------------------------------------------------------
 # DSP helpers (continued)
 # ---------------------------------------------------------------------------
+
+def _seam_blend(from_sig: np.ndarray, to_sig: np.ndarray) -> np.ndarray:
+    """
+    Linear (equal-gain) crossfade from ``from_sig`` to ``to_sig`` over their
+    full (equal) length: 100% from_sig at sample 0, 100% to_sig at the last
+    sample. Used to smooth the splice seams around the stem-blended
+    transition window.
+
+    Deliberately equal-GAIN, not equal-power like _stem_crossfade_curves:
+    seam material is two renderings of the *same* moment of the same song
+    (original mix vs. Demucs stem sum), i.e. highly correlated — equal-power
+    weights would bulge up to +3 dB mid-seam on correlated signals, while
+    linear weights sum transparently.
+    """
+    n = len(from_sig)
+    t = np.linspace(0.0, 1.0, n, dtype=np.float32)
+    return (from_sig * (1.0 - t) + to_sig * t).astype(np.float32)
+
 
 def _pad_or_trim(audio: np.ndarray, target_samples: int) -> np.ndarray:
     """Pad with zeros or trim to exactly target_samples."""

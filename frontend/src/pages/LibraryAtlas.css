@@ -136,6 +136,129 @@
   cursor: default;
 }
 
+.la-filter-chip--broken {
+  border-color: var(--color-crimson-500);
+  color: var(--color-crimson-500);
+}
+
+.la-filter-chip--broken-solo {
+  margin-left: auto;
+}
+
+.la-filter-chip--broken:hover:not(:disabled) {
+  background: var(--color-crimson-glow);
+}
+
+.la-filter-chip--broken:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Broken songs results panel */
+.la-broken-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.la-broken-modal {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  width: 520px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.la-broken-modal__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.la-broken-modal__icon {
+  color: var(--color-crimson-500);
+  flex-shrink: 0;
+}
+
+.la-broken-modal__title {
+  font-size: var(--text-base);
+  margin: 0;
+  flex: 1;
+}
+
+.la-broken-modal__empty {
+  font-size: var(--text-sm);
+}
+
+.la-broken-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow-y: auto;
+  border-top: 1px solid var(--color-border-default);
+  border-bottom: 1px solid var(--color-border-default);
+  padding: var(--space-2) 0;
+}
+
+.la-broken-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.la-broken-row:hover {
+  background: var(--color-bg-surface);
+}
+
+.la-broken-row--select-all {
+  font-size: var(--text-xs);
+}
+
+.la-broken-row__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.la-broken-row__name {
+  font-size: var(--text-sm);
+  word-break: break-word;
+}
+
+.la-broken-row__reasons {
+  font-size: var(--text-xs);
+}
+
+.la-broken-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.la-bulk-btn--danger {
+  background: var(--color-crimson-500);
+  color: #fff;
+}
+
+.la-bulk-btn--danger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Refresh button */
 .la-refresh-btn {
   background: none;

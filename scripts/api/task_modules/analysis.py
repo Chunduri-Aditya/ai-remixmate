@@ -96,6 +96,58 @@ def task_analyze_missing(job_id: str, key_profile: str = "auto", force: bool = F
     return {"total": total, "done": done, "failed": failed, "success": True}
 
 
+def task_scan_broken(job_id: str) -> Dict[str, Any]:
+    """
+    Read-only health scan of every library song — flags songs with no
+    playable audio source, an audio file that fails to decode, or a
+    corrupt meta.json/analysis.json. Deletes nothing; this backs the
+    "Scan for broken songs" button on Library Atlas, whose results panel
+    lets the user pick which flagged songs to actually remove via a
+    separate POST /library/delete-batch call.
+
+    Deliberately does NOT flag songs that simply haven't been analyzed
+    yet (no meta.json/analysis.json at all) — see
+    LibraryManager.check_song_health()'s docstring for why conflating
+    "unanalyzed" with "broken" would be actively misleading here.
+    """
+    from scripts.core.library import get_library_manager
+
+    mgr = get_library_manager()
+    targets = [d.name for d in sorted(LIBRARY_DIR.iterdir()) if d.is_dir()]
+    total = len(targets)
+    broken: List[Dict[str, Any]] = []
+
+    log_audit("scan_broken_start", resource=f"{total} songs", job_id=job_id)
+    update_job(job_id, progress=0.01, message=f"Scanning {total} song(s) for damage…")
+
+    # update_job() does a synchronous SQLite write + SSE emit under a shared
+    # lock on every call. Each song here is a cheap file-existence/decode
+    # probe (milliseconds), unlike task_analyze_missing's per-song work
+    # (seconds), so calling update_job() once per song fires that write/SSE
+    # path hundreds of times in a couple of seconds — a burst that visibly
+    # locked up both the API and the browser tab during testing. Report
+    # progress in batches instead; the actual scan work below is unthrottled.
+    _PROGRESS_EVERY = max(1, total // 25)
+
+    for i, name in enumerate(targets):
+        if i % _PROGRESS_EVERY == 0 or i == total - 1:
+            update_job(job_id, progress=round(min(0.99, (i + 1) / max(total, 1)), 3),
+                       message=f"[{i + 1}/{total}] {name[:40]}")
+        try:
+            reasons = mgr.check_song_health(name)
+            if reasons:
+                broken.append({"name": name, "reasons": reasons})
+        except Exception as exc:
+            broken.append({"name": name, "reasons": [f"scan itself failed: {exc}"]})
+            _log.warning(f"scan_broken: '{name}' scan errored (flagging as broken): {exc}")
+
+    summary = f"Done — {len(broken)}/{total} broken song(s) found"
+    update_job(job_id, progress=1.0, message=summary)
+    log_audit("scan_broken_complete", resource=f"{total} songs", job_id=job_id,
+              metadata={"total": total, "broken": len(broken)})
+    return {"total": total, "broken": broken, "count": len(broken), "success": True}
+
+
 def task_rebuild_index(job_id: str) -> Dict[str, Any]:
     """
     Rebuild the RAG music index for every song in the library.

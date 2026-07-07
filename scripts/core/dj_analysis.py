@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -115,6 +115,10 @@ class SongStructure:
     energy_curve: Optional[np.ndarray] = field(
         default=None, compare=False, repr=False,
     )
+    # Full MusicVector from analyze_structure's enrichment pass, kept so
+    # downstream consumers (e.g. task_dj_remix's transition score) can reuse
+    # it instead of recomputing ~2.5 s of features per track from raw audio.
+    music_vector: Optional[Any] = field(default=None, compare=False, repr=False)
 
     # SSM-novelty phrase boundary times (seconds); populated by analyze_structure
     phrase_boundaries: list = field(default_factory=list)
@@ -357,10 +361,33 @@ def analyze_structure(
     if struct.phrase_boundaries:
         log.info("Phrase boundaries: %d detected (bar-grid snapped)", len(struct.phrase_boundaries))
 
+    # ── Key detection with requested profile (authoritative key result) ────────
+    # Runs BEFORE the music-intelligence enrichment so the detected key can be
+    # passed into compute_track_vector(), which otherwise re-detects with its
+    # own quick Krumhansl-only variant — ~1-2 s of duplicate work per track,
+    # and a potentially *different* key feeding the transition score than the
+    # one the plan uses.
+    _key_tuple: Optional[Tuple[str, str, str, float]] = None
+    try:
+        from scripts.core.key_detection import detect_key as _detect_key
+        kr = _detect_key(audio, sr, profile=key_profile)
+        _key_tuple = (kr.key_name, kr.mode, kr.camelot, float(kr.confidence))
+        struct.key_name       = kr.key_name
+        struct.mode           = kr.mode
+        struct.camelot        = kr.camelot
+        struct.key_confidence = float(kr.confidence)
+        log.info(
+            "Key (profile=%s): %s %s (%s) conf=%.2f",
+            key_profile, kr.key_name, kr.mode, kr.camelot, kr.confidence,
+        )
+    except Exception as exc:
+        log.debug("Key detection (profile=%s) failed: %s", key_profile, exc)
+
     # ── Enrich with music intelligence ──────────────────────────────
     try:
         from scripts.core.music_intelligence import compute_track_vector
-        vec = compute_track_vector(audio, sr, bpm=bpm)
+        vec = compute_track_vector(audio, sr, bpm=bpm, key=_key_tuple)
+        struct.music_vector         = vec
         struct.key_name             = vec.key_name
         struct.mode                 = vec.mode
         struct.camelot              = vec.camelot
@@ -381,21 +408,6 @@ def analyze_structure(
         )
     except Exception as exc:
         log.warning("Music intelligence enrichment failed (non-critical): %s", exc)
-
-    # ── Key detection with requested profile (authoritative key result) ────────
-    try:
-        from scripts.core.key_detection import detect_key as _detect_key
-        kr = _detect_key(audio, sr, profile=key_profile)
-        struct.key_name       = kr.key_name
-        struct.mode           = kr.mode
-        struct.camelot        = kr.camelot
-        struct.key_confidence = float(kr.confidence)
-        log.info(
-            "Key (profile=%s): %s %s (%s) conf=%.2f",
-            key_profile, kr.key_name, kr.mode, kr.camelot, kr.confidence,
-        )
-    except Exception as exc:
-        log.debug("Key detection (profile=%s) failed: %s", key_profile, exc)
 
     return struct
 

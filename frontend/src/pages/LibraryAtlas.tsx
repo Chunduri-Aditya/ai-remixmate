@@ -25,10 +25,11 @@ import {
   Layers,
   ArrowRight,
   FileDown,
+  AlertTriangle,
 } from 'lucide-react'
 import { libraryApi, analysisApi, stemsApi, favoritesApi, cratesApi, audioApi } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
-import type { SongInfo, Recommendation, SimilarTrack } from '@/types'
+import type { SongInfo, Recommendation, SimilarTrack, BrokenSong } from '@/types'
 import { StemsPlayerRow } from '@/components/StemsPlayerRow'
 import './PageBase.css'
 import './LibraryAtlas.css'
@@ -422,6 +423,97 @@ function SongDrawer({
   )
 }
 
+// ── Broken songs results panel ───────────────────────────────────────────────
+
+function BrokenSongsPanel({
+  results,
+  selected,
+  deleting,
+  onToggle,
+  onToggleAll,
+  onClose,
+  onDelete,
+}: {
+  results: BrokenSong[]
+  selected: Set<string>
+  deleting: boolean
+  onToggle: (name: string) => void
+  onToggleAll: () => void
+  onClose: () => void
+  onDelete: () => void
+}) {
+  const allSelected = results.length > 0 && results.every((r) => selected.has(r.name))
+
+  return (
+    <div className="la-broken-backdrop" onClick={onClose}>
+      <div className="la-broken-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="la-broken-modal__header">
+          <AlertTriangle size={16} className="la-broken-modal__icon" />
+          <h3 className="la-broken-modal__title font-display">
+            {results.length === 0
+              ? 'No broken songs found'
+              : `${results.length} broken song${results.length === 1 ? '' : 's'} found`}
+          </h3>
+          <button className="la-drawer__close" onClick={onClose} title="Close">
+            <X size={14} />
+          </button>
+        </div>
+
+        {results.length === 0 ? (
+          <p className="la-broken-modal__empty text-muted">
+            Every song has a playable audio source and valid metadata.
+          </p>
+        ) : (
+          <>
+            <label className="la-broken-row la-broken-row--select-all">
+              <input
+                type="checkbox"
+                className="la-checkbox"
+                checked={allSelected}
+                onChange={onToggleAll}
+              />
+              <span className="text-muted">Select all</span>
+            </label>
+
+            <div className="la-broken-list">
+              {results.map((r) => (
+                <label key={r.name} className="la-broken-row">
+                  <input
+                    type="checkbox"
+                    className="la-checkbox"
+                    checked={selected.has(r.name)}
+                    onChange={() => onToggle(r.name)}
+                  />
+                  <div className="la-broken-row__info">
+                    <span className="la-broken-row__name">{r.name}</span>
+                    <span className="la-broken-row__reasons text-muted">
+                      {r.reasons.join('; ')}
+                    </span>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className="la-broken-modal__footer">
+              <span className="text-muted font-mono" style={{ fontSize: 'var(--text-xs)' }}>
+                {selected.size} selected
+              </span>
+              <button
+                className="la-bulk-btn la-bulk-btn--danger"
+                onClick={onDelete}
+                disabled={selected.size === 0 || deleting}
+              >
+                {deleting ? <Loader2 size={12} className="la-spin" /> : <Trash2 size={12} />}
+                Delete selected ({selected.size}) — disk + library
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function LibraryAtlas() {
   const [search, setSearch]               = useState('')
   const [sortKey, setSortKey]             = useState<SortKey>('name')
@@ -438,8 +530,16 @@ export default function LibraryAtlas() {
 
   const upsertJob     = useAppStore((s) => s.upsertJob)
   const setActiveNav  = useAppStore((s) => s.setActiveNav)
+  const jobs          = useAppStore((s) => s.jobs)
   const queryClient   = useQueryClient()
   const navigate      = useNavigate()
+
+  // --- Broken-song scan + delete ---
+  const [scanningBroken, setScanningBroken] = useState(false)
+  const [brokenScanJobId, setBrokenScanJobId] = useState<string | null>(null)
+  const [brokenResults, setBrokenResults]   = useState<BrokenSong[] | null>(null)
+  const [brokenSelected, setBrokenSelected] = useState<Set<string>>(new Set())
+  const [deletingBroken, setDeletingBroken] = useState(false)
 
   const { data: songs = [], isLoading: songsLoading, refetch } = useQuery({
     queryKey: ['library-atlas'],
@@ -638,6 +738,85 @@ export default function LibraryAtlas() {
     }
   }, [upsertJob, missingCount])
 
+  const handleScanBroken = useCallback(async () => {
+    setScanningBroken(true)
+    try {
+      const res = await libraryApi.scanBroken()
+      setBrokenScanJobId(res.job_id)
+      upsertJob({
+        job_id: res.job_id, status: 'PENDING', type: 'scan_broken',
+        progress: 0, message: 'Scanning library for broken songs…',
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      })
+    } catch {
+      setScanningBroken(false)
+    }
+  }, [upsertJob])
+
+  // Watch the scan job via the shared SSE-fed job store (same mechanism the
+  // Inspector's Jobs tab uses) rather than polling — job.result.broken is
+  // only populated once status flips to COMPLETED.
+  useEffect(() => {
+    if (!brokenScanJobId) return
+    const job = jobs[brokenScanJobId]
+    if (!job) return
+    if (job.status === 'COMPLETED') {
+      const list = ((job.result as { broken?: BrokenSong[] } | undefined)?.broken) ?? []
+      setBrokenResults(list)
+      setBrokenSelected(new Set(list.map((r) => r.name)))
+      setScanningBroken(false)
+      setBrokenScanJobId(null)
+    } else if (job.status === 'FAILED' || job.status === 'CANCELLED') {
+      setScanningBroken(false)
+      setBrokenScanJobId(null)
+    }
+  }, [jobs, brokenScanJobId])
+
+  const handleToggleBrokenSelect = useCallback((name: string) => {
+    setBrokenSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }, [])
+
+  const handleToggleBrokenSelectAll = useCallback(() => {
+    setBrokenSelected((prev) => {
+      if (!brokenResults) return prev
+      const allSelected = brokenResults.length > 0 && brokenResults.every((r) => prev.has(r.name))
+      return allSelected ? new Set() : new Set(brokenResults.map((r) => r.name))
+    })
+  }, [brokenResults])
+
+  const handleDeleteBrokenSelected = useCallback(async () => {
+    const names = Array.from(brokenSelected)
+    if (names.length === 0) return
+    if (!confirm(
+      `Permanently delete ${names.length} song(s) from the library and disk? This cannot be undone.`,
+    )) return
+
+    setDeletingBroken(true)
+    try {
+      const res = await libraryApi.deleteBatch(names)
+      const remaining = (brokenResults ?? []).filter((r) => !res.deleted.includes(r.name))
+      setBrokenResults(remaining)
+      setBrokenSelected(new Set())
+      queryClient.invalidateQueries({ queryKey: ['library-atlas'] })
+      queryClient.invalidateQueries({ queryKey: ['library-stats'] })
+      if (res.failed.length > 0) {
+        alert(
+          `${res.deleted.length} deleted. ${res.failed.length} failed:\n` +
+          res.failed.map((f) => `${f.name}: ${f.error}`).join('\n'),
+        )
+      }
+    } catch {
+      alert('Bulk delete failed — check the Inspector activity log for details.')
+    } finally {
+      setDeletingBroken(false)
+    }
+  }, [brokenSelected, brokenResults, queryClient])
+
   // Sync header checkbox indeterminate state
   useEffect(() => {
     if (!headerCheckboxRef.current) return
@@ -756,6 +935,18 @@ export default function LibraryAtlas() {
             Analyze missing ({missingCount})
           </button>
         )}
+
+        <button
+          className={`la-filter-chip la-filter-chip--broken ${missingCount === 0 ? 'la-filter-chip--broken-solo' : ''}`}
+          onClick={handleScanBroken}
+          disabled={scanningBroken}
+          title="Scan the library for songs with missing/corrupt audio or corrupt metadata"
+        >
+          {scanningBroken
+            ? <Loader2 size={10} className="la-spin" />
+            : <AlertTriangle size={10} />}
+          Scan for broken songs
+        </button>
       </div>
 
       {/* Table + drawer */}
@@ -922,6 +1113,20 @@ export default function LibraryAtlas() {
             Clear
           </button>
         </div>
+      )}
+
+      {brokenResults !== null && (
+        <BrokenSongsPanel
+          results={brokenResults}
+          selected={brokenSelected}
+          deleting={deletingBroken}
+          onToggle={handleToggleBrokenSelect}
+          onToggleAll={handleToggleBrokenSelectAll}
+          // Closing mid-delete would let the resolve handler pop the panel
+          // back open via setBrokenResults(remaining).
+          onClose={() => { if (!deletingBroken) setBrokenResults(null) }}
+          onDelete={handleDeleteBrokenSelected}
+        />
       )}
     </div>
   )

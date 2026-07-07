@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, Response
 from scripts.api import jobs as job_store
 from scripts.api.routers._helpers import _require_song, _song_info, _stem_file, _check_job_cap
 from scripts.api.schemas import (
+    DeleteBatchRequest,
     InitializeLibraryRequest,
     JobResponse,
     JobType,
@@ -33,7 +34,7 @@ from scripts.api.schemas import (
     StoragePruneResponse,
     StorageStatusResponse,
 )
-from scripts.api.tasks import task_analyze_missing, task_initialize_library
+from scripts.api.tasks import task_analyze_missing, task_initialize_library, task_scan_broken
 from scripts.core.paths import LIBRARY_DIR, OUTPUTS_DIR
 
 router = APIRouter()
@@ -274,6 +275,56 @@ def delete_song(name: str):
     # both read from this same index rather than scanning LIBRARY_DIR live.
     get_library_manager().unregister(name)
     return {"deleted": name}
+
+
+@router.post("/library/delete-batch", tags=["library"])
+def delete_songs_batch(req: DeleteBatchRequest):
+    """
+    Delete multiple songs in one call — the bulk-delete counterpart to
+    DELETE /library/{name}. Backs the "Scan for broken songs" results panel
+    so confirming N deletions doesn't mean N sequential requests from the
+    frontend. Best-effort: one song failing to delete doesn't abort the rest.
+    """
+    import shutil
+    from scripts.core.library import get_library_manager
+
+    mgr = get_library_manager()
+    deleted: List[str] = []
+    failed: List[dict] = []
+    for name in req.names:
+        try:
+            d = _require_song(name)
+            shutil.rmtree(d)
+            # Same phantom-index-entry fix as DELETE /library/{name} — see its comment.
+            mgr.unregister(name)
+            deleted.append(name)
+        except HTTPException as e:
+            failed.append({"name": name, "error": str(e.detail)})
+        except Exception as e:
+            failed.append({"name": name, "error": str(e)})
+    return {"deleted": deleted, "failed": failed}
+
+
+@router.post("/library/scan-broken", response_model=JobResponse, status_code=202, tags=["library"])
+def scan_broken():
+    """
+    Health-scan every song in the library for structural damage — no
+    playable audio source, an audio file that fails to decode, or a corrupt
+    meta.json/analysis.json — without deleting anything.
+
+    Returns a job_id; poll it (or subscribe via SSE) and read
+    `result.broken` (a list of `{name, reasons}`) once status is COMPLETED.
+    Pair with POST /library/delete-batch to remove confirmed-broken songs
+    once the user has reviewed the results — this endpoint never deletes.
+
+    Deliberately does NOT flag songs that simply haven't been analyzed yet
+    (no meta.json/analysis.json at all) — that's the normal pending state
+    already covered by "Analyze missing", not damage.
+    """
+    _check_job_cap()
+    job_id = job_store.create_job(JobType.ANALYZE, {"type": "scan_broken"})
+    job_store.submit_job(job_id, task_scan_broken)
+    return job_store.job_to_response(job_store.get_job(job_id))
 
 
 @router.get("/library/{name}/audio", tags=["library"])

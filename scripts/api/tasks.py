@@ -34,6 +34,7 @@ from scripts.api.task_modules.analysis import (
     task_analyze_missing,
     task_initialize_library,
     task_rebuild_index,
+    task_scan_broken,
 )
 
 # Generative tasks
@@ -66,6 +67,7 @@ __all__ = [
     "task_analyze_missing",
     "task_rebuild_index",
     "task_initialize_library",
+    "task_scan_broken",
     # Generative
     "task_style_transfer",
     "task_inpaint_transition",

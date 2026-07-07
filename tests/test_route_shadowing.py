@@ -52,17 +52,26 @@ class TestStaticRoutesWinOverDynamic:
         route = _first_matching_route("/library/Some%20Song", "GET")
         assert route.path == "/library/{name}"
 
-    def test_every_static_get_route_wins_over_dynamic_siblings(self):
-        """Generic guard: for every static (no-param) GET path in the app,
-        the route FastAPI dispatches to must be that same static route."""
-        static_paths = [
-            r.path
+    def test_scan_broken_not_shadowed(self):
+        route = _first_matching_route("/library/scan-broken", "POST")
+        assert route.path == "/library/scan-broken"
+
+    def test_delete_batch_not_shadowed(self):
+        route = _first_matching_route("/library/delete-batch", "POST")
+        assert route.path == "/library/delete-batch"
+
+    def test_every_static_route_wins_over_dynamic_siblings(self):
+        """Generic guard: for every static (no-param) path and method in the
+        app, the route FastAPI dispatches to must be that same static route."""
+        static_routes = [
+            (r.path, method)
             for r in router.routes
-            if isinstance(r, APIRoute) and "GET" in r.methods and "{" not in r.path
+            if isinstance(r, APIRoute) and "{" not in r.path
+            for method in r.methods
         ]
         misrouted = []
-        for path in static_paths:
-            winner = _first_matching_route(path, "GET")
+        for path, method in static_routes:
+            winner = _first_matching_route(path, method)
             if winner.path != path:
-                misrouted.append((path, winner.path))
+                misrouted.append((method, path, winner.path))
         assert not misrouted, f"static routes shadowed by earlier dynamic routes: {misrouted}"

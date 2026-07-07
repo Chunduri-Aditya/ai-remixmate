@@ -37,6 +37,11 @@ export interface SongInfo {
   stems?: string[]          // e.g. ['vocals', 'drums', 'bass', 'other']
 }
 
+export interface BrokenSong {
+  name: string
+  reasons: string[]
+}
+
 export interface LibraryStats {
   total_songs: number
   indexed_songs: number
