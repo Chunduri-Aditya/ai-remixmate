@@ -1,0 +1,27 @@
+AI RemixMate - Quick Start Guide
+================================
+
+Prerequisite:
+  Python >=3.10,<3.13
+
+Start the web application:
+
+  cd /Users/chunduri/Downloads/ai-remixmate
+  python3 -m venv .venv
+  source .venv/bin/activate
+  python -m pip install --upgrade pip
+  python -m pip install -e ".[web,separation,lyrics,ingestion,data]"
+  python app.py
+
+Then open:
+  http://127.0.0.1:7860
+
+Notes:
+  - app.py checks dependencies but does not install packages automatically.
+  - For a smaller install without Demucs, lyrics, or ingestion tools, run:
+    python -m pip install -e ".[web]"
+  - Optional utility scripts live under scripts/* subfolders. Similarity/remix
+    matching scripts need:
+    python -m pip install -e ".[analysis]"
+  - Run smoke tests with:
+    python -m unittest discover -s tests

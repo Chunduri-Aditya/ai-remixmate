@@ -1,0 +1,3 @@
+# Compatibility shim. Dependency declarations live in pyproject.toml.
+# Prefer: python -m pip install -e ".[web,separation,lyrics,ingestion,data]"
+-e .[web,separation,lyrics,ingestion,data]
