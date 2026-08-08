@@ -60,6 +60,15 @@ class TestStaticRoutesWinOverDynamic:
         route = _first_matching_route("/library/delete-batch", "POST")
         assert route.path == "/library/delete-batch"
 
+    def test_structure_v1_endpoint_reachable(self):
+        """DJ_ENGINE_IMPROVEMENT_PLAN.md §3.1 — GET /analysis/v1/{name}/structure
+        lives entirely under a prefix ('/analysis/v1/...') no other router
+        uses, so nothing before it in routes.py can shadow it — but pin that
+        down explicitly rather than relying on the generic static-route guard
+        below, which only checks parameter-free paths."""
+        route = _first_matching_route("/analysis/v1/Some%20Song/structure", "GET")
+        assert route.path == "/analysis/v1/{name}/structure"
+
     def test_every_static_route_wins_over_dynamic_siblings(self):
         """Generic guard: for every static (no-param) path and method in the
         app, the route FastAPI dispatches to must be that same static route."""

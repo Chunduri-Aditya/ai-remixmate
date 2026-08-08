@@ -3,6 +3,28 @@
    Mirror of FastAPI schemas; kept in sync manually.
    ============================================================ */
 
+// --- Feedback telemetry (SELF_IMPROVING_DJ_RESEARCH.md §3, Stage A) ---
+// Mirrors scripts/api/schemas.py's FeedbackEventType / FeedbackSummaryResponse.
+
+export type FeedbackEventType =
+  | 'play_start'
+  | 'skip'
+  | 'complete'
+  | 'replay'
+  | 'reorder'
+  | 'rerender'
+  | 'thumbs_up'
+  | 'thumbs_down'
+
+export interface FeedbackSummaryResponse {
+  total_events: number
+  by_event_type: Record<string, number>
+  by_song: Record<string, Record<string, number>>
+  by_song_pair: Record<string, Record<string, number>>
+  oldest_event_at: number | null
+  newest_event_at: number | null
+}
+
 // --- Job types ---
 
 export type JobStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
@@ -96,6 +118,74 @@ export interface TransitionPlan {
   exit_time_a?: number      // seconds in Song A's timeline
   entry_time_b?: number     // seconds in Song B's timeline
   key_compatible?: boolean
+}
+
+export interface CompatMatch {
+  name: string
+  score: number          // 0–100, already filtered to min_score by the API
+  key_score: number
+  bpm_score: number
+  energy_score: number
+  bpm: number
+  camelot?: string
+  key_info?: string
+}
+
+export interface CompatMatchesResponse {
+  song: string
+  min_score: number
+  matches: CompatMatch[]
+  scored: number
+  skipped_unanalyzed: number
+}
+
+// GET /analysis/v1/{name}/structure — DJ_ENGINE_IMPROVEMENT_PLAN.md §3.1.
+// Mirrors scripts/api/schemas.py's StructureV1Response; bump the endpoint
+// path (v2) rather than changing this shape in place if it ever diverges.
+export interface BeatInfo {
+  index: number
+  time: number         // seconds
+  bar: number           // 0-based
+  beat_in_bar: number   // 1–4
+}
+
+export interface SectionInfo {
+  type: string          // "intro" | "verse" | "chorus" | "drop" | "break" | "outro" | "build"
+  start_bar: number
+  end_bar: number       // exclusive
+  start_time: number
+  end_time: number
+  avg_energy: number    // 0–1
+  avg_spectral: number  // 0–1
+  key_name: string      // "" = not confidently detected for this phrase
+  mode: string
+  camelot: string
+  key_confidence: number
+}
+
+export interface KeySegmentInfo {
+  start_time: number
+  key_name: string
+  mode: string
+  camelot: string
+  confidence: number
+}
+
+export interface StructureV1Response {
+  version: string
+  song: string
+  bpm: number
+  duration: number
+  total_bars: number
+  key_name: string
+  mode: string
+  camelot: string
+  key_confidence: number
+  bars: [number, number][]   // (start_s, end_s) per bar
+  beats: BeatInfo[]
+  sections: SectionInfo[]
+  key_segments: KeySegmentInfo[]
+  downbeat_times: number[]
 }
 
 export interface CompatibilityResult {

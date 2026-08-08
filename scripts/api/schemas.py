@@ -8,9 +8,9 @@ from the route logic makes it easy to generate OpenAPI docs and write tests.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional, Tuple
 
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -29,6 +29,19 @@ class JobType(str, Enum):
     DJ_REMIX   = "dj_remix"
     SEPARATE   = "separate"
     ANALYZE    = "analyze"
+
+
+class FeedbackEventType(str, Enum):
+    """SELF_IMPROVING_DJ_RESEARCH.md §3's feedback_events.event_type values —
+    kept in sync with scripts/core/feedback_store.py's VALID_EVENT_TYPES."""
+    PLAY_START   = "play_start"
+    SKIP         = "skip"
+    COMPLETE     = "complete"
+    REPLAY       = "replay"
+    REORDER      = "reorder"
+    RERENDER     = "rerender"
+    THUMBS_UP    = "thumbs_up"
+    THUMBS_DOWN  = "thumbs_down"
 
 
 # ---------------------------------------------------------------------------
@@ -309,9 +322,108 @@ class MusicVectorResponse(BaseModel):
     key_confidence:    Optional[float]      = None   # 0–1
     danceability:      Optional[float]      = None   # 0–1
     vocal_density:     Optional[float]      = None   # 0–1
+    vocal_mean_pitch_hz:   Optional[float]  = None   # Hz, from vocal_analyzer.py
+    vocal_voiced_fraction: Optional[float]  = None   # 0–1, from vocal_analyzer.py
     spectral_centroid_hz: Optional[float]   = None
     chord_sequence:    List[str]            = []
     drop_position_sec: Optional[float]      = None
+
+
+class BeatInfo(BaseModel):
+    """One beat from dj_analysis.Beat."""
+    index:       int
+    time:        float    # seconds
+    bar:         int      # 0-based bar this beat falls in
+    beat_in_bar: int       # 1–4
+
+
+class SectionInfo(BaseModel):
+    """One labelled section from dj_analysis.Section, including its
+    per-phrase key (DJ_ENGINE_IMPROVEMENT_PLAN.md §1.3) — "" / 0.0 means
+    the local key wasn't confidently detected for this phrase."""
+    type:           str    # "intro" | "verse" | "chorus" | "drop" | "break" | "outro" | "build"
+    start_bar:      int
+    end_bar:        int    # exclusive
+    start_time:     float
+    end_time:       float
+    avg_energy:     float  # 0–1
+    avg_spectral:   float  # 0–1
+    key_name:       str    = ""
+    mode:           str    = ""
+    camelot:        str    = ""
+    key_confidence: float  = 0.0
+
+
+class KeySegmentInfo(BaseModel):
+    """One entry from key_detection.detect_key_segments() — finer-grained
+    than SectionInfo's per-section key: fixed 30 s windows at 50% overlap
+    across the whole track, independent of section boundaries."""
+    start_time: float
+    key_name:   str
+    mode:       str
+    camelot:    str
+    confidence: float
+
+
+class StructureV1Response(BaseModel):
+    """
+    GET /analysis/v1/{name}/structure — DJ_ENGINE_IMPROVEMENT_PLAN.md §3.1.
+
+    Versioned so later changes to dj_analysis.py's SongStructure data model
+    (a "current"-engine-only construct — see CLAUDE.md's "Two mixing
+    engines") don't silently change this response shape out from under
+    external consumers; a breaking change should ship as /analysis/v2/...
+    instead of mutating this one.
+    """
+    version:        str = "v1"
+    song:           str
+    bpm:            float
+    duration:       float   # seconds
+    total_bars:     int
+    key_name:       str     = ""
+    mode:           str     = ""
+    camelot:        str     = ""
+    key_confidence: float   = 0.0
+    bars:           List[Tuple[float, float]] = []   # (start_s, end_s) per bar
+    beats:          List[BeatInfo]            = []
+    sections:       List[SectionInfo]         = []
+    key_segments:   List[KeySegmentInfo]      = []
+    downbeat_times: List[float]               = []
+
+
+class FeedbackEventRequest(BaseModel):
+    """POST /feedback/event body — SELF_IMPROVING_DJ_RESEARCH.md §3, Stage A.
+
+    Fire-and-forget from the frontend's perspective: the audio player and DJ
+    Widget log these on play/skip/complete/replay without blocking playback.
+    `context` is optional — when omitted and `job_id` is given, the route
+    backfills it from that job's stored meta/result (transition_bars, preset,
+    effect, harmonic_score, transition_confidence) so callers that only have
+    a job_id handy don't need to re-assemble those fields themselves.
+    """
+    event_type:   FeedbackEventType
+    song_a:       str
+    song_b:       Optional[str]           = None
+    job_id:       Optional[str]           = None
+    position_sec: Optional[float]         = Field(None, ge=0.0)
+    context:      Optional[Dict[str, Any]] = None
+
+
+class FeedbackEventResponse(BaseModel):
+    event_id: str
+    logged:   bool = True
+
+
+class FeedbackSummaryResponse(BaseModel):
+    """GET /feedback/summary — raw aggregates only, no scoring. Stage B's
+    skip-rate-vs-compatibility-score correlation analysis runs offline
+    against the underlying event log, not against this endpoint."""
+    total_events:    int
+    by_event_type:   Dict[str, int]
+    by_song:         Dict[str, Dict[str, int]]
+    by_song_pair:    Dict[str, Dict[str, int]]
+    oldest_event_at: Optional[float] = None
+    newest_event_at: Optional[float] = None
 
 
 class QualityReportResponse(BaseModel):

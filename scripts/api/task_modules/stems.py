@@ -15,6 +15,41 @@ from scripts.core.paths import LIBRARY_DIR, song_dir
 _STEMS = ("vocals", "drums", "bass", "other")
 
 
+def _prune_after_split(song_name: str) -> None:
+    """
+    Reclaim full.wav / full_enhanced.wav once a song has all 4 real stems.
+
+    Nothing previously called prune_raw()/prune_enhanced() from this task
+    layer — only the legacy scripts/download.py CLI path did. That left
+    every song split through the API (single or batch) carrying a
+    permanently redundant full-length audio file alongside its stems. Reuses
+    library.prune_on_download as the gate, matching its documented meaning
+    ("auto-prune after each successful separation") rather than introducing
+    a second config flag for the same policy.
+    """
+    try:
+        from scripts.core.config import cfg
+        prune_enabled = getattr(getattr(cfg, "library", None), "prune_on_download", True)
+    except Exception:
+        # Fail CLOSED, not open: if we can't confirm the config actually
+        # says "prune", don't delete anything. A prior version swallowed
+        # this exception and fell through to delete anyway, which would
+        # silently ignore a user's explicit prune_on_download=false opt-out
+        # the one time reading their own config happened to fail.
+        return
+
+    if not prune_enabled:
+        return
+
+    try:
+        from scripts.core.library import get_library_manager
+        mgr = get_library_manager()
+        mgr.prune_raw(song_name)
+        mgr.prune_enhanced(song_name)
+    except Exception:
+        pass  # storage cleanup itself is best-effort — never fail the split over it
+
+
 def task_stem_split(
     job_id: str,
     song: str,
@@ -40,6 +75,8 @@ def task_stem_split(
 
     if not result.success:
         raise RuntimeError(result.error or "Stem separation failed")
+
+    _prune_after_split(song)
 
     return {
         "song":         result.song,
@@ -75,10 +112,17 @@ def task_batch_stem_split(
         next_prog = (i + 1) / total
 
         # ── Skip songs that already have all 4 stems (WAV or FLAC) ──────
+        # Previously checked vocals only, so a song with 1-3 stems (e.g. a
+        # prior Demucs run that partially failed, or a full_enhanced.wav
+        # backlog song with a stray vocals.wav) was reported "skipped:
+        # stems exist" with a fabricated stems: [vocals, drums, bass, other]
+        # list — silently leaving it permanently half-split. Reusing the
+        # discovery predicate's semantics: only skip when ALL four exist.
         _sd = song_dir(song)
-        if skip_existing and (
-            (_sd / "vocals.flac").exists() or (_sd / "vocals.wav").exists()
-        ):
+        _stems_present = [
+            s for s in _STEMS if (_sd / f"{s}.flac").exists() or (_sd / f"{s}.wav").exists()
+        ]
+        if skip_existing and len(_stems_present) == len(_STEMS):
             update_job(job_id,
                        progress=round(next_prog, 3),
                        message=f"[{i+1}/{total}] Skipped (stems exist): {song[:40]}")
@@ -106,6 +150,7 @@ def task_batch_stem_split(
         )
 
         if result.success:
+            _prune_after_split(song)
             results.append({
                 "song":    song,
                 "stems":   list(result.stems.keys()),

@@ -997,6 +997,107 @@ interface SimilarSongResult {
 
 ---
 
+### Feature: Inspect Song Structure (bars/beats/segments)
+
+DJ_ENGINE_IMPROVEMENT_PLAN.md §3.1. Exposes the same `SongStructure` data
+`dj_analysis.analyze_structure()` computes internally for the render/planner
+path, as a standalone read — for building an external DJ-cue editor, a
+waveform-with-sections view, or any tool that needs the beat grid and
+per-phrase key without going through `POST /dj-remix`.
+
+**Backend Route**:
+- Router: `scripts/api/routers/analysis.py`
+- Endpoint: `GET /analysis/v1/{name}/structure`
+- Query params: `key_profile` ('auto' | 'ks' | 'edma' | 'edmm'), `include_beats` (bool, default true)
+- Response: `StructureV1Response` (`scripts/api/schemas.py`)
+
+Versioned (`/v1`) deliberately: `SongStructure`'s fields evolve as the
+"current" engine gains features (per-phrase key landed in §1.3) — a
+breaking response-shape change should ship as `/analysis/v2/...` rather than
+mutate this one under existing consumers. Recomputes from the **full**
+track on every call (not cached — `meta.json`/`analysis.json` only carry the
+flat whole-track summary `POST /analyze` writes), unlike `POST /analyze`'s
+internal 120 s analysis window; typically 2–5 s for a 5-minute track.
+
+**Data Structure**:
+```typescript
+interface StructureV1Response {
+  version: string; song: string
+  bpm: number; duration: number; total_bars: number
+  key_name: string; mode: string; camelot: string; key_confidence: number
+  bars: [number, number][]           // (start_s, end_s) per bar
+  beats: BeatInfo[]                  // index, time, bar, beat_in_bar
+  sections: SectionInfo[]            // type, start/end bar+time, avg_energy/spectral,
+                                      //   plus per-phrase key_name/mode/camelot/key_confidence
+  key_segments: KeySegmentInfo[]     // 30s-window key detections (key_detection.detect_key_segments)
+  downbeat_times: number[]
+}
+```
+
+**Frontend client**: `analysisApi.structure(name, { keyProfile?, includeBeats? })` in `frontend/src/lib/api.ts` — not yet wired into a page.
+
+**Tests**: `tests/test_structure_endpoint.py` (end-to-end via TestClient on a
+synthetic click track), `tests/test_route_shadowing.py::test_structure_v1_endpoint_reachable`.
+
+---
+
+### Feature: Behavioral Feedback Telemetry (Stage A)
+
+`SELF_IMPROVING_DJ_RESEARCH.md` §3. Instrumentation only — collects the
+event stream a later offline analysis (Stage B) needs to decide whether a
+learned preference correction (Stage C) is worth building at all. Nothing
+here scores, ranks, or adjusts `compatibility_score()` / `setlist_planner.py`.
+
+**Core module**: `scripts/core/feedback_store.py` — write-through SQLite
+(`data/feedback.db`) + in-memory cache, structurally mirroring
+`scripts/api/jobs.py` but append-only (events are never mutated after being
+logged, so there's no `update_job()` equivalent, no executor, no SSE hook).
+
+**Backend Route**:
+- Router: `scripts/api/routers/feedback.py`
+- `POST /feedback/event` — `{ event_type, song_a, song_b?, job_id?, position_sec?, context? }`.
+  When `context` is omitted and `job_id` is given, backfilled from that
+  job's stored `meta`/`result` (transition_bars, preset, effect,
+  harmonic_score, transition_confidence) via `_context_from_job()`.
+- `GET /feedback/summary` — raw aggregate counts by event type / song /
+  song-pair (order-independent pair key). No scoring — Stage B's
+  skip-rate-vs-compatibility-score correlation runs offline against the
+  raw event log, not against this endpoint.
+- Response models: `FeedbackEventResponse`, `FeedbackSummaryResponse` (`scripts/api/schemas.py`).
+
+**Frontend wiring** (`feedbackApi.logEvent()` in `frontend/src/lib/api.ts`,
+always fire-and-forget with `.catch(() => {})` so a telemetry hiccup can
+never affect playback):
+- `stores/playerStore.ts` — the single global player (feeds `PlayerBar` and
+  every page that calls `playQueue`/`playTrack`/`playUrl`) logs `play_start`
+  on every track start, `complete` on natural end, `replay` on repeat-loop,
+  and `skip` on manual `next()`/`prev()` (restart-in-place via `prev()` is
+  deliberately NOT logged as a skip — ambiguous signal, see the inline
+  comment). `PlayerTrack` gained optional `songA`/`songB`/`jobId` so these
+  events can attribute to a rendered transition, not just a bare song name.
+- `pages/MixVault.tsx` — populates `songA`/`songB`/`jobId` from `job.meta`/
+  `job.job_id` at both playback entry points: the "play in global player"
+  button and the inline per-card `WaveformPlayer` (which logs its own
+  `play_start`/`complete` independently, since it doesn't go through
+  `playerStore`).
+- `pages/Widget.tsx` — `queueTrack()` logs a `reorder` event when the
+  user queues anything other than the top-ranked recommendation (an
+  implicit "disagree with the auto-suggestion" signal).
+- `shell/RightInspector.tsx` — thumbs up/down buttons on a completed
+  `dj_remix`/`dj_chain` job card (one verdict per render, same convention
+  as the existing spectral-matching feedback buttons in MixDeck — a
+  **different**, pre-existing system that trains `spectral_match_model.json`
+  cue-point weights; this is a separate telemetry event, not a replacement).
+
+**Tests**: `tests/test_feedback_store.py` (store logic, isolated tmp_path
+SQLite), `tests/test_feedback_router.py` (TestClient, job-context backfill).
+
+**Not yet built** (later stages, gated on ≥2-3 weeks of this data collecting):
+Stage B offline analysis notebook, Stage C `preference_model.py` correction
+term. See `SELF_IMPROVING_DJ_RESEARCH.md` §6 for the staged roadmap.
+
+---
+
 ### Feature: Build a DJ Set
 
 **Frontend Initiation**:
@@ -1302,11 +1403,20 @@ Library Change:   event: library_changed
 
 **Solution**:
 - If Demucs stems exist, fade each stem independently:
-  - Drums/bass from Song B enter early (establish groove)
-  - Vocals from Song B enter late (avoid overlap clash)
+  - `bass` gets a dedicated cosine-taper swap ramp (verified: true stem-level mute/enter at the
+    swap point, no IIR bleed)
+  - Every other stem (drums/vocals/other) fades via `_stem_crossfade_curves(trans_samples,
+    similarity)` — driven by that stem pair's similarity score, **not** by stem identity. There is
+    currently no logic that specifically delays vocals relative to drums; under equal similarity
+    they enter at the same time. (Corrected 2026-07 after an adversarial behavioral audit measured
+    this directly with per-stem test tones — the original "drums/bass early, vocals late" framing
+    below described intended, not actual, behavior. Real stem-type-aware offset logic would need to
+    be added to make that claim true.)
   - Low-shelf EQ pulls Song A's bass as Song B's rises
-  
-**Benefit**: Intentional, pro-sounding transitions; feels less "automated."
+
+**Benefit**: Intentional, pro-sounding transitions; feels less "automated" — for the bass swap and
+the EQ ducking, which are real. The non-bass stems currently get a similarity-shaped crossfade
+rather than a stem-identity-shaped one.
 
 ---
 

@@ -6,9 +6,10 @@ task_dj_chain          — render an N-song continuous DJ mix
 task_remix_preview     — render only the transition window for fast audition
 """
 
+import logging
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, NamedTuple, Optional
+from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple
 
 import librosa
 import numpy as np
@@ -18,6 +19,8 @@ from scripts.api.jobs import update_job
 from scripts.core.audio_source import load_source_audio
 from scripts.core.audit import log_audit
 from scripts.core.paths import OUTPUTS_DIR, song_dir
+
+log = logging.getLogger(__name__)
 
 
 class MixEngine(NamedTuple):
@@ -106,6 +109,46 @@ def _transition_timeline(plan, struct_b) -> Dict[str, Any]:
     }
 
 
+def _should_use_stem_blend(
+    has_stems_a: bool,
+    has_stems_b: bool,
+    harmonic_score: float,
+    spectral_score: Optional[float],
+    threshold: float,
+) -> Tuple[bool, Optional[float]]:
+    """Decide the render path: full stem-aware blend, or the plain crossfade.
+
+    DJ_ENGINE_IMPROVEMENT_PLAN.md §2.1 — before this, the only gate on
+    render_stem_blend() vs. render() was whether stem files exist on disk;
+    two tracks that don't actually suit a stem blend (harmonic clash, no
+    usable spectral cue match) still got the full pipeline forced onto them.
+    This adds compatibility as a second, independent condition, using signals
+    plan_transition()/apply_spectral_matching() already computed — it never
+    invents a third render path, "low confidence" just means the existing
+    has_stems_a-and-has_stems_b path stays False, exactly as if stems were
+    simply missing.
+
+    Returns (use_stem_blend, transition_confidence). transition_confidence is
+    None when the gate didn't evaluate (stems missing, so it's moot; or
+    harmonic_score is the -1.0 "not computed" sentinel, e.g. some classic-
+    engine paths) — missing data is never treated as evidence of a bad
+    pairing, the same "0.0/unknown == don't penalize" convention used
+    throughout this codebase (compatibility_score(), etc.).
+    """
+    if not (has_stems_a and has_stems_b):
+        return False, None
+
+    if harmonic_score is None or harmonic_score < 0.0:
+        return True, None
+
+    if spectral_score is not None:
+        confidence = 0.5 * harmonic_score + 0.5 * spectral_score
+    else:
+        confidence = harmonic_score
+
+    return confidence >= threshold, confidence
+
+
 def task_dj_remix(
     job_id: str,
     song_a: str,
@@ -191,7 +234,22 @@ def task_dj_remix(
         (stems_dir_b / f"{s}.wav").exists() or (stems_dir_b / f"{s}.flac").exists()
         for s in ("vocals", "drums", "bass", "other")
     )
-    use_stem_blend = has_stems_a and has_stems_b
+    from scripts.core.config import cfg as _cfg
+    _confidence_threshold = float(
+        getattr(getattr(_cfg, "dj", None), "transition_confidence_threshold", 0.30)
+    )
+    use_stem_blend, transition_confidence = _should_use_stem_blend(
+        has_stems_a, has_stems_b,
+        plan.harmonic_score,
+        spectral_info.get("score") if spectral_info else None,
+        _confidence_threshold,
+    )
+    if has_stems_a and has_stems_b and not use_stem_blend:
+        log.info(
+            "Transition confidence %.3f < %.2f threshold (%s → %s) — "
+            "falling back to plain crossfade instead of stem blend",
+            transition_confidence, _confidence_threshold, song_a, song_b,
+        )
 
     if use_stem_blend:
         update_job(job_id, progress=0.55,
@@ -289,6 +347,13 @@ def task_dj_remix(
         "transition_sec":    round(plan.transition_seconds, 1),
         "tempo_ratio":       round(plan.tempo_shift_ratio, 4),
         "harmonic_score":    round(plan.harmonic_score, 3) if plan.harmonic_score >= 0 else None,
+        # Confidence-gate outcome (DJ_ENGINE_IMPROVEMENT_PLAN.md §2.1) — None
+        # when the gate didn't evaluate (stems missing, or harmonic_score
+        # unavailable); stem_blend below already reflects the actual path
+        # taken post-gate.
+        "transition_confidence": (
+            round(transition_confidence, 3) if transition_confidence is not None else None
+        ),
         "key_a":             struct_a.key_name + " " + struct_a.mode if struct_a.key_name else None,
         "key_b":             struct_b.key_name + " " + struct_b.mode if struct_b.key_name else None,
         "camelot_a":         struct_a.camelot or None,

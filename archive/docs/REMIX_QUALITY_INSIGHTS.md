@@ -1,3 +1,10 @@
+> **STATUS (2026-07-08, per `DJ_ENGINE_IMPROVEMENT_PLAN.md` §0):** All four open findings below
+> (#1 compatibility formula, #2 BPM octave errors, #3 stretch-ratio clamp silently absorbing
+> octave errors, #4 limiter attack/release sharing one time constant) are **fixed** — verified
+> directly against current code (`track_metadata.py:790-939`, `beat_tracker.py:115-215`,
+> `dj_engine.py:289-305`, `mastering.py:184-238`). Do not re-litigate them; see
+> `DJ_ENGINE_IMPROVEMENT_PLAN.md` for the current backlog.
+
 # Why the remixing is bad — synthesized findings
 
 Compiled from `docs/DJ_THEORY.md` (the project's own ground-truth reference for correct DJ

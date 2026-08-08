@@ -18,8 +18,9 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import WaveSurfer from 'wavesurfer.js'
-import { jobsApi } from '@/lib/api'
+import { jobsApi, feedbackApi } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
+import { usePlayerStore } from '@/stores/playerStore'
 import type { Job } from '@/types'
 import './PageBase.css'
 import './MixVault.css'
@@ -40,13 +41,29 @@ function mixTitle(job: Job): string {
   return `Mix — ${new Date(job.created_at).toLocaleDateString()}`
 }
 
-function WaveformPlayer({ src }: { src: string }) {
+interface WaveformPlayerProps {
+  src: string
+  // DJ-transition context for feedback telemetry (SELF_IMPROVING_DJ_RESEARCH.md
+  // §3, Stage A) — undefined for a plain single-song play, where there's no
+  // song_b/job_id to attribute a skip/replay to a specific rendered transition.
+  songA?: string
+  songB?: string
+  jobId?: string
+}
+
+function WaveformPlayer({ src, songA, songB, jobId }: WaveformPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const wsRef        = useRef<WaveSurfer | null>(null)
   const [playing, setPlaying]   = useState(false)
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolume]     = useState(1)
+
+  // Fire-and-forget — never let a feedback-logging hiccup affect playback.
+  function logEvent(eventType: 'play_start' | 'complete', positionSec?: number) {
+    if (!songA) return
+    feedbackApi.logEvent({ eventType, songA, songB, jobId, positionSec }).catch(() => {})
+  }
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -65,14 +82,22 @@ function WaveformPlayer({ src }: { src: string }) {
       const dur = ws.getDuration()
       if (dur) setProgress(t / dur)
     })
-    ws.on('finish', () => setPlaying(false))
+    ws.on('finish', () => {
+      setPlaying(false)
+      logEvent('complete', ws.getDuration())
+    })
     wsRef.current = ws
     return () => ws.destroy()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- songA/songB/jobId
+    // are static per-card props (a card never swaps which job it represents),
+    // only src should re-run the WaveSurfer setup.
   }, [src])
 
   function togglePlay() {
+    const startingPlayback = !playing
     wsRef.current?.playPause()
-    setPlaying((p) => !p)
+    setPlaying(startingPlayback)
+    if (startingPlayback) logEvent('play_start', wsRef.current?.getCurrentTime())
   }
 
   function onVolumeChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -130,6 +155,18 @@ function MixCard({ job }: MixCardProps) {
     ? `${BASE}${result.output_url}`
     : null
 
+  // Song-pair context for feedback telemetry (SELF_IMPROVING_DJ_RESEARCH.md
+  // §3) — dj_chain jobs carry songs[] instead of song_a/song_b; first/last
+  // is an approximation (Stage A doesn't need per-adjacent-pair granularity
+  // yet, that's a Stage B/C refinement if the aggregate signal looks worth it).
+  const feedbackMeta = job.meta as { song_a?: string; song_b?: string; songs?: string[] } | undefined
+  const feedbackSongA = feedbackMeta?.song_a ?? feedbackMeta?.songs?.[0]
+  const feedbackSongB =
+    feedbackMeta?.song_b ??
+    (feedbackMeta?.songs && feedbackMeta.songs.length > 1
+      ? feedbackMeta.songs[feedbackMeta.songs.length - 1]
+      : undefined)
+
   const isChain   = job.type === 'dj_chain'
   const TypeIcon  = isChain ? GitBranch : GitMerge
 
@@ -173,6 +210,19 @@ function MixCard({ job }: MixCardProps) {
         </div>
         <div className="mv-card__actions">
           {streamUrl && (
+            <button
+              className="mv-icon-btn"
+              onClick={() =>
+                usePlayerStore.getState().playUrl(streamUrl, mixTitle(job), {
+                  songA: feedbackSongA, songB: feedbackSongB, jobId: job.job_id,
+                })
+              }
+              title="Play in the global player (EQ + queue)"
+            >
+              <Play size={14} />
+            </button>
+          )}
+          {streamUrl && (
             <a className="mv-icon-btn" href={streamUrl} download title="Download mix">
               <Download size={14} />
             </a>
@@ -188,7 +238,12 @@ function MixCard({ job }: MixCardProps) {
       </div>
 
       {streamUrl && (
-        <WaveformPlayer src={streamUrl} />
+        <WaveformPlayer
+          src={streamUrl}
+          songA={feedbackSongA}
+          songB={feedbackSongB}
+          jobId={job.job_id}
+        />
       )}
 
       {open && result && (

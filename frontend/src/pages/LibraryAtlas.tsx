@@ -26,9 +26,11 @@ import {
   ArrowRight,
   FileDown,
   AlertTriangle,
+  Play,
 } from 'lucide-react'
 import { libraryApi, analysisApi, stemsApi, favoritesApi, cratesApi, audioApi } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
+import { usePlayerStore } from '@/stores/playerStore'
 import type { SongInfo, Recommendation, SimilarTrack, BrokenSong } from '@/types'
 import { StemsPlayerRow } from '@/components/StemsPlayerRow'
 import './PageBase.css'
@@ -82,6 +84,7 @@ interface SongRowProps {
   expandedStems: string | null
   selected: boolean
   onFav: (name: string, add: boolean) => void
+  onPlay: (name: string) => void
   onAnalyze: (name: string) => void
   onStems: (name: string) => void
   onDelete: (name: string) => void
@@ -90,7 +93,7 @@ interface SongRowProps {
   onToggleSelect: (name: string) => void
 }
 
-function SongRow({ song, isFav, expandedStems, selected, onFav, onAnalyze, onStems, onDelete, onSelect, onExpandStems, onToggleSelect }: SongRowProps) {
+function SongRow({ song, isFav, expandedStems, selected, onFav, onPlay, onAnalyze, onStems, onDelete, onSelect, onExpandStems, onToggleSelect }: SongRowProps) {
   const stemsExpanded = expandedStems === song.name
   return (
     <tr className="la-row la-row--clickable" onClick={() => onSelect(song)}>
@@ -137,6 +140,13 @@ function SongRow({ song, isFav, expandedStems, selected, onFav, onAnalyze, onSte
       </td>
       <td className="la-cell la-cell--actions" onClick={(e) => e.stopPropagation()}>
         <div className="la-actions">
+          <button
+            className="la-action-btn"
+            onClick={() => onPlay(song.name)}
+            title="Play in player (queues the visible list)"
+          >
+            <Play size={12} />
+          </button>
           <button
             className="la-action-btn"
             onClick={() => onAnalyze(song.name)}
@@ -609,6 +619,19 @@ export default function LibraryAtlas() {
     [refetchFavs],
   )
 
+  const playQueue = usePlayerStore((s) => s.playQueue)
+  const handlePlay = useCallback(
+    (name: string) => {
+      // Play this song; the rest of the visible (filtered) list becomes the queue
+      const idx = filtered.findIndex((s) => s.name === name)
+      playQueue(
+        filtered.map((s) => ({ title: s.name, url: audioApi.streamUrl(s.name), songName: s.name })),
+        Math.max(idx, 0),
+      )
+    },
+    [filtered, playQueue],
+  )
+
   const handleAnalyze = useCallback(
     async (name: string) => {
       try {
@@ -1027,6 +1050,7 @@ export default function LibraryAtlas() {
                         expandedStems={expandedStems}
                         selected={selected.has(song.name)}
                         onFav={handleFav}
+                        onPlay={handlePlay}
                         onAnalyze={handleAnalyze}
                         onStems={handleStems}
                         onDelete={handleDelete}
@@ -1062,6 +1086,7 @@ export default function LibraryAtlas() {
                         expandedStems={expandedStems}
                         selected={selected.has(song.name)}
                         onFav={handleFav}
+                        onPlay={handlePlay}
                         onAnalyze={handleAnalyze}
                         onStems={handleStems}
                         onDelete={handleDelete}

@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -81,6 +82,78 @@ class SongEntry:
     license_type: Optional[str] = None  # LicenseType.value string
 
 
+def is_playlist_artifact(song_path: Path) -> bool:
+    """
+    Return True if this directory's yt-dlp metadata (full.info.json) marks it
+    as a playlist download rather than a single song.
+
+    Two forms exist in the wild:
+      - a playlist manifest: ``_type == "playlist"`` or a top-level
+        ``entries`` list;
+      - per-entry metadata left behind by a concatenated playlist download:
+        ``n_entries`` / ``playlist_count`` > 1 (e.g. library/Walking_playlist,
+        whose full.wav held multiple concatenated tracks and dominated
+        /recommend because its averaged features "matched" everything).
+
+    Single-track downloads never carry playlist keys — download.py resolves
+    playlist entries to direct video URLs and downloads each with
+    ``no_playlist: True`` — so the presence of these keys means the audio is
+    not one song and must not be indexed as one.
+    """
+    info_path = song_path / "full.info.json"
+    if not info_path.exists():
+        return False
+    try:
+        info = json.loads(info_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(info, dict):
+        return False
+    if info.get("_type") == "playlist" or isinstance(info.get("entries"), list):
+        return True
+    try:
+        n_entries = int(info.get("n_entries") or info.get("playlist_count") or 0)
+    except (TypeError, ValueError):
+        n_entries = 0
+    return n_entries > 1
+
+
+def _stem_is_healthy(path: Path) -> bool:
+    """
+    True if `path` is a stem file worth trusting as "this stem really
+    exists" before deleting the last full-length source over it.
+
+    prune_raw()/prune_enhanced() previously counted a stem as present via
+    `.exists()` alone. That's true even for a zero-byte or truncated file —
+    exactly the shape left behind if the per-stem LUFS normalisation in
+    separate_song_stems() dies mid-`sf.write()` (that exception is swallowed
+    and the overall result still reports success). Reuses the same cheap
+    probe check_song_health() already uses for the same reason: sf.info()
+    is header-only (no full decode), and the tail-window read catches the
+    common truncation mode (write killed partway through) that a
+    frames-count check alone would miss, since a truncated file can still
+    report a plausible non-zero frame count in its header.
+
+    Falls back to existence-only when audio libs aren't installed
+    (_AUDIO_AVAILABLE=False) — no worse than the pre-existing behaviour in
+    that environment, not a regression.
+    """
+    if not path.exists():
+        return False
+    if not _AUDIO_AVAILABLE:
+        return True
+    try:
+        info = sf.info(str(path))
+        if info.frames <= 0:
+            return False
+        win = min(info.frames, 44100)
+        sf.read(str(path), frames=win, start=info.frames - win, always_2d=False)
+        return True
+    except Exception as e:
+        log.warning("Stem file failed health probe, treating as absent: %s (%s)", path, e)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Library manager
 # ---------------------------------------------------------------------------
@@ -109,6 +182,19 @@ class LibraryManager:
         self.library_dir = library_dir or _DEFAULT_LIBRARY_DIR
         self.max_size_gb = max_size_gb if max_size_gb is not None else _MAX_SIZE_GB
         self._index_path = self.library_dir / self.INDEX_FILE
+        # Guards every _load_index() -> mutate -> _save_index() cycle below.
+        # Without it, two threads (task_batch_stem_split runs each song's
+        # separation inside a ThreadPoolExecutor worker, and evict_lru can
+        # fire concurrently via auto_evict_on_download) can interleave a
+        # read-modify-write pair: both load the same on-disk index, each
+        # mutates its own in-memory copy, and whichever saves last silently
+        # discards the other's write (e.g. a register() from song A racing a
+        # prune_raw() index update for song B loses one of the two updates).
+        # RLock, not Lock — evict_lru() calls list_songs(), prune_raw(), and
+        # prune_enhanced() internally, each of which acquires this same lock;
+        # a plain Lock would deadlock the moment a locked method called
+        # another locked method from the same thread.
+        self._index_lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Index I/O
@@ -140,6 +226,10 @@ class LibraryManager:
 
         for song_path in self.library_dir.iterdir():
             if not song_path.is_dir() or song_path.name.startswith("."):
+                continue
+            if is_playlist_artifact(song_path):
+                log.warning("_rebuild_index: skipping playlist artifact '%s' — "
+                            "not a single song", song_path.name)
                 continue
             name = song_path.name
             entry = self._scan_song_dir(name, song_path)
@@ -212,53 +302,63 @@ class LibraryManager:
           predates register()) get adopted, so storage counts match what
           GET /library reports from the filesystem.
         """
-        index = self._load_index()
-        entries = []
-        stale_names = []
-        for name, data in index.items():
-            try:
-                entry = SongEntry(**data)
-            except Exception:
-                stale_names.append(name)
-                continue
-            if not Path(entry.path).exists():
-                stale_names.append(name)
-                continue
-            entries.append(entry)
-
-        if stale_names:
-            log.info("list_songs: dropping %d stale index entr%s (directory no longer exists): %s",
-                      len(stale_names), "y" if len(stale_names) == 1 else "ies",
-                      ", ".join(stale_names[:10]) + (", …" if len(stale_names) > 10 else ""))
-            for name in stale_names:
-                index.pop(name, None)
-
-        # Adopt on-disk song dirs the index doesn't know about
-        adopted = []
-        if self.library_dir.exists():
-            for song_path in self.library_dir.iterdir():
-                if not song_path.is_dir() or song_path.name.startswith("."):
+        with self._index_lock:
+            index = self._load_index()
+            entries = []
+            stale_names = []
+            for name, data in index.items():
+                try:
+                    entry = SongEntry(**data)
+                except Exception:
+                    stale_names.append(name)
                     continue
-                if song_path.name in index:
+                if not Path(entry.path).exists():
+                    stale_names.append(name)
                     continue
-                entry = self._scan_song_dir(song_path.name, song_path)
-                index[song_path.name] = asdict(entry)
                 entries.append(entry)
-                adopted.append(song_path.name)
-        if adopted:
-            log.info("list_songs: adopted %d unregistered on-disk song(s): %s",
-                      len(adopted),
-                      ", ".join(adopted[:10]) + (", …" if len(adopted) > 10 else ""))
 
-        if stale_names or adopted:
-            self._save_index(index)
+            if stale_names:
+                log.info("list_songs: dropping %d stale index entr%s (directory no longer exists): %s",
+                          len(stale_names), "y" if len(stale_names) == 1 else "ies",
+                          ", ".join(stale_names[:10]) + (", …" if len(stale_names) > 10 else ""))
+                for name in stale_names:
+                    index.pop(name, None)
+
+            # Adopt on-disk song dirs the index doesn't know about
+            adopted = []
+            skipped_playlists = []
+            if self.library_dir.exists():
+                for song_path in self.library_dir.iterdir():
+                    if not song_path.is_dir() or song_path.name.startswith("."):
+                        continue
+                    if song_path.name in index:
+                        continue
+                    if is_playlist_artifact(song_path):
+                        skipped_playlists.append(song_path.name)
+                        continue
+                    entry = self._scan_song_dir(song_path.name, song_path)
+                    index[song_path.name] = asdict(entry)
+                    entries.append(entry)
+                    adopted.append(song_path.name)
+            if adopted:
+                log.info("list_songs: adopted %d unregistered on-disk song(s): %s",
+                          len(adopted),
+                          ", ".join(adopted[:10]) + (", …" if len(adopted) > 10 else ""))
+            if skipped_playlists:
+                log.warning("list_songs: refused to adopt %d playlist artifact(s) "
+                            "(not single songs): %s",
+                            len(skipped_playlists), ", ".join(skipped_playlists[:10]))
+
+            if stale_names or adopted:
+                self._save_index(index)
 
         return sorted(entries, key=lambda e: e.last_accessed, reverse=True)
 
     def song_info(self, name: str) -> Optional[SongEntry]:
         """Return the SongEntry for a named song, or None if not found."""
-        index = self._load_index()
-        data = index.get(name)
+        with self._index_lock:
+            index = self._load_index()
+            data = index.get(name)
         if not data:
             return None
         try:
@@ -294,20 +394,22 @@ class LibraryManager:
         if source:
             entry.source = source
 
-        index = self._load_index()
-        # Preserve existing fingerprint if we already computed it
-        if name in index and index[name].get("fingerprint"):
-            entry.fingerprint = index[name]["fingerprint"]
-        index[name] = asdict(entry)
-        self._save_index(index)
+        with self._index_lock:
+            index = self._load_index()
+            # Preserve existing fingerprint if we already computed it
+            if name in index and index[name].get("fingerprint"):
+                entry.fingerprint = index[name]["fingerprint"]
+            index[name] = asdict(entry)
+            self._save_index(index)
         return entry
 
     def touch(self, name: str) -> None:
         """Update last_accessed timestamp for a song (call on every remix)."""
-        index = self._load_index()
-        if name in index:
-            index[name]["last_accessed"] = time.time()
-            self._save_index(index)
+        with self._index_lock:
+            index = self._load_index()
+            if name in index:
+                index[name]["last_accessed"] = time.time()
+                self._save_index(index)
 
     def unregister(self, name: str) -> bool:
         """
@@ -322,11 +424,12 @@ class LibraryManager:
 
         Returns True if an entry was actually removed.
         """
-        index = self._load_index()
-        if name in index:
-            index.pop(name, None)
-            self._save_index(index)
-            return True
+        with self._index_lock:
+            index = self._load_index()
+            if name in index:
+                index.pop(name, None)
+                self._save_index(index)
+                return True
         return False
 
     # ------------------------------------------------------------------
@@ -441,10 +544,11 @@ class LibraryManager:
         if fp is None:
             return None
 
-        index = self._load_index()
-        for name, data in index.items():
-            if data.get("fingerprint") == fp:
-                return name
+        with self._index_lock:
+            index = self._load_index()
+            for name, data in index.items():
+                if data.get("fingerprint") == fp:
+                    return name
         return None
 
     def store_fingerprint(self, name: str, wav_path: Path) -> Optional[str]:
@@ -455,10 +559,11 @@ class LibraryManager:
         fp = self.audio_fingerprint(wav_path)
         if fp is None:
             return None
-        index = self._load_index()
-        if name in index:
-            index[name]["fingerprint"] = fp
-            self._save_index(index)
+        with self._index_lock:
+            index = self._load_index()
+            if name in index:
+                index[name]["fingerprint"] = fp
+                self._save_index(index)
         return fp
 
     # ------------------------------------------------------------------
@@ -490,7 +595,17 @@ class LibraryManager:
         if not full_wav.exists():
             return False
 
-        stems_present = [s for s in self.STEM_NAMES if (song_path / f"{s}.wav").exists()]
+        # .flac too, not just .wav — post-compression (task_compress_stems)
+        # converts stem WAVs to FLAC and deletes the WAV, so a WAV-only check
+        # could never fire for any song whose stems have already been
+        # compressed, even though full.wav is genuinely redundant by then.
+        # Each candidate is also health-probed (_stem_is_healthy), not just
+        # existence-checked — a zero-byte or truncated stem must not count
+        # as "safe to delete the last full-length copy over".
+        stems_present = [
+            s for s in self.STEM_NAMES
+            if _stem_is_healthy(song_path / f"{s}.flac") or _stem_is_healthy(song_path / f"{s}.wav")
+        ]
         all_stems = len(stems_present) == len(self.STEM_NAMES)
 
         if not all_stems and not force:
@@ -505,16 +620,82 @@ class LibraryManager:
             full_wav.unlink()
             log.info("🗑️  Pruned full.wav for '%s' (freed %.1f MB)", name, size_mb)
             # Refresh index
-            index = self._load_index()
-            if name in index:
-                index[name]["has_full_wav"] = False
-                index[name]["size_bytes"] = sum(
-                    f.stat().st_size for f in song_path.rglob("*") if f.is_file()
-                )
-                self._save_index(index)
+            with self._index_lock:
+                index = self._load_index()
+                if name in index:
+                    index[name]["has_full_wav"] = False
+                    index[name]["size_bytes"] = sum(
+                        f.stat().st_size for f in song_path.rglob("*") if f.is_file()
+                    )
+                    self._save_index(index)
             return True
         except Exception as e:
             log.warning("Could not prune full.wav for '%s': %s", name, e)
+            return False
+
+    def prune_enhanced(self, name: str, force: bool = False) -> bool:
+        """
+        Delete  full_enhanced.wav  for a song if all four stems are present.
+
+        full_enhanced.wav is the intermediate audio separate_song_stems()
+        writes before handing it to Demucs — once real stems exist it's
+        redundant (audio_source.py's resolve_source_file() only reaches for
+        it when full.wav AND stems are both absent). Nothing previously
+        cleaned it up, so every successfully-split song was silently left
+        carrying a full duplicate of its own audio: on the live library this
+        was ~4 GB across ~130 already-completed songs and climbing with every
+        new one, on top of an already near-capacity library.
+
+        Parameters
+        ----------
+        name : str
+            Song name.
+        force : bool
+            Delete full_enhanced.wav even if not all stems are present.
+
+        Returns
+        -------
+        bool : True if full_enhanced.wav was deleted, False otherwise.
+        """
+        if _KEEP_RAW and not force:
+            log.debug("prune_enhanced skipped for '%s': keep_raw_after_separation=true", name)
+            return False
+
+        song_path = self._dir(name)
+        enhanced_wav = song_path / "full_enhanced.wav"
+        if not enhanced_wav.exists():
+            return False
+
+        # Health-probed, not just existence-checked — see _stem_is_healthy's
+        # docstring: a zero-byte or truncated stem must not count as "safe
+        # to delete the last full-length copy over".
+        stems_present = [
+            s for s in self.STEM_NAMES
+            if _stem_is_healthy(song_path / f"{s}.wav") or _stem_is_healthy(song_path / f"{s}.flac")
+        ]
+        all_stems = len(stems_present) == len(self.STEM_NAMES)
+
+        if not all_stems and not force:
+            log.debug(
+                "prune_enhanced skipped for '%s': only %d/%d stems present",
+                name, len(stems_present), len(self.STEM_NAMES),
+            )
+            return False
+
+        try:
+            size_mb = enhanced_wav.stat().st_size / (1024 * 1024)
+            enhanced_wav.unlink()
+            log.info("🗑️  Pruned full_enhanced.wav for '%s' (freed %.1f MB)", name, size_mb)
+            with self._index_lock:
+                index = self._load_index()
+                if name in index:
+                    index[name]["size_bytes"] = sum(
+                        f.stat().st_size for f in song_path.rglob("*") if f.is_file()
+                    )
+                    self._save_index(index)
+            return True
+        except Exception as e:
+            log.warning("Could not prune full_enhanced.wav for '%s': %s", name, e)
             return False
 
     # ------------------------------------------------------------------
@@ -530,7 +711,8 @@ class LibraryManager:
         Evict least-recently-used songs until library fits within target_gb.
 
         Strategy:
-          1. Only delete  full.wav  (keeps stems so re-mixing still works)
+          1. Only delete  full.wav  / full_enhanced.wav  for songs that have
+             all 4 stems (keeps stems so re-mixing still works)
           2. If still over budget, delete entire song directories (LRU order)
 
         Parameters
@@ -563,19 +745,42 @@ class LibraryManager:
         songs = sorted(self.list_songs(), key=lambda e: e.last_accessed)
         evicted: List[str] = []
 
-        # Pass 1: delete only full.wav
+        # Pass 1: delete only full.wav / full_enhanced.wav, and only for
+        # songs that have all 4 stems. force=True here would bypass that
+        # check entirely — for a song with full.wav but zero stems (the
+        # common in-progress-download shape), that deletes its only audio
+        # outright, permanently, with no user action required to trigger it
+        # (auto_evict_on_download can fire this mid-download). This is the
+        # exact bug fixed for the manual /library/storage/prune endpoint
+        # (see storage_prune() in routers/library.py) — force=False here
+        # applies the same fix to the automatic eviction path.
         for entry in songs:
             if current <= target:
                 break
-            full_wav = Path(entry.path) / "full.wav"
+            song_path = Path(entry.path)
+            full_wav = song_path / "full.wav"
+            enhanced_wav = song_path / "full_enhanced.wav"
+            if dry_run:
+                if full_wav.exists():
+                    log.info("[DRY RUN] Would prune full.wav: %s (%.1f MB)",
+                             entry.name, full_wav.stat().st_size / 1e6)
+                if enhanced_wav.exists():
+                    log.info("[DRY RUN] Would prune full_enhanced.wav: %s (%.1f MB)",
+                             entry.name, enhanced_wav.stat().st_size / 1e6)
+                continue
             if full_wav.exists():
                 size = full_wav.stat().st_size
-                if dry_run:
-                    log.info("[DRY RUN] Would prune full.wav: %s (%.1f MB)",
-                             entry.name, size / 1e6)
-                else:
-                    if self.prune_raw(entry.name, force=True):
-                        current -= size
+                if self.prune_raw(entry.name, force=False):
+                    current -= size
+                    if entry.name not in evicted:
+                        evicted.append(entry.name)
+            if current <= target:
+                break
+            if enhanced_wav.exists():
+                size = enhanced_wav.stat().st_size
+                if self.prune_enhanced(entry.name, force=False):
+                    current -= size
+                    if entry.name not in evicted:
                         evicted.append(entry.name)
 
         # Pass 2: if still over budget, delete entire song dirs (LRU)
@@ -599,9 +804,10 @@ class LibraryManager:
                         log.info("🗑️  Evicted song dir: %s (freed %.1f MB)",
                                  entry.name, size / 1e6)
                         # Remove from index
-                        index = self._load_index()
-                        index.pop(entry.name, None)
-                        self._save_index(index)
+                        with self._index_lock:
+                            index = self._load_index()
+                            index.pop(entry.name, None)
+                            self._save_index(index)
 
         return evicted
 

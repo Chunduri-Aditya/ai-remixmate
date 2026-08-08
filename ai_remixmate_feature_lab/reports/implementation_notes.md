@@ -15,6 +15,12 @@
 - TypeScript neural model specs, vectorizers, online MLP, and learning controller.
 - Python neural model specs, vectorizers, online MLP, learning controller, JSON persistence, and tests.
 - Future Codex prompts scoped to isolated work.
+- `spectral_entry_match` research prototype (DJ_ENGINE_IMPROVEMENT_PLAN.md §5.1): a 14th
+  neural feature model plus an independent, faithful reimplementation of
+  `scripts/core/spectral_matching.py`'s hand-tuned band-weight model for comparison. See
+  `reports/spectral_entry_match_prototype.md` for the result — no real labeled data exists
+  to evaluate against yet (a production logging gap, documented in that report), so this
+  is a synthetic-data methodology check, not a production result.
 
 ## Production-Ready
 
@@ -57,4 +63,5 @@ Completed.
 - JSON schema files parse as valid JSON.
 - TypeScript tests: `../../frontend/node_modules/.bin/vitest run --config vitest.config.ts` from `ai_remixmate_feature_lab/typescript` passed 10 files / 21 tests.
 - Python tests: `/Users/chunduri/Desktop/ai-remixmate/.venv/bin/python -m pytest -p no:cacheprovider` from `ai_remixmate_feature_lab/python` passed 6 files / 12 tests.
+- Python tests, updated after the `spectral_entry_match` prototype: same command now passes 7 files / 35 tests (the 23 new tests are in `tests/test_spectral_entry_match.py`).
 - Extra TypeScript typecheck was attempted with the existing root frontend `tsc` binary, but local lab dependencies were intentionally not installed. It failed on missing local `react`/`vitest` type packages, so it is recorded as an environment limitation rather than a source test failure.

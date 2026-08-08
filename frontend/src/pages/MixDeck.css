@@ -484,6 +484,64 @@
 
 .md-spin { animation: md-spin 1s linear infinite; }
 
+/* Strict compatibility matches list */
+.md-matches {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.md-matches__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.md-matches__title { font-size: var(--text-sm); color: var(--color-text-primary); }
+.md-matches__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.md-match-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 5px var(--space-2);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+.md-match-row:hover { background: var(--color-bg-elevated); color: var(--color-text-primary); }
+.md-match-row--active { background: var(--color-bg-elevated); color: var(--color-amber-500); }
+.md-match-row__score {
+  color: var(--color-green-500);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.md-match-row__name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.md-match-row__chip {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+  color: var(--color-violet-400);
+}
+.md-match-row__bpm { color: var(--color-text-muted); }
+
 /* Remix result card */
 .md-result-card {
   background: var(--color-bg-elevated);
@@ -546,3 +604,18 @@
   height: 32px;
   accent-color: var(--color-green-500);
 }
+
+.md-result-card__player-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: none;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.md-result-card__player-btn:hover { border-color: var(--color-green-500); color: var(--color-text-primary); }

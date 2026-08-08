@@ -13,6 +13,10 @@ import type {
   StoragePruneResult,
   StorageEvictResult,
   CompatibilityResult,
+  CompatMatchesResponse,
+  StructureV1Response,
+  FeedbackEventType,
+  FeedbackSummaryResponse,
   Recommendation,
   SimilarTrack,
   CrateSearchResult,
@@ -227,6 +231,22 @@ export const analysisApi = {
     get<{ source: string; similar: SimilarTrack[] }>(
       `/library/similar/${encodeURIComponent(name)}?k=${k}`,
     ).then((r) => r.similar),
+  // Strict ranked matches — full compatibility scorer, min_score on the
+  // 0–100 scale, sorted best-first. 409 when the source isn't analyzed yet.
+  compatibilityMatches: (name: string, minScore = 85, limit = 50) =>
+    get<CompatMatchesResponse>(
+      `/compatibility/matches/${encodeURIComponent(name)}?min_score=${minScore}&limit=${limit}`,
+    ),
+  // Versioned bars/beats/segments/per-phrase-key structure — recomputed from
+  // the full track on every call (not cached), so this can be slower than
+  // the other GETs here. Set includeBeats=false for a lighter payload on
+  // long tracks; bars/sections/key_segments are unaffected either way.
+  structure: (name: string, opts?: { keyProfile?: string; includeBeats?: boolean }) =>
+    get<StructureV1Response>(
+      `/analysis/v1/${encodeURIComponent(name)}/structure` +
+        `?key_profile=${opts?.keyProfile ?? 'auto'}` +
+        `&include_beats=${opts?.includeBeats ?? true}`,
+    ),
   rebuildIndex:  () =>
     post<{ job_id: string }>('/index/rebuild', {}),
   // CLAP 512-D semantic search (falls back to 35-D index server-side when
@@ -342,6 +362,35 @@ export const setlistApi = {
         camelot: s.camelot ?? null,
       })),
     }).then((r) => r.setlist.map((t) => t.name)),
+}
+
+// --- Feedback telemetry (SELF_IMPROVING_DJ_RESEARCH.md §3, Stage A) ---
+// Instrumentation only — this collects the event stream Stage B will later
+// analyze to decide whether a learned preference correction (Stage C) is
+// even worth building. Nothing here scores or ranks anything.
+
+export const feedbackApi = {
+  // Fire-and-forget: callers should NOT await this on the playback/UI hot
+  // path — chain .catch(() => {}) at the call site (mirrors the backend's
+  // own "log and swallow" posture on a broken feedback pipe) so a network
+  // hiccup can never stall or interrupt what the user is actually doing.
+  logEvent: (opts: {
+    eventType: FeedbackEventType
+    songA: string
+    songB?: string
+    jobId?: string
+    positionSec?: number
+    context?: Record<string, unknown>
+  }) =>
+    post<{ event_id: string; logged: boolean }>('/feedback/event', {
+      event_type: opts.eventType,
+      song_a: opts.songA,
+      song_b: opts.songB,
+      job_id: opts.jobId,
+      position_sec: opts.positionSec,
+      context: opts.context,
+    }),
+  summary: () => get<FeedbackSummaryResponse>('/feedback/summary'),
 }
 
 // --- AI / Generative ---

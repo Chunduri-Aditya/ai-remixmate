@@ -104,15 +104,20 @@ scripts/
 │   ├── paths.py                             # Canonical path constants + sanitize_song_name()
 │   └── config.py                             # YAML config loader, see precedence above
 └── ui/app.py                     # Streamlit dashboard (legacy; React is primary)
+                                  # ui/static/ now serves only a redirect page — the old static DJ UI
+                                  # was merged into the React app (archive/legacy-static-ui/)
 
 frontend/src/
 ├── pages/                # 8 pages: MissionControl, LibraryAtlas, MixDeck, SetBuilder,
 │                         #   SignalSearch, AILab, MixVault, Operations (+ Widget)
-├── shell/                # AppShell (3-zone grid), LeftRail, RightInspector
+├── shell/                # AppShell (3-zone grid), LeftRail, RightInspector, global PlayerBar
+├── components/PlayerBar.tsx # Persistent bottom player: transport, queue, 3-band EQ knobs, visualizer
 ├── stores/appStore.ts    # Zustand: nav, health, live jobs, activity log
-├── lib/api.ts             # Thin fetch wrapper for all API namespaces; normalizeJob() lives here
-├── hooks/useSSE.ts         # SSE connection + job store hydration; falls back to polling on disconnect
-└── types/index.ts           # TypeScript types mirroring FastAPI Pydantic schemas (kept in sync manually)
+├── stores/playerStore.ts  # Global player state — pages enqueue via playTrack/playQueue/playUrl
+├── lib/playerEngine.ts     # Singleton Web Audio chain (lowshelf/peaking/highshelf → gain → analyser)
+├── lib/api.ts               # Thin fetch wrapper for all API namespaces; normalizeJob() lives here
+├── hooks/useSSE.ts            # SSE connection + job store hydration; falls back to polling on disconnect
+└── types/index.ts              # TypeScript types mirroring FastAPI Pydantic schemas (kept in sync manually)
 
 tests/                    # pytest + librosa-probe conftest guard + e2e/smoke suites
 ai_remixmate_feature_lab/ # Isolated experimental area — imports nothing from scripts/, not wired to UI by design
@@ -136,9 +141,17 @@ setlist planning, and library metadata always use the current modules. Job resul
 correction (clamped to ±half a bar). Entry sample index compensates for the stretch ratio:
 `entry_sample_b = int(entry_time_b * sr / stretch_ratio)`.
 
-**Stem-aware crossfade** — When Demucs stems exist, each stem fades on its own envelope. Drums/bass
-from Song B come in early; vocals are delayed. `_stem_bass_ramp()` does a true stem-level cosine-taper
-bass mute at the swap point (no IIR bleed) rather than a linear crossfade. The standard
+**Stem-aware crossfade** — When Demucs stems exist, each stem fades on its own envelope. `bass` gets a
+dedicated swap-ramp path (see below); every other stem (drums/vocals/other) goes through
+`_stem_crossfade_curves(trans_samples, similarity)`, which is driven purely by that stem pair's
+similarity score, not by stem identity — there is no code path that keys entry timing to "this is
+vocals, delay it" specifically. (Confirmed by adversarial behavioral audit, 2026-07: measured
+per-stem B-onset timing with distinct test tones — drums, vocals, and other entered the mix at the
+identical timestamp under equal similarity.) Read "stem-aware" as "each stem gets its own
+similarity-shaped curve," not "drums/bass are always brought in ahead of vocals" — the latter would
+need real stem-type-specific offset logic that doesn't currently exist. `_stem_bass_ramp()` does a
+true stem-level cosine-taper bass mute at the swap point (no IIR bleed) rather than a linear
+crossfade. The standard
 (medium-similarity) crossfade is equal-power (cos/sin), not equal-gain — two different songs are
 uncorrelated, so amplitude-complementary curves dip ~3 dB at the midpoint. The stem-summed transition
 window splices into the surrounding original mixes through ~30 ms equal-gain seam blends

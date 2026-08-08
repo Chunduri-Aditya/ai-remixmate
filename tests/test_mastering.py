@@ -327,3 +327,99 @@ class TestLimiterAttackRelease:
         # further toward the target than the slow-attack one.
         check_at = 500 + int(SR * 0.005)
         assert fast[check_at] < slow[check_at]
+
+
+# ---------------------------------------------------------------------------
+# apply_limiter — true-peak (not just sample-peak) regression guard.
+#
+# Confirmed root cause (external behavioral-correctness review): the limiter
+# detected and clamped only np.abs(audio) sample values, despite being
+# documented as an ITU-R BS.1770-4 "true-peak" limiter. A signal whose every
+# discrete sample sat under the ceiling could still reconstruct to an
+# inter-sample (true) peak above it — measured up to +2 dB over ceiling on
+# hot transient material via 4x-oversampled peak detection, the same
+# measurement technique used here. Fix: detect/limit on a 4x-oversampled
+# copy of the signal, decimate the resulting (already-smoothed, so
+# alias-safe) gain envelope back to native rate, apply it to the original
+# audio. Sample-peak compliance (the pre-existing guarantee) is preserved by
+# the unchanged final native-rate hard-clip.
+# ---------------------------------------------------------------------------
+
+def _true_peak_dbfs(audio: np.ndarray, oversample: int = 4) -> float:
+    """Measure true (inter-sample) peak via oversampled reconstruction —
+    independent of apply_limiter's own internal oversampling, so this
+    actually exercises the fix rather than assuming it worked."""
+    from scipy import signal as _signal
+    os_audio = _signal.resample_poly(audio.astype(np.float64), oversample, 1)
+    peak = float(np.max(np.abs(os_audio))) + 1e-12
+    return 20 * np.log10(peak)
+
+
+class TestLimiterTruePeak:
+    def test_true_peak_stays_under_ceiling_on_hot_transients(self):
+        """The exact failure mode the review measured: dense sharp
+        transients that pass sample-peak detection but overshoot ceiling
+        between samples once reconstructed."""
+        from scripts.core.mastering import apply_limiter
+
+        rng = np.random.default_rng(0)
+        n = SR * 2
+        audio = (rng.standard_normal(n) * 0.05).astype(np.float32)
+        for i in range(0, n, int(SR * 0.05)):
+            audio[i:i + 5] = 1.5  # sharp transient well above ceiling
+
+        ceiling_db = -1.0
+        out = apply_limiter(audio, ceiling_db=ceiling_db, sr=SR)
+
+        true_peak = _true_peak_dbfs(out)
+        assert true_peak <= ceiling_db + 0.3, (
+            f"true peak {true_peak:.2f} dBFS exceeds ceiling {ceiling_db} dBFS "
+            f"by more than the 0.3 dB tolerance — inter-sample overshoot"
+        )
+
+    def test_true_peak_stays_under_ceiling_on_gentle_bed(self):
+        """The review's 'gentle bed' case still measured 0.38 dB of true-peak
+        overshoot pre-fix even with no extreme transients at all — the
+        overshoot was systematic, not just a hot-signal edge case."""
+        from scripts.core.mastering import apply_limiter
+
+        audio = _sine(freq=1200.0, duration=2.0, amplitude=0.85, sr=SR)
+
+        ceiling_db = -1.0
+        out = apply_limiter(audio, ceiling_db=ceiling_db, sr=SR)
+
+        true_peak = _true_peak_dbfs(out)
+        assert true_peak <= ceiling_db + 0.3
+
+    def test_oversample_1_restores_old_sample_peak_only_behavior(self):
+        """oversample=1 is an explicit escape hatch back to the original
+        sample-peak-only detection — must still guarantee sample-peak
+        compliance even though true-peak is no longer checked."""
+        from scripts.core.mastering import apply_limiter
+
+        rng = np.random.default_rng(1)
+        audio = (rng.standard_normal(SR) * 1.2).astype(np.float32)
+        ceiling_db = -1.0
+        ceiling = 10.0 ** (ceiling_db / 20.0)
+
+        out = apply_limiter(audio, ceiling_db=ceiling_db, sr=SR, oversample=1)
+        assert np.max(np.abs(out)) <= ceiling + 1e-6
+
+    def test_output_same_length_as_input(self):
+        """The oversample/decimate round trip on the gain envelope must not
+        change the output length — resample_poly can be off by a few
+        samples, which the implementation must pad/trim to fix."""
+        from scripts.core.mastering import apply_limiter
+
+        for n in (SR - 7, SR, SR + 13, SR * 3 + 1):
+            audio = (np.random.default_rng(n).standard_normal(n) * 0.3).astype(np.float32)
+            out = apply_limiter(audio, sr=SR)
+            assert len(out) == n
+
+    def test_no_nan_inf_after_true_peak_fix(self):
+        from scripts.core.mastering import apply_limiter
+
+        rng = np.random.default_rng(2)
+        audio = (rng.standard_normal(SR * 2) * 0.9).astype(np.float32)
+        out = apply_limiter(audio, sr=SR)
+        assert np.all(np.isfinite(out))

@@ -75,6 +75,16 @@ class Section:
     avg_energy: float       # 0–1 average RMS energy in this section
     avg_spectral: float     # 0–1 normalised spectral centroid (brightness)
 
+    # Per-phrase key, populated from key_detection.detect_key_segments()
+    # (DJ_ENGINE_IMPROVEMENT_PLAN.md §1.3) — "" / 0.0 means "not computed",
+    # same missing-data convention used elsewhere in this codebase. Added at
+    # the end with defaults so the existing positional Section(...) call
+    # sites keep working unchanged.
+    key_name: str           = ""
+    mode: str                = ""
+    camelot: str             = ""
+    key_confidence: float    = 0.0
+
     @property
     def length_bars(self) -> int:
         return self.end_bar - self.start_bar
@@ -104,11 +114,20 @@ class SongStructure:
     mode:                str   = ""
     camelot:             str   = ""
     key_confidence:      float = 0.0
+    # Per-phrase key detections from key_detection.detect_key_segments()
+    # (DJ_ENGINE_IMPROVEMENT_PLAN.md §1.3): list of (start_time_s, KeyResult),
+    # 30s windows at 50% overlap. key_name/mode/camelot/key_confidence above
+    # remain the whole-track call and are NOT derived from this — kept
+    # exactly as before for backward compatibility. Empty when segment
+    # detection wasn't run or failed.
+    key_segments: List[Any] = field(default_factory=list, compare=False, repr=False)
     energy_mean:         float = 0.0
     energy_std:          float = 0.0
     drop_position:       Optional[float] = None
     danceability:        float = 0.5
     vocal_density:       float = 0.5
+    vocal_mean_pitch_hz:   float = 0.0
+    vocal_voiced_fraction: float = 0.0
     spectral_centroid_hz: float = 0.0
     chord_sequence:      List[str] = field(default_factory=list)
     # numpy array stored with compare=False to avoid element-wise equality issues
@@ -247,6 +266,7 @@ def analyze_structure(
     audio: np.ndarray,
     sr: int = 44100,
     key_profile: str = "auto",
+    stems_dir: "Optional[Any]" = None,
 ) -> SongStructure:
     """
     Analyse the musical structure of an audio clip.
@@ -260,6 +280,12 @@ def analyze_structure(
         Tonal profile for key detection: 'ks' (Krumhansl-Schmuckler),
         'edma' (EDM major), 'edmm' (EDM major+minor), or 'auto' (choose
         based on spectral centroid). Defaults to 'auto'.
+    stems_dir : Path, optional
+        Directory containing Demucs stems (vocals.wav etc.), forwarded to
+        compute_track_vector() for stem-accurate vocal_density and the
+        vocal_analyzer.py pitch/voiced-fraction signal. None (default)
+        preserves prior behaviour — both fall back to spectral proxies /
+        "no data" when the caller has no stems on hand.
     """
     try:
         import librosa
@@ -383,10 +409,48 @@ def analyze_structure(
     except Exception as exc:
         log.debug("Key detection (profile=%s) failed: %s", key_profile, exc)
 
+    # ── Per-phrase key detection (DJ_ENGINE_IMPROVEMENT_PLAN.md §1.3) ───────────
+    # The whole-track kr/_key_tuple above stays exactly as it was (backward
+    # compatibility, and compute_track_vector() below still needs a single
+    # key to skip its own re-detection). This adds *additional* per-phrase
+    # data on top: any track that modulates key mid-song was previously
+    # represented by one averaged/wrong whole-track guess with no way to
+    # tell — now each Section carries its own local key + confidence from
+    # whichever 30s-window segment (50% overlap) it falls in.
+    try:
+        from scripts.core.key_detection import detect_key_segments as _detect_key_segments
+        key_segs = _detect_key_segments(audio, sr, profile=key_profile)
+        struct.key_segments = key_segs
+        if key_segs and struct.sections:
+            for sec in struct.sections:
+                midpoint = (sec.start_time + sec.end_time) / 2.0
+                # Segment "active" at midpoint = last one whose start_time
+                # hasn't passed it yet; segments are chronological so this
+                # is just "closest start_time <= midpoint", falling back to
+                # the first segment for a section that starts before it
+                # (only possible for a section starting at/near t=0).
+                active = key_segs[0]
+                for seg_start, seg_result in key_segs:
+                    if seg_start <= midpoint:
+                        active = (seg_start, seg_result)
+                    else:
+                        break
+                sec.key_name       = active[1].key_name
+                sec.mode           = active[1].mode
+                sec.camelot        = active[1].camelot
+                sec.key_confidence = float(active[1].confidence)
+            if len({s.camelot for s in struct.sections if s.camelot}) > 1:
+                log.info(
+                    "Per-phrase key: modulation detected — %s",
+                    " → ".join(f"{s.type}:{s.camelot}" for s in struct.sections),
+                )
+    except Exception as exc:
+        log.debug("Per-phrase key detection (profile=%s) failed: %s", key_profile, exc)
+
     # ── Enrich with music intelligence ──────────────────────────────
     try:
         from scripts.core.music_intelligence import compute_track_vector
-        vec = compute_track_vector(audio, sr, bpm=bpm, key=_key_tuple)
+        vec = compute_track_vector(audio, sr, bpm=bpm, key=_key_tuple, stems_dir=stems_dir)
         struct.music_vector         = vec
         struct.key_name             = vec.key_name
         struct.mode                 = vec.mode
@@ -398,6 +462,8 @@ def analyze_structure(
         struct.drop_position        = vec.drop_position
         struct.danceability         = float(vec.danceability)
         struct.vocal_density        = float(vec.vocal_density)
+        struct.vocal_mean_pitch_hz   = float(vec.vocal_mean_pitch_hz)
+        struct.vocal_voiced_fraction = float(vec.vocal_voiced_fraction)
         struct.spectral_centroid_hz = float(vec.spectral_centroid)
         struct.chord_sequence       = list(vec.chord_sequence)
         log.info(
@@ -816,10 +882,26 @@ def plan_transition(
     harmonic_score: float = 0.5
     try:
         from scripts.core.key_detection import psychoacoustic_consonance
-        harmonic_score = psychoacoustic_consonance(
-            song_a.key_name, song_a.mode,
-            song_b.key_name, song_b.mode,
-        )
+
+        # Prefer the LOCAL phrase key at the actual exit/entry points over
+        # the whole-track key (DJ_ENGINE_IMPROVEMENT_PLAN.md §1.3) — a track
+        # that modulates key mid-song can have a transition point whose real
+        # local key disagrees with the track-wide average. Falls back to the
+        # whole-track key/mode (unchanged behaviour) when per-section data is
+        # missing or too uncertain to trust — gated by confidence, not just
+        # presence, so a low-confidence segment guess can't override a
+        # perfectly good whole-track detection.
+        _MIN_SECTION_KEY_CONF = 0.35
+
+        def _local_key(song: "SongStructure", t: float) -> Tuple[str, str]:
+            for sec in song.sections:
+                if sec.start_time <= t < sec.end_time and sec.key_confidence >= _MIN_SECTION_KEY_CONF:
+                    return sec.key_name, sec.mode
+            return song.key_name, song.mode
+
+        key_a, mode_a = _local_key(song_a, exit_time)
+        key_b, mode_b = _local_key(song_b, entry_time)
+        harmonic_score = psychoacoustic_consonance(key_a, mode_a, key_b, mode_b)
         # Shorten the transition window when consonance is low to reduce clash
         if harmonic_score < 0.35 and transition_bars >= 16:
             old_bars = transition_bars
@@ -829,16 +911,16 @@ def plan_transition(
                 "Harmonic clash (consonance=%.2f, %s %s→%s %s): "
                 "shortened transition %d→%d bars",
                 harmonic_score,
-                song_a.key_name, song_a.mode,
-                song_b.key_name, song_b.mode,
+                key_a, mode_a,
+                key_b, mode_b,
                 old_bars, transition_bars,
             )
         else:
             log.info(
                 "Psychoacoustic consonance: %.2f (%s %s → %s %s)",
                 harmonic_score,
-                song_a.key_name, song_a.mode,
-                song_b.key_name, song_b.mode,
+                key_a, mode_a,
+                key_b, mode_b,
             )
     except Exception as exc:
         log.debug("Consonance computation failed: %s", exc)

@@ -480,11 +480,18 @@ def download_track(spec: TrackSpec, progress_cb: Optional[ProgressCb] = None) ->
         except Exception as exc:
             print(f"⚠️  Auto-analyze failed for '{name}' (non-critical): {exc}")
 
-    # --- Smart storage: prune raw WAV if stems were produced ---
+    # --- Smart storage: prune raw WAV / redundant enhanced WAV if stems
+    # were produced. _separate_stems() above runs with enhance=False, so
+    # full_enhanced.wav normally doesn't exist for a fresh download — but a
+    # re-download of a song name that already had a stray full_enhanced.wav
+    # left over from an earlier interrupted attempt (the exact backlog shape
+    # this session started from) would otherwise leave that duplicate
+    # unpruned forever, since nothing else in this script ever cleans it up.
     if stems and _PRUNE_ON_DL:
         try:
             mgr = get_library_manager()
             mgr.prune_raw(name)
+            mgr.prune_enhanced(name)
         except Exception:
             pass
 

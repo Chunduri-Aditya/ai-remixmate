@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import sqlite3
 import time
@@ -99,6 +100,14 @@ class TrackMetadata:
     vocal_density: float              = 0.0         # 0–1, source-separation energy ratio
     spectral_centroid_hz: float       = 0.0         # brightness proxy for timbral_similarity
 
+    # Richer vocal_analyzer.py signal (CREPE/autocorrelation F0 tracking on
+    # the isolated vocals stem). 0.0 means "not computed" — compatibility_score()
+    # falls back to vocal_density when these are missing, same "0.0 == unknown"
+    # convention as the rest of this dataclass. See REMIX_QUALITY_INSIGHTS.md
+    # finding #1 / DJ_ENGINE_IMPROVEMENT_PLAN.md §1.2.
+    vocal_mean_pitch_hz: float        = 0.0         # mean F0 of voiced frames, Hz
+    vocal_voiced_fraction: float      = 0.0         # 0–1, fraction of stem with trackable pitch
+
     # Genre
     genres: List[str]                 = field(default_factory=list)
 
@@ -129,7 +138,8 @@ class TrackMetadata:
             current = getattr(result, f_name)
             # Fill only if current is empty/zero/unknown
             if f_name in ("bpm", "energy", "danceability", "valence", "duration_seconds",
-                          "vocal_density", "spectral_centroid_hz"):
+                          "vocal_density", "spectral_centroid_hz",
+                          "vocal_mean_pitch_hz", "vocal_voiced_fraction"):
                 if current == 0.0 and f_val != 0.0:
                     setattr(result, f_name, f_val)
             elif f_name in ("key", "mode", "camelot", "isrc", "mb_id",
@@ -197,6 +207,31 @@ def camelot_distance(a: str, b: str) -> int:
         return 999  # different modes — very incompatible
     diff = abs(num_a - num_b)
     return min(diff, 12 - diff)  # circular distance on 12-position wheel
+
+
+def _register_closeness(hz_a: float, hz_b: float) -> float:
+    """
+    Return how much two mean vocal pitches occupy the same audible register,
+    in [0, 1] — 1.0 = same register (high masking risk), 0.0 = far enough
+    apart (roughly an octave-plus) that simultaneous vocals mask each other
+    much less. Used to scale compatibility_score()'s vocal_clash_penalty by
+    register, not just by how much each track sings (DJ_ENGINE_IMPROVEMENT_
+    PLAN.md §1.2 — the old vocal_density energy-ratio proxy had no register
+    term at all).
+
+    Unknown pitch (<=0 Hz, e.g. no voiced frames detected) returns 1.0 —
+    treat missing register data as the worst case rather than silently
+    dropping the penalty, since voiced_fraction being > 0 already means the
+    caller believes both tracks have real vocal presence.
+    """
+    if hz_a <= 0.0 or hz_b <= 0.0:
+        return 1.0
+    cents = abs(1200.0 * math.log2(hz_a / hz_b))
+    if cents <= 400.0:      # within a major third — same register
+        return 1.0
+    if cents >= 1200.0:     # an octave or more apart — negligible masking
+        return 0.0
+    return 1.0 - (cents - 400.0) / 800.0   # linear taper across the middle band
 
 
 # ---------------------------------------------------------------------------
@@ -880,16 +915,32 @@ class MetadataClient:
         # Vocal clash penalty — the single most audible DJ-mixing failure
         # mode (two vocals overlapping) and, until now, the one dimension in
         # the documented SetFlow formula with zero implementation anywhere
-        # in the codebase (REMIX_QUALITY_INSIGHTS.md finding #1). Penalty
-        # scales with how strongly *both* tracks carry simultaneous vocal
-        # presence; 0.0 (no penalty) when either track's vocal_density is
-        # unknown, since we'd rather under-penalize than flag a clash on
-        # missing data.
-        vd_a, vd_b = meta_a.vocal_density, meta_b.vocal_density
-        if vd_a > 0.0 and vd_b > 0.0:
-            vocal_clash_penalty = min(0.30, vd_a * vd_b)
+        # in the codebase (REMIX_QUALITY_INSIGHTS.md finding #1).
+        #
+        # Preferred: vocal_analyzer.py's voiced_fraction + mean_pitch_hz
+        # (DJ_ENGINE_IMPROVEMENT_PLAN.md §1.2). The old vocal_density energy-
+        # ratio proxy can't tell "two vocals stacked in the same register"
+        # from "two vocals an octave apart" — it only sees how much energy
+        # sits in the 300-3400 Hz band, vocal or not. voiced_fraction is
+        # cleaner (F0-trackable pitched content only, not incidental
+        # instrument energy in that band) and mean_pitch_hz adds a register
+        # term: two strong vocals in *different* registers mask each other
+        # far less than two in the same register, so the penalty now scales
+        # with register closeness, not just co-presence.
+        #
+        # Falls back to the vocal_density proxy (register-blind) when either
+        # track lacks vocal_analyzer data — same "0.0 == unknown, don't
+        # penalize on missing data" convention as the rest of this method.
+        vp_a, vp_b = meta_a.vocal_voiced_fraction, meta_b.vocal_voiced_fraction
+        if vp_a > 0.0 and vp_b > 0.0:
+            closeness = _register_closeness(meta_a.vocal_mean_pitch_hz, meta_b.vocal_mean_pitch_hz)
+            vocal_clash_penalty = min(0.30, vp_a * vp_b * closeness)
         else:
-            vocal_clash_penalty = 0.0
+            vd_a, vd_b = meta_a.vocal_density, meta_b.vocal_density
+            if vd_a > 0.0 and vd_b > 0.0:
+                vocal_clash_penalty = min(0.30, vd_a * vd_b)
+            else:
+                vocal_clash_penalty = 0.0
 
         # Overall — SetFlow weighted combination (docs/DJ_THEORY.md section 3)
         overall = (

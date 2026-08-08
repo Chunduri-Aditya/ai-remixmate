@@ -145,7 +145,7 @@ def run_song_analysis(
     genre = detect_genre(audio, sr)
 
     _progress(0.7, "Analysing structure…")
-    struct = analyze_structure(audio, sr, key_profile=key_profile)
+    struct = analyze_structure(audio, sr, key_profile=key_profile, stems_dir=song_dir(song))
 
     # ── Persist BPM + genre to meta.json cache for the recommendation engine ──
     try:
@@ -173,6 +173,8 @@ def run_song_analysis(
             "beat_strength":         round(struct.beat_strength, 4)   if hasattr(struct, "beat_strength") else None,
             "tempo_stability":       round(struct.tempo_stability, 4) if hasattr(struct, "tempo_stability") else None,
             "vocal_density":         round(struct.vocal_density, 4)   if hasattr(struct, "vocal_density") else None,
+            "vocal_mean_pitch_hz":   round(struct.vocal_mean_pitch_hz, 2)   if getattr(struct, "vocal_mean_pitch_hz", 0.0) else None,
+            "vocal_voiced_fraction": round(struct.vocal_voiced_fraction, 4) if getattr(struct, "vocal_voiced_fraction", 0.0) else None,
             "spectral_centroid_hz":  round(struct.spectral_centroid_hz, 1) if hasattr(struct, "spectral_centroid_hz") else None,
             "chroma_vector":         struct.chord_sequence if hasattr(struct, "chroma_vector") else None,
         })
@@ -232,6 +234,9 @@ def run_song_analysis(
         result["key_confidence"]   = round(struct.key_confidence, 3)
         result["danceability"]     = round(struct.danceability, 3)
         result["vocal_density"]    = round(struct.vocal_density, 3)
+        if getattr(struct, "vocal_voiced_fraction", 0.0):
+            result["vocal_mean_pitch_hz"]   = round(struct.vocal_mean_pitch_hz, 2)
+            result["vocal_voiced_fraction"] = round(struct.vocal_voiced_fraction, 4)
         result["spectral_centroid_hz"] = round(struct.spectral_centroid_hz, 1)
         result["chord_sequence"]   = struct.chord_sequence
         if struct.drop_position is not None:

@@ -47,7 +47,7 @@ frontend/src/
 
 **Beat-grid lock** — `dj_engine.py` computes bar-grid phases at cue points and applies a sample-level correction (clamped to ±half a bar). Entry sample index compensates for the stretch ratio: `entry_sample_b = int(entry_time_b * sr / stretch_ratio)`.
 
-**Stem crossfade** — When Demucs stems exist, each stem fades on its own envelope. Drums/bass from Song B come in early. Vocals are delayed. This is what makes outputs sound intentional vs. automated.
+**Stem crossfade** — When Demucs stems exist, each stem fades on its own envelope. `bass` gets a dedicated cosine-taper swap ramp (verified). Every other stem (drums/vocals/other) fades by similarity score, not by stem identity — there's no logic that specifically delays vocals relative to drums (corrected 2026-07 after an adversarial audit measured this directly; see CLAUDE.md's "Stem-aware crossfade" note for detail).
 
 **Dynamic EQ** — Low-shelf filter pulls Song A's bass as Song B's rises. Prevents bass-clash from dual-track playback.
 

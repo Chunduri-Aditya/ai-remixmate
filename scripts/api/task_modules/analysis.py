@@ -219,7 +219,19 @@ def task_initialize_library(
         update_job(job_id, progress=round(base_prog, 3),
                    message=f"[{i+1}/{total_split}] Demucs · {song_name[:42]}")
         try:
-            separate_song_stems(song_name, enhance=enhance, model=model)
+            result = separate_song_stems(song_name, enhance=enhance, model=model)
+            if not result.success:
+                # separate_song_stems() reports failure (e.g. Demucs exit
+                # code, missing source audio) via StemResult.success rather
+                # than raising — it must be checked explicitly. Previously
+                # this branch was unreachable in the common failure case, so
+                # every Demucs failure was silently counted as split_done
+                # with split_failed staying at 0, even though no stem files
+                # were ever produced.
+                split_failed.append({"song": song_name, "error": result.error or "Unknown failure"})
+                continue
+            from scripts.api.task_modules.stems import _prune_after_split
+            _prune_after_split(song_name)
             _index_upsert(song_name)
             split_done += 1
         except Exception as exc:

@@ -4,6 +4,7 @@
 
 # ── Runtime data (large / user-specific, never commit) ──────
 library/
+archive/library/
 outputs/
 separated/
 runs/
@@ -95,3 +96,6 @@ AI_RemixMate_Launch_Plan.md
 
 # Vitest cache (feature lab runs vitest with a local cache dir)
 .vitest-cache/
+
+# Vite's config loader writes a throwaway compiled config on every dev/build start
+frontend/vite.config.ts.timestamp-*.mjs

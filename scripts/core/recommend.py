@@ -409,3 +409,90 @@ def get_recommendations(
 
     results.sort(key=lambda x: x["overall"], reverse=True)
     return results[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Strict compatibility matches — full pair scorer over cached analyses
+# ---------------------------------------------------------------------------
+
+def _meta_from_cache(song_dir: Path):
+    """Build a TrackMetadata from a song's cached meta.json, or None.
+
+    Mirrors the cache path of POST /compatibility's _meta_for(): requires a
+    cached bpm + camelot so every candidate is scored on real analysis data,
+    never on empty defaults (the "57/100 of two empty objects" trap).
+    """
+    from scripts.core.track_metadata import TrackMetadata
+
+    cache = _load_cache(song_dir)
+    if not cache.get("bpm") or not cache.get("camelot"):
+        return None
+    return TrackMetadata(
+        title=song_dir.name, artist="",
+        bpm=float(cache["bpm"]),
+        key=cache.get("key") or "",
+        mode=cache.get("mode") or "",
+        camelot=cache.get("camelot"),
+        genres=[cache["genre"]] if cache.get("genre") else [],
+        energy=float(cache["energy_mean"]) if cache.get("energy_mean") is not None else 0.5,
+        vocal_density=float(cache.get("vocal_density") or 0.0),
+        vocal_mean_pitch_hz=float(cache.get("vocal_mean_pitch_hz") or 0.0),
+        vocal_voiced_fraction=float(cache.get("vocal_voiced_fraction") or 0.0),
+        spectral_centroid_hz=float(cache.get("spectral_centroid_hz") or 0.0),
+    )
+
+
+def top_compatibility_matches(
+    source_dir: Path,
+    library_dir: Path,
+    min_score: float = 85.0,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """Rank every analyzed library song against ``source_dir`` by the full
+    compatibility scorer (key/BPM/energy/genre/timbre/vocal-clash — the same
+    one behind POST /compatibility), keeping only matches at or above
+    ``min_score`` (0–100 scale), sorted best-first.
+
+    Only songs with cached analysis are scored (instant — no audio decode);
+    unanalyzed songs are counted in ``skipped_unanalyzed`` so callers can
+    surface "run analyze-missing to widen the pool".
+    """
+    from scripts.core.track_metadata import MetadataClient
+
+    meta_src = _meta_from_cache(source_dir)
+    if meta_src is None:
+        return {"matches": [], "scored": 0, "skipped_unanalyzed": 0,
+                "error": f"'{source_dir.name}' has no cached analysis — analyze it first"}
+
+    client = MetadataClient()
+    matches: List[Dict[str, Any]] = []
+    scored = 0
+    skipped = 0
+    for d in library_dir.iterdir():
+        if not d.is_dir() or d.name == source_dir.name:
+            continue
+        meta = _meta_from_cache(d)
+        if meta is None:
+            skipped += 1
+            continue
+        s = client.compatibility_score(meta_src, meta)
+        scored += 1
+        pct = round(float(s.get("overall", 0.0)) * 100.0, 1)
+        if pct < min_score:
+            continue
+        matches.append({
+            "name":       d.name,
+            "score":      pct,
+            "key_score":  round(float(s.get("key_score", 0.0)), 3),
+            "bpm_score":  round(float(s.get("bpm_score", 0.0)), 3),
+            "energy_score": round(float(s.get("energy_score", 0.0)), 3),
+            "bpm":        meta.bpm,
+            "camelot":    meta.camelot,
+            "key_info":   s.get("key_info"),
+        })
+    matches.sort(key=lambda m: m["score"], reverse=True)
+    return {
+        "matches": matches[:limit],
+        "scored": scored,
+        "skipped_unanalyzed": skipped,
+    }

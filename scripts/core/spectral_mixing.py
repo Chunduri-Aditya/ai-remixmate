@@ -134,6 +134,13 @@ def masking_gain_curve(
     itself (not among its rank_thresh loudest bands at that frame) but IS
     essential to the maskee (among the maskee's rank_thresh loudest bands).
 
+    strength=0.0 (the shipped config default, dj.masking_eq_strength) is NOT
+    "off" — Eq.(2)'s multiplier is 2**strength, so strength=0.0 still applies
+    a full 1x masking gain, not zero. This is the paper's own formula, not a
+    bug here; the actual A/B kill switch is dj.masking_eq_enabled. Read
+    "strength" as an intensity exponent on top of an always-active effect,
+    not a linear 0=disabled scale.
+
     masker_db / maskee_db: [n_bands, n_frames] dB magnitude (compute_band_energies()).
     Returns: [n_bands, n_frames] gain in dB, always <= 0, magnitude <= max_atten_db.
     """

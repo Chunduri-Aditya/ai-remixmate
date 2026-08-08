@@ -30,6 +30,10 @@ remix:
 separation:
   model: htdemucs             # htdemucs | htdemucs_ft | mdx_extra
   device: auto                # auto | cpu | cuda | mps (Apple Silicon)
+  preview_seconds: 60.0        # Default window for preview-tier separation (live preview / PiP
+                               #   widget) — only used by callers that opt into
+                               #   separate_song_stems(preview_seconds=...). Full-quality library
+                               #   separation always processes the whole track regardless.
 
 # ---------------------------------------------------------------------------
 download:
@@ -72,6 +76,11 @@ dj:                             # DJ-style transition engine
                                 #   EQ easing the mix's spectrum from A's outro to B's profile
                                 #   across the overlap (bass band untouched)
   spectral_sync_max_db: 4.0     # Per-band gain cap for the sync EQ
+  transition_confidence_threshold: 0.30
+                                # Below this blended harmonic/spectral-match score, fall back to
+                                #   the plain crossfade instead of the full stem-aware blend, even
+                                #   when both songs have stems on disk (scripts/api/task_modules/
+                                #   remix.py::_should_use_stem_blend())
 
 # ---------------------------------------------------------------------------
 library:                        # Smart storage management

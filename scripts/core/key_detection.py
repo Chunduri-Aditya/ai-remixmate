@@ -374,12 +374,17 @@ def detect_key(audio: np.ndarray, sr: int,
 
 def detect_key_segments(audio: np.ndarray, sr: int,
                         segment_seconds: float = 30.0,
-                        profile: str = 'ks') -> List[KeyResult]:
+                        profile: str = 'ks') -> List[Tuple[float, KeyResult]]:
     """
     Perform segment-wise key detection for tracks with key changes.
 
     Divides the audio into overlapping segments and detects the key in each,
     useful for identifying key modulations or key changes during breakdowns.
+    The detection itself is unchanged detect_key() per segment — only the
+    packaging is richer than a bare list, so callers can place each result
+    in time without re-deriving the segment/hop math (DJ_ENGINE_IMPROVEMENT_
+    PLAN.md §1.3; this function had zero callers before that wiring, so
+    enriching the return shape here doesn't break anything).
 
     Args:
         audio: Audio time-series (mono)
@@ -388,14 +393,15 @@ def detect_key_segments(audio: np.ndarray, sr: int,
         profile: Tonal profile passed to detect_key ('ks', 'edma', 'edmm', 'auto')
 
     Returns:
-        List of KeyResult objects, one per segment
+        List of (start_time_seconds, KeyResult) tuples, one per segment,
+        in chronological order.
     """
     segment_samples = int(segment_seconds * sr)
     if len(audio) < segment_samples:
         # Audio is shorter than one segment — return single detection
-        return [detect_key(audio, sr, profile=profile)]
+        return [(0.0, detect_key(audio, sr, profile=profile))]
 
-    results: List[KeyResult] = []
+    results: List[Tuple[float, KeyResult]] = []
     # 50% overlap between segments
     hop_samples = segment_samples // 2
 
@@ -409,11 +415,11 @@ def detect_key_segments(audio: np.ndarray, sr: int,
             break
 
         result = detect_key(segment, sr, profile=profile)
-        results.append(result)
+        results.append((start / sr, result))
 
         start += hop_samples
 
-    return results if results else [detect_key(audio, sr, profile=profile)]
+    return results if results else [(0.0, detect_key(audio, sr, profile=profile))]
 
 
 # ── Camelot wheel utilities ───────────────────────────────────────────────────

@@ -323,3 +323,41 @@
 .inspector-job-card__retry:hover {
   background: var(--color-amber-glow);
 }
+
+/* Feedback thumbs (SELF_IMPROVING_DJ_RESEARCH.md §3, Stage A) */
+.inspector-job-card__feedback {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.inspector-job-card__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+
+.inspector-job-card__thumb:hover:not(:disabled) {
+  background: var(--color-border-subtle);
+  color: var(--color-text-primary);
+}
+
+.inspector-job-card__thumb:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.inspector-job-card__thumb--active {
+  opacity: 1;
+  color: var(--color-amber-500);
+  border-color: var(--color-amber-500);
+}

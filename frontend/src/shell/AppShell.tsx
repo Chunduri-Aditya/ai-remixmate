@@ -16,6 +16,7 @@ import { useJobToasts } from '@/hooks/useJobToasts'
 import { ShortcutsModal } from '@/components/ShortcutsModal'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { PageErrorBoundary } from '@/components/PageErrorBoundary'
+import { PlayerBar } from '@/components/PlayerBar'
 import './AppShell.css'
 
 function JobToastWatcher() {
@@ -110,6 +111,7 @@ export function AppShell() {
 
         {inspectorOpen && <RightInspector />}
       </div>
+      <PlayerBar />
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
     </ToastProvider>
   )

@@ -49,18 +49,27 @@ def _kweight_coefficients(sr: int) -> Tuple:
     if sr in _KW_CACHE:
         return _KW_CACHE[sr]
 
-    # Stage 1: shelving filter
-    # Reference: Giannoulis et al. AES 2012 / ITU-R BS.1770
+    # Stage 1: high-shelving pre-filter (+4 dB shelf above ~1.5 kHz).
+    # Reference: Giannoulis, Massberg & Reiss (JAES 2013) analytic K-weighting
+    # coefficients / ITU-R BS.1770.  The shelf gain Vh must appear on the
+    # numerator's constant and middle terms (with Vb = Vh**0.4996 on the K/Q
+    # term); that is what makes H(z) → Vh (+4 dB) at Nyquist and → 1 (0 dB) at
+    # DC — an actual high shelf.  The previous numerator used 1.0 on those
+    # terms, collapsing the shelf to 0 dB at HF (a mid-bell, not a shelf) and
+    # making compute_lufs deviate from a BS.1770 reference meter by several LU
+    # in a frequency-dependent way.  Verified against the published 48 kHz
+    # reference coefficients (b0≈1.53512, a2≈0.73248).
     db = 3.99984385397
     f0 = 1681.97437553
     Q  = 0.7071752369
     K  = np.tan(np.pi * f0 / sr)
-    Vb = 10 ** (db / 20.0)
+    Vh = 10 ** (db / 20.0)       # full shelf gain (linear)
+    Vb = Vh ** 0.4996            # mid-band coupling term (Giannoulis)
 
     b1 = np.array([
-        1.0 + Vb / Q * K + K ** 2,
-        2.0 * (K ** 2 - 1.0),
-        1.0 - Vb / Q * K + K ** 2,
+        Vh + Vb / Q * K + K ** 2,
+        2.0 * (K ** 2 - Vh),
+        Vh - Vb / Q * K + K ** 2,
     ])
     a1 = np.array([
         1.0 + 1.0 / Q * K + K ** 2,
@@ -70,9 +79,22 @@ def _kweight_coefficients(sr: int) -> Tuple:
     b1 = b1 / a1[0]
     a1 = a1 / a1[0]
 
-    # Stage 2: high-pass (Butterworth, fc = 38.13547 Hz)
-    fc = 38.13547
-    b2, a2 = signal.butter(2, fc / (sr / 2.0), btype='high')
+    # Stage 2: RLB high-pass (2nd-order, fc = 38.13547 Hz, Q = 0.50033).
+    # BS.1770's RLB stage is NOT a maximally-flat Butterworth (Q = 0.7071) —
+    # scipy.signal.butter places the poles at the wrong Q and leaves a ~2–3 LU
+    # error on deep-bass content vs a reference meter.  Derive the poles
+    # analytically at the spec Q so the response matches BS.1770 (verified
+    # against the published 48 kHz reference a = [1, -1.99004745, 0.99007225]).
+    fc  = 38.13547
+    Qhp = 0.5003270373238773
+    Khp = np.tan(np.pi * fc / sr)
+    a0_hp = 1.0 + Khp / Qhp + Khp ** 2
+    b2 = np.array([1.0, -2.0, 1.0]) / a0_hp
+    a2 = np.array([
+        a0_hp,
+        2.0 * (Khp ** 2 - 1.0),
+        1.0 - Khp / Qhp + Khp ** 2,
+    ]) / a0_hp
 
     _KW_CACHE[sr] = (b1, a1, b2, a2)
     return b1, a1, b2, a2
@@ -247,20 +269,47 @@ def apply_limiter(
     release_ms:     float = 50.0,
     attack_ms:      float = 2.0,
     sr:             int   = 44100,
+    oversample:     int   = 4,
 ) -> np.ndarray:
     """
     Brick-wall true-peak limiter with look-ahead gain reduction.
 
     Algorithm:
-      1. Compute peak envelope with a look-ahead window (maximum filter)
-      2. Where envelope exceeds ceiling, compute required gain reduction
+      1. Oversample the signal 4x (ITU-R's own recommended factor for
+         true-peak detection)
+      2. Compute peak envelope with a look-ahead window (maximum filter) on
+         the oversampled signal — where it exceeds ceiling, compute the
+         required gain reduction
       3. Smooth gain curve with independent attack/release time constants —
          fast attack so the look-ahead window's advance warning is actually
          used, slow release so gain recovery doesn't pump (see
          _smooth_gain_envelope docstring for why these must differ)
-      4. Apply gain, then hard-clip as a true safety net (should now fire
-         rarely — under the old symmetric smoothing it was firing as the
-         primary limiting mechanism on dense transient material)
+      4. Apply gain and hard-clip AT the oversampled rate (so the safety net
+         can see inter-sample peaks, unlike a native-rate clip), then
+         decimate the fully-limited oversampled audio back to native rate
+      5. Verify: re-measure the decimated output's own true peak (one more
+         oversampled pass) and, if still over ceiling, apply one exact
+         corrective linear gain. Decimation's reconstruction filter rings
+         slightly on the sharp corner a hard clip creates (classic
+         Gibbs-type behavior), so step 4's clip alone measurably isn't
+         airtight — two earlier versions of this fix (oversampling only the
+         gain envelope; then oversampled clip without verification) each
+         left a fraction of a dB of overshoot on razor-sharp transient
+         material. This step makes the ceiling a guarantee by measurement
+         rather than by assuming the DSP chain landed under it.
+
+    True-peak detection: a signal can measure "safe" using only its discrete
+    sample values (np.abs(audio).max() below ceiling) while its
+    reconstructed analog waveform still overshoots between samples — this is
+    exactly what ITU-R BS.1770-4 Annex 2 "true peak" measures, and what
+    downstream lossy encoders / D/A conversion actually see. The previous
+    version of this function detected and limited on sample-domain peaks
+    only, despite being named/documented as a true-peak limiter — measured
+    up to +2 dB of inter-sample overshoot above ceiling on hot transient
+    material even though every sample individually reported within ceiling.
+    Oversampling by 4x (ITU-R's own recommended factor) before peak
+    detection makes those inter-sample peaks visible to the detector, so the
+    gain reduction that gets computed actually accounts for them.
 
     Args:
         ceiling_db:   True-peak ceiling (default -1 dBFS)
@@ -270,16 +319,29 @@ def apply_limiter(
                       before they pass through)
         release_ms:   Gain-recovery release time constant (default 50 ms —
                       slow enough to avoid audible pumping)
+        oversample:   Oversampling factor for true-peak detection (default
+                      4x, matching ITU-R BS.1770-4 Annex 2). Set to 1 to
+                      restore the old sample-peak-only behavior.
     """
-    ceiling   = 10.0 ** (ceiling_db / 20.0)
-    la_samp   = max(1, int(sr * lookahead_ms  / 1000.0))
-    att_samp  = max(1, int(sr * attack_ms  / 1000.0))
-    rel_samp  = max(1, int(sr * release_ms / 1000.0))
+    ceiling = 10.0 ** (ceiling_db / 20.0)
+    audio = audio.astype(np.float32)
+    os_factor = max(1, int(oversample))
 
-    peak_env  = np.abs(audio.astype(np.float32))
-    peak_env  = maximum_filter1d(peak_env, size=la_samp * 2)
+    if os_factor > 1:
+        audio_os = signal.resample_poly(audio, os_factor, 1).astype(np.float32)
+    else:
+        audio_os = audio
+    sr_os = sr * os_factor
 
-    # Per-sample target gain
+    la_samp  = max(1, int(sr_os * lookahead_ms  / 1000.0))
+    att_samp = max(1, int(sr_os * attack_ms  / 1000.0))
+    rel_samp = max(1, int(sr_os * release_ms / 1000.0))
+
+    peak_env = np.abs(audio_os)
+    peak_env = maximum_filter1d(peak_env, size=la_samp * 2)
+
+    # Per-sample target gain, computed at the oversampled rate so
+    # inter-sample peaks factor into the reduction amount.
     reduction = np.where(
         peak_env > ceiling,
         ceiling / np.maximum(peak_env, 1e-10),
@@ -288,10 +350,45 @@ def apply_limiter(
 
     alpha_attack  = float(np.exp(-1.0 / att_samp))
     alpha_release = float(np.exp(-1.0 / rel_samp))
-    gain = _smooth_gain_envelope(reduction, alpha_attack, alpha_release)
-    gain = np.clip(gain, 0.0, 1.0).astype(np.float32)
+    gain_os = _smooth_gain_envelope(reduction, alpha_attack, alpha_release)
+    gain_os = np.clip(gain_os, 0.0, 1.0).astype(np.float32)
 
-    limited = (audio * gain).astype(np.float32)
+    # Gain application AND the safety-net clip both happen at the
+    # oversampled rate, where inter-sample peaks are actually visible —
+    # clipping only after decimating back to native rate would miss the
+    # exact peaks this function exists to catch.
+    limited_os = (audio_os * gain_os).astype(np.float32)
+    limited_os = np.clip(limited_os, -ceiling, ceiling)
+
+    if os_factor > 1:
+        # Polyphase decimation back to native rate — standard sample-rate
+        # conversion with a built-in anti-aliasing filter.
+        limited = signal.resample_poly(limited_os, 1, os_factor).astype(np.float32)
+        if len(limited) < len(audio):
+            limited = np.pad(limited, (0, len(audio) - len(limited)), mode="edge")
+        elif len(limited) > len(audio):
+            limited = limited[: len(audio)]
+    else:
+        limited = limited_os
+
+    limited = np.clip(limited, -ceiling, ceiling)
+
+    if os_factor > 1:
+        # Decimation's reconstruction filter measurably reintroduces
+        # overshoot right at a hard-clipped edge (the clip creates a sharp
+        # corner — decimation's FIR filter rings on it, classic Gibbs
+        # behavior). Rather than guess a safety-margin dB to pre-compensate
+        # for that (fragile — tuned to one test signal, wrong for another),
+        # verify the actual output's true peak directly and, if it's still
+        # over ceiling, apply one exact corrective linear gain. This is a
+        # guarantee by measurement, not by hoping the DSP chain landed
+        # under threshold — the correction is a fraction of a dB in
+        # practice since the bulk of the reduction already happened above.
+        verify_os = signal.resample_poly(limited, os_factor, 1)
+        true_peak = float(np.max(np.abs(verify_os))) + 1e-12
+        if true_peak > ceiling:
+            limited = (limited * (ceiling / true_peak)).astype(np.float32)
+
     return np.clip(limited, -ceiling, ceiling)
 
 

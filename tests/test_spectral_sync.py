@@ -222,3 +222,75 @@ class TestTransitionTimeline:
             drop_position = None
         tl = _transition_timeline(plan, _Struct())
         assert tl["drop_b_s"] is None
+
+
+class TestConfidenceGatedStemBlend:
+    """
+    DJ_ENGINE_IMPROVEMENT_PLAN.md §2.1 — _should_use_stem_blend() gates the
+    full stem-aware render path on compatibility, not just on whether stem
+    files happen to exist on disk.
+    """
+
+    def test_missing_stems_never_blends_regardless_of_confidence(self):
+        from scripts.api.task_modules.remix import _should_use_stem_blend
+
+        use_blend, confidence = _should_use_stem_blend(
+            has_stems_a=False, has_stems_b=True,
+            harmonic_score=0.95, spectral_score=0.95, threshold=0.30,
+        )
+        assert use_blend is False
+        assert confidence is None
+
+    def test_high_confidence_pair_uses_stem_blend(self):
+        from scripts.api.task_modules.remix import _should_use_stem_blend
+
+        use_blend, confidence = _should_use_stem_blend(
+            has_stems_a=True, has_stems_b=True,
+            harmonic_score=0.8, spectral_score=0.7, threshold=0.30,
+        )
+        assert use_blend is True
+        assert confidence == pytest.approx(0.5 * 0.8 + 0.5 * 0.7)
+
+    def test_low_confidence_pair_falls_back_to_plain_crossfade(self):
+        from scripts.api.task_modules.remix import _should_use_stem_blend
+
+        use_blend, confidence = _should_use_stem_blend(
+            has_stems_a=True, has_stems_b=True,
+            harmonic_score=0.1, spectral_score=0.1, threshold=0.30,
+        )
+        assert use_blend is False
+        assert confidence == pytest.approx(0.1)
+
+    def test_missing_spectral_score_falls_back_to_harmonic_alone(self):
+        from scripts.api.task_modules.remix import _should_use_stem_blend
+
+        use_blend, confidence = _should_use_stem_blend(
+            has_stems_a=True, has_stems_b=True,
+            harmonic_score=0.5, spectral_score=None, threshold=0.30,
+        )
+        assert use_blend is True
+        assert confidence == pytest.approx(0.5)
+
+    def test_unset_harmonic_score_sentinel_does_not_block_blend(self):
+        """harmonic_score=-1.0 ("not computed", e.g. some classic-engine
+        paths) is missing data, not evidence of a bad pairing — must not
+        block the blend, same convention as compatibility_score()'s
+        missing-metadata handling elsewhere in this codebase."""
+        from scripts.api.task_modules.remix import _should_use_stem_blend
+
+        use_blend, confidence = _should_use_stem_blend(
+            has_stems_a=True, has_stems_b=True,
+            harmonic_score=-1.0, spectral_score=0.9, threshold=0.30,
+        )
+        assert use_blend is True
+        assert confidence is None
+
+    def test_confidence_exactly_at_threshold_still_blends(self):
+        from scripts.api.task_modules.remix import _should_use_stem_blend
+
+        use_blend, confidence = _should_use_stem_blend(
+            has_stems_a=True, has_stems_b=True,
+            harmonic_score=0.30, spectral_score=None, threshold=0.30,
+        )
+        assert use_blend is True
+        assert confidence == pytest.approx(0.30)

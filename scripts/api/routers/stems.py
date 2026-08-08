@@ -10,7 +10,7 @@ POST /stems/compress-batch     — compress stems for all library songs (queued 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from scripts.api import jobs as job_store
-from scripts.api.routers._helpers import _require_song, _check_job_cap
+from scripts.api.routers._helpers import _check_job_cap, _require_song
 from scripts.api.schemas import (
     BatchStemSplitRequest,
     JobResponse,
@@ -50,18 +50,40 @@ def stem_split(req: StemSplitRequest, background_tasks: BackgroundTasks = None):
 def stem_split_batch(req: BatchStemSplitRequest, background_tasks: BackgroundTasks = None):
     """
     Run Demucs on a list of songs (or ALL library songs if songs=null).
-    Songs that already have vocals.wav are skipped unless skip_existing=false.
+    Songs that already have all 4 stems are skipped unless skip_existing=false.
     """
     _check_job_cap()
     songs = req.songs
     if not songs:
-        # Default: all library songs that have a full.wav
+        # Default: every library song separate_song_stems() can actually
+        # consume — full.wav or its full_enhanced.wav fallback (see
+        # scripts/core/audio_source.py::resolve_source_file()). Deliberately
+        # NOT has_source_audio(), which also returns True for stems-only
+        # songs (already fully split, or split with full.wav/full_enhanced
+        # pruned away) — those have no single-file source for
+        # separate_song_stems() to read, so including them here just
+        # enqueues a song that immediately fails with "no source audio".
+        from scripts.core.audio_source import resolve_source_file
         songs = [
             d.name for d in sorted(LIBRARY_DIR.iterdir())
-            if d.is_dir() and (d / "full.wav").exists()
+            if d.is_dir() and resolve_source_file(d.name) is not None
         ]
+    else:
+        # req.songs is caller-supplied — validate each name the same way
+        # _require_song() does (path-traversal confinement to LIBRARY_DIR)
+        # before it can reach _prune_after_split()'s unlink() calls.
+        # Invalid/nonexistent entries are dropped rather than failing the
+        # whole batch, matching delete_songs_batch's best-effort pattern.
+        validated = []
+        for name in songs:
+            try:
+                _require_song(name)
+                validated.append(name)
+            except HTTPException:
+                continue
+        songs = validated
     if not songs:
-        raise HTTPException(status_code=400, detail="No songs found in library with full.wav")
+        raise HTTPException(status_code=400, detail="No songs found in library with usable source audio")
 
     job_id = job_store.create_job(
         JobType.ANALYZE, {"n_songs": len(songs), "type": "batch_stem_split"}

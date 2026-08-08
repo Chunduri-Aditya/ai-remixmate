@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from scripts.core import vocal_analyzer
+from scripts.core.track_metadata import MetadataClient, TrackMetadata
 from scripts.core.vocal_analyzer import (
     F0Curve,
     analyze_vocal_performance,
@@ -124,3 +125,62 @@ class TestVocalAnalyzer:
     def test_invalid_sample_rate_raises(self):
         with pytest.raises(ValueError, match="sample rate"):
             analyze_vocal_performance(np.ones(100, dtype=np.float32), 0)
+
+
+class TestVocalClashPenaltyIntegration:
+    """
+    DJ_ENGINE_IMPROVEMENT_PLAN.md §1.2 — vocal_analyzer.py's voiced_fraction
+    + mean_pitch_hz feed compatibility_score()'s vocal_clash_penalty as a
+    register-aware upgrade over the old vocal_density energy-ratio proxy,
+    which scored two vocals purely on how much energy sat in the 300-3400 Hz
+    band and could not distinguish "same register, high masking risk" from
+    "an octave-plus apart, low masking risk".
+    """
+
+    @staticmethod
+    def _vocal_report(freq_hz: float, sr: int = 22050, duration_s: float = 2.0):
+        audio = _sine(freq_hz, sr, duration_s, amp=0.5)
+        return analyze_vocal_performance(audio, sr, backend="autocorrelation")
+
+    @staticmethod
+    def _meta_from_report(report) -> TrackMetadata:
+        return TrackMetadata(
+            title="t", artist="a", bpm=120.0, camelot="8A",
+            vocal_voiced_fraction=report.voiced_fraction,
+            vocal_mean_pitch_hz=report.mean_pitch_hz,
+        )
+
+    def test_same_register_scores_higher_clash_than_different_register(self):
+        client = MetadataClient()
+
+        report_a = self._vocal_report(220.00)    # A3
+        report_close = self._vocal_report(246.94)  # B3, ~196 cents above A3 — same register
+        report_far = self._vocal_report(880.00)   # A5, 2400 cents above A3 — two octaves apart
+
+        meta_a = self._meta_from_report(report_a)
+        meta_close = self._meta_from_report(report_close)
+        meta_far = self._meta_from_report(report_far)
+
+        assert meta_a.vocal_voiced_fraction > 0.85   # sanity: strong "vocal" in both
+        assert meta_far.vocal_voiced_fraction > 0.85
+
+        score_close = client.compatibility_score(meta_a, meta_close)
+        score_far = client.compatibility_score(meta_a, meta_far)
+
+        # Same distinction the old vocal_density*vocal_density proxy could
+        # never make: two equally "strong vocal" tracks score very
+        # differently depending on register overlap.
+        assert score_close["vocal_clash_penalty"] > score_far["vocal_clash_penalty"]
+        assert score_far["vocal_clash_penalty"] == 0.0
+        assert score_close["vocal_clash_penalty"] > 0.0
+
+    def test_falls_back_to_vocal_density_when_analyzer_data_absent(self):
+        """Backward compatibility: no vocal_analyzer data on either track ->
+        identical to the pre-existing vocal_density*vocal_density behavior."""
+        client = MetadataClient()
+        meta_a = TrackMetadata(title="a", artist="", bpm=120.0, camelot="8A", vocal_density=0.6)
+        meta_b = TrackMetadata(title="b", artist="", bpm=120.0, camelot="8A", vocal_density=0.6)
+
+        score = client.compatibility_score(meta_a, meta_b)
+
+        assert score["vocal_clash_penalty"] == pytest.approx(min(0.30, 0.6 * 0.6), abs=1e-6)

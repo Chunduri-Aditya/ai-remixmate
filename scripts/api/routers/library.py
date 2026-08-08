@@ -215,9 +215,26 @@ def storage_status():
 @router.post("/library/storage/prune", response_model=StoragePruneResponse, tags=["library", "storage"])
 def storage_prune():
     """
-    Delete full.wav for every song that already has all 4 stems — they're
-    redundant once stems exist. Synchronous: it's just file deletes, fast
-    even across a large library.
+    Delete full.wav AND full_enhanced.wav for every song that already has
+    all 4 stems — both are redundant once stems exist. Synchronous: it's
+    just file deletes, fast even across a large library.
+
+    Both branches use force=False deliberately. force=True bypasses the
+    all-4-stems check entirely (see prune_raw()/prune_enhanced()'s
+    docstrings) — a prior version of this endpoint used force=True on the
+    full.wav branch, which meant calling this on a freshly-downloaded,
+    never-split song (full.wav only, no stems, no full_enhanced.wav) deleted
+    its only audio outright, contradicting this endpoint's own docstring
+    ("for every song that already has all 4 stems") and confirmed by direct
+    reproduction. Neither branch should ever delete a song's last remaining
+    source audio, full stop — that's the actual invariant this endpoint
+    exists to respect, not just a property of the full_enhanced.wav branch.
+
+    full_enhanced.wav is checked independently of full.wav (not only as a
+    fallback) because a song can have full_enhanced.wav as its only
+    remaining full-length audio — e.g. full.wav was already pruned/evicted
+    before stems finished — and that file was never swept by anything until
+    prune_enhanced() existed.
     """
     from scripts.core.library import get_library_manager
 
@@ -225,13 +242,23 @@ def storage_prune():
     pruned: List[str] = []
     freed_bytes = 0
     for entry in mgr.list_songs():
-        if not entry.has_full_wav:
-            continue
-        full_wav = Path(entry.path) / "full.wav"
-        size = full_wav.stat().st_size if full_wav.exists() else 0
-        if mgr.prune_raw(entry.name, force=True):
-            pruned.append(entry.name)
-            freed_bytes += size
+        song_dir_path = Path(entry.path)
+
+        if entry.has_full_wav:
+            full_wav = song_dir_path / "full.wav"
+            size = full_wav.stat().st_size if full_wav.exists() else 0
+            if mgr.prune_raw(entry.name, force=False):
+                pruned.append(entry.name)
+                freed_bytes += size
+
+        enhanced_wav = song_dir_path / "full_enhanced.wav"
+        if enhanced_wav.exists():
+            size = enhanced_wav.stat().st_size
+            if mgr.prune_enhanced(entry.name, force=False):
+                if entry.name not in pruned:
+                    pruned.append(entry.name)
+                freed_bytes += size
+
     return StoragePruneResponse(pruned=pruned, freed_mb=round(freed_bytes / 1_048_576, 1))
 
 

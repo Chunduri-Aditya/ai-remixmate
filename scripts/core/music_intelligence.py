@@ -109,6 +109,15 @@ class MusicVector:
 
     # ─── Vocals ──────────────────────────────────────────────────────────────
     vocal_density:    float = 0.5   # 0 = instrumental, 1 = heavily vocal
+    # Richer vocal_analyzer.py signal (CREPE/autocorrelation F0 tracking on
+    # the isolated vocals stem) — 0.0 means "not computed" (no stem available
+    # or vocal_analyzer failed), distinct from a real measurement of silence.
+    # Wired in alongside vocal_density rather than replacing it: consumers
+    # (compatibility_score()) treat 0.0 as missing data and fall back to the
+    # vocal_density energy-ratio proxy. See REMIX_QUALITY_INSIGHTS.md finding
+    # #1 / DJ_ENGINE_IMPROVEMENT_PLAN.md §1.2.
+    vocal_mean_pitch_hz:    float = 0.0   # mean F0 of voiced frames, Hz
+    vocal_voiced_fraction:  float = 0.0   # 0-1, fraction of stem with a trackable pitch
 
     # ─── Harmony ─────────────────────────────────────────────────────────────
     chord_sequence:   List[str]   = field(default_factory=list)
@@ -486,6 +495,19 @@ def compute_track_vector(
                 vocals_path = p
                 break
     vec.vocal_density = detect_vocal_density(audio, sr, vocals_path=vocals_path)
+
+    # Richer pitch-register + voiced-fraction signal, only computable when an
+    # isolated vocals stem exists (F0 tracking on a full mix is unreliable).
+    # Graceful degradation: any failure leaves the 0.0 defaults, which
+    # compatibility_score() reads as "no data" and falls back to vocal_density.
+    if vocals_path is not None:
+        try:
+            from scripts.core.vocal_analyzer import analyze_vocal_file
+            vreport = analyze_vocal_file(vocals_path, duration=120.0)
+            vec.vocal_mean_pitch_hz = float(vreport.mean_pitch_hz)
+            vec.vocal_voiced_fraction = float(vreport.voiced_fraction)
+        except Exception as exc:
+            log.debug('vocal_analyzer failed for %s: %s', vocals_path, exc)
 
     # ── Chord progression ─────────────────────────────────────────────────────
     vec.chord_sequence = compute_chord_progression(audio, sr)

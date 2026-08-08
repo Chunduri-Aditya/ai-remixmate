@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { libraryApi, analysisApi, remixApi, audioApi } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
+import { usePlayerStore } from '@/stores/playerStore'
 import { WaveformDeck } from '@/components/WaveformDeck'
 import { TransitionTimeline } from '@/components/TransitionTimeline'
 import { RemixControls, RemixOptions, REMIX_DEFAULTS } from '@/components/RemixControls'
@@ -339,6 +340,14 @@ function RemixResultCard({ job }: { job: import('@/types').Job }) {
       {audioUrl && (
         <audio controls src={audioUrl} className="md-result-card__player" />
       )}
+      {audioUrl && (
+        <button
+          className="md-result-card__player-btn"
+          onClick={() => usePlayerStore.getState().playUrl(audioUrl, 'DJ Mix — just rendered')}
+        >
+          <Play size={11} /> Play in global player (EQ)
+        </button>
+      )}
     </div>
   )
 }
@@ -396,6 +405,15 @@ export default function MixDeck() {
     staleTime: 300_000,
   })
 
+  // Strict ranked matches (full compatibility scorer, ≥85, sorted best-first).
+  // 409 = Deck A not analyzed yet — treat as "no strict list available".
+  const { data: strictMatches } = useQuery({
+    queryKey: ['compat-matches', songA],
+    queryFn: () => analysisApi.compatibilityMatches(songA, 85, 30).catch(() => null),
+    enabled: !!songA,
+    staleTime: 300_000,
+  })
+
   const songNames  = useMemo(() => songs.map((s) => s.name).sort(), [songs])
   const infoA      = useMemo(() => songs.find((s) => s.name === songA), [songs, songA])
   const infoB      = useMemo(() => songs.find((s) => s.name === songB), [songs, songB])
@@ -404,11 +422,14 @@ export default function MixDeck() {
   const songInfoA = detailA ?? infoA
   const songInfoB = detailB ?? infoB
 
-  // Names of similar songs for Deck B, excluding Deck A's song itself
-  const similarNamesForB = useMemo(
-    () => similarTracksA.map((t) => t.name).filter((n) => n !== songA),
-    [similarTracksA, songA],
-  )
+  // Names for the "Similar to Deck A" dropdown group. Prefer the strict
+  // ≥85 compatibility list (already sorted best-first); fall back to the
+  // vector-similarity list when nothing clears the bar.
+  const similarNamesForB = useMemo(() => {
+    const strict = (strictMatches?.matches ?? []).map((m) => m.name)
+    const names = strict.length > 0 ? strict : similarTracksA.map((t) => t.name)
+    return names.filter((n) => n !== songA)
+  }, [strictMatches, similarTracksA, songA])
   const canCompare = songA && songB && songA !== songB
   const shortcutDeck: 'A' | 'B' | null = songA ? 'A' : songB ? 'B' : null
 
@@ -541,6 +562,44 @@ export default function MixDeck() {
           <div className="md-error">{compatError}</div>
         )}
         {compat && <CompatPanel result={compat} />}
+
+        {/* Strict ranked matches for Deck A (full scorer, ≥85, sorted) */}
+        {songA && strictMatches && (
+          <div className="md-matches">
+            <div className="md-matches__head">
+              <span className="md-matches__title font-display">
+                Top matches for Deck A <span className="font-mono">≥{strictMatches.min_score}</span>
+              </span>
+              <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
+                {strictMatches.matches.length} of {strictMatches.scored} scored
+                {strictMatches.skipped_unanalyzed > 0 &&
+                  ` · ${strictMatches.skipped_unanalyzed} unanalyzed skipped`}
+              </span>
+            </div>
+            {strictMatches.matches.length === 0 ? (
+              <div className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
+                Nothing scores ≥{strictMatches.min_score} against this track — try another Deck A
+                or analyze more of the library.
+              </div>
+            ) : (
+              <div className="md-matches__list">
+                {strictMatches.matches.map((m) => (
+                  <button
+                    key={m.name}
+                    className={`md-match-row ${m.name === songB ? 'md-match-row--active' : ''}`}
+                    onClick={() => { setSongB(m.name); setCompat(null) }}
+                    title={`Load into Deck B — ${m.key_info ?? ''}`}
+                  >
+                    <span className="md-match-row__score font-mono">{Math.round(m.score)}</span>
+                    <span className="md-match-row__name">{m.name}</span>
+                    {m.camelot && <span className="md-match-row__chip">{m.camelot}</span>}
+                    <span className="md-match-row__bpm font-mono">{m.bpm.toFixed(0)} bpm</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {songA && songB && (
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 'var(--space-2)' }}>
             <CamelotWheel keyA={songInfoA?.key} keyB={songInfoB?.key} size={220} />

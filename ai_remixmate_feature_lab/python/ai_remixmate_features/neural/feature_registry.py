@@ -3,6 +3,13 @@ from __future__ import annotations
 from .core import NeuralFeatureSpec, TinyOnlineMLP
 from .vectorizers import PAIR_VECTOR_SIZE, TRACK_VECTOR_SIZE
 
+# Matches scripts/core/spectral_matching.py's N_BANDS constant (24 mel bands
+# in a transition profile) — redefined independently here rather than
+# imported, per this lab's isolation rule (README.md: "Nothing here imports
+# from scripts/"). See ai_remixmate_features/research/spectral_entry_match.py
+# (DJ_ENGINE_IMPROVEMENT_PLAN.md §5.1) for the prototype that uses this spec.
+SPECTRAL_SIMS_SIZE = 24
+
 
 FEATURE_MODEL_SPECS: dict[str, NeuralFeatureSpec] = {
     "bpm_compatibility": NeuralFeatureSpec(
@@ -74,6 +81,17 @@ FEATURE_MODEL_SPECS: dict[str, NeuralFeatureSpec] = {
         name="waveform_interest",
         input_size=TRACK_VECTOR_SIZE,
         description="Learns which track regions tend to become cues, loops, or transition points.",
+    ),
+    "spectral_entry_match": NeuralFeatureSpec(
+        name="spectral_entry_match",
+        input_size=SPECTRAL_SIMS_SIZE,
+        hidden_size=12,
+        description=(
+            "Research prototype (DJ_ENGINE_IMPROVEMENT_PLAN.md §5.1): learns to score a "
+            "B-entry candidate's per-mel-band trajectory similarity to A's outro, as an "
+            "alternative to scripts/core/spectral_matching.py's hand-tuned linear weights. "
+            "Not wired to any render path — see reports/spectral_entry_match_prototype.md."
+        ),
     ),
 }
 

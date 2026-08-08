@@ -17,6 +17,7 @@ Run:
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -358,19 +359,105 @@ class TestLibraryManager:
 
     def test_prune_raw_succeeds_with_all_stems(self, tmp_path):
         """prune_raw should delete full.wav when all four stems exist."""
+        import numpy as np
+        import soundfile as sf
         from scripts.core.library import LibraryManager
         lib = tmp_path / "lib"
         song = lib / "FullSong"
         song.mkdir(parents=True)
         (song / "full.wav").write_bytes(b"\x00" * 4096)
+        # Real (if tiny) audio, not raw byte blobs — prune_raw() now
+        # health-probes each stem (_stem_is_healthy) before trusting it as
+        # "safe to delete the last full-length source over", so a fake
+        # non-audio blob would correctly fail that probe and break this test.
+        tone = (0.1 * np.sin(2 * np.pi * 440 * np.arange(4410) / 44100)).astype(np.float32)
         for stem in ("vocals", "drums", "bass", "other"):
-            (song / f"{stem}.wav").write_bytes(b"\x00" * 1024)
+            sf.write(str(song / f"{stem}.wav"), tone, 44100)
 
         mgr = LibraryManager(library_dir=lib)
         mgr.register("FullSong")
         result = mgr.prune_raw("FullSong")
         assert result is True
         assert not (song / "full.wav").exists()
+
+    def test_prune_enhanced_requires_all_stems(self, tmp_path):
+        """prune_enhanced should do nothing if not all stems are present —
+        this is the exact safety property that matters: a song mid-batch
+        (full_enhanced.wav written, Demucs not finished yet) must not lose
+        its only remaining source audio."""
+        from scripts.core.library import LibraryManager
+        lib = tmp_path / "lib"
+        song = lib / "MidBatchSong"
+        song.mkdir(parents=True)
+        (song / "full_enhanced.wav").write_bytes(b"\x00" * 1024)
+        (song / "vocals.wav").write_bytes(b"\x00" * 512)  # only 1/4 stems
+
+        mgr = LibraryManager(library_dir=lib)
+        result = mgr.prune_enhanced("MidBatchSong")
+        assert result is False
+        assert (song / "full_enhanced.wav").exists()
+
+    def test_prune_enhanced_succeeds_with_all_stems(self, tmp_path):
+        """prune_enhanced should delete full_enhanced.wav once all four
+        stems exist — this is the real backlog shape: full.wav already
+        gone, full_enhanced.wav is the only remaining full-length copy,
+        redundant once real stems are on disk."""
+        import numpy as np
+        import soundfile as sf
+        from scripts.core.library import LibraryManager
+        lib = tmp_path / "lib"
+        song = lib / "DoneSong"
+        song.mkdir(parents=True)
+        (song / "full_enhanced.wav").write_bytes(b"\x00" * 4096)
+        tone = (0.1 * np.sin(2 * np.pi * 440 * np.arange(4410) / 44100)).astype(np.float32)
+        for stem in ("vocals", "drums", "bass", "other"):
+            sf.write(str(song / f"{stem}.wav"), tone, 44100)
+
+        mgr = LibraryManager(library_dir=lib)
+        mgr.register("DoneSong")
+        result = mgr.prune_enhanced("DoneSong")
+        assert result is True
+        assert not (song / "full_enhanced.wav").exists()
+
+    def test_prune_enhanced_recognizes_flac_stems(self, tmp_path):
+        """Stems get FLAC-compressed after separation — prune_enhanced must
+        not treat a FLAC-compressed song as still missing stems."""
+        import numpy as np
+        import soundfile as sf
+        from scripts.core.library import LibraryManager
+        lib = tmp_path / "lib"
+        song = lib / "FlacSong"
+        song.mkdir(parents=True)
+        (song / "full_enhanced.wav").write_bytes(b"\x00" * 4096)
+        tone = (0.1 * np.sin(2 * np.pi * 440 * np.arange(4410) / 44100)).astype(np.float32)
+        for stem in ("vocals", "drums", "bass", "other"):
+            sf.write(str(song / f"{stem}.flac"), tone, 44100, format="flac")
+
+        mgr = LibraryManager(library_dir=lib)
+        assert mgr.prune_enhanced("FlacSong") is True
+
+    def test_prune_raw_skips_zero_byte_stem(self, tmp_path):
+        """A zero-byte stem must not count toward 'all 4 present' — this is
+        the actual regression check for the health-probe requirement: a
+        stem that exists on disk but is empty/corrupt (e.g. per-stem LUFS
+        normalisation died mid-write) must not let the last full-length
+        source get deleted out from under it."""
+        import numpy as np
+        import soundfile as sf
+        from scripts.core.library import LibraryManager
+        lib = tmp_path / "lib"
+        song = lib / "CorruptStemSong"
+        song.mkdir(parents=True)
+        (song / "full.wav").write_bytes(b"\x00" * 4096)
+        tone = (0.1 * np.sin(2 * np.pi * 440 * np.arange(4410) / 44100)).astype(np.float32)
+        for stem in ("vocals", "drums", "bass"):
+            sf.write(str(song / f"{stem}.wav"), tone, 44100)
+        (song / "other.wav").touch()  # zero bytes — simulates a killed write
+
+        mgr = LibraryManager(library_dir=lib)
+        result = mgr.prune_raw("CorruptStemSong")
+        assert result is False, "a zero-byte stem must block pruning, not count as present"
+        assert (song / "full.wav").exists()
 
     def test_evict_lru_no_action_when_under_cap(self, tmp_path):
         from scripts.core.library import LibraryManager
@@ -382,6 +469,264 @@ class TestLibraryManager:
         mgr = LibraryManager(library_dir=lib, max_size_gb=100.0)
         evicted = mgr.evict_lru()
         assert evicted == []
+
+    def test_evict_lru_pass1_never_deletes_zero_stem_songs_full_wav(self, tmp_path):
+        """Regression for the same critical bug class as
+        storage_prune()'s force=True fix (see test_storage_prune_safety.py):
+        evict_lru()'s Pass 1 used to call prune_raw(force=True), bypassing
+        the all-4-stems check entirely. For a song with full.wav but zero
+        stems, that deletes its only audio outright — and unlike the manual
+        /library/storage/prune endpoint, evict_lru() can fire automatically
+        via auto_evict_on_download with no user action at all. This test
+        pins an older, fully-stemmed song alongside the zero-stem one so
+        pruning the older song's full.wav alone satisfies the target —
+        isolating whether Pass 1 ever touches the zero-stem song's full.wav."""
+        import numpy as np
+        import soundfile as sf
+        from scripts.core.library import LibraryManager
+
+        lib = tmp_path / "lib"
+        lib.mkdir()
+
+        # Older song (registered first -> sorts first in LRU order): has all
+        # 4 stems, so its full.wav is legitimately redundant and safe to prune.
+        old_song = lib / "OldFullyStemmedSong"
+        old_song.mkdir()
+        (old_song / "full.wav").write_bytes(b"\x00" * (5 * 1024 * 1024))
+        tone = (0.1 * np.sin(2 * np.pi * 440 * np.arange(4410) / 44100)).astype(np.float32)
+        for stem in ("vocals", "drums", "bass", "other"):
+            sf.write(str(old_song / f"{stem}.wav"), tone, 44100)
+
+        # Newer song: full.wav only, zero stems — its only copy of audio.
+        new_song = lib / "NewNeverSplitSong"
+        new_song.mkdir()
+        (new_song / "full.wav").write_bytes(b"\x00" * 1024)
+
+        mgr = LibraryManager(library_dir=lib, max_size_gb=100.0)
+        mgr.register("OldFullyStemmedSong")
+        time.sleep(0.02)
+        mgr.register("NewNeverSplitSong")
+
+        # Target set so pruning OldFullyStemmedSong's full.wav alone (5 MB)
+        # satisfies it — Pass 1 should never need to reach NewNeverSplitSong.
+        current = mgr.get_size_bytes()
+        target_gb = (current - 5 * 1024 * 1024 + 1024) / (1024 ** 3)
+
+        evicted = mgr.evict_lru(target_gb=target_gb)
+
+        assert (new_song / "full.wav").exists(), (
+            "a zero-stem song's only audio must never be deleted by Pass 1 "
+            "— force=True previously bypassed the all-4-stems check unconditionally"
+        )
+        assert not (old_song / "full.wav").exists(), (
+            "a fully-stemmed song's redundant full.wav should still be reclaimed normally"
+        )
+        assert "OldFullyStemmedSong" in evicted
+        assert "NewNeverSplitSong" not in evicted
+
+    def test_evict_lru_pass1_also_prunes_full_enhanced(self, tmp_path):
+        """Pass 1 previously only ever considered full.wav, so a song whose
+        full.wav was already pruned (only full_enhanced.wav + all 4 stems
+        remain) had nothing left to reclaim in Pass 1 and fell straight
+        through to Pass 2's whole-directory deletion — destroying its stems
+        too, when reclaiming the redundant full_enhanced.wav alone would
+        have satisfied the budget."""
+        import numpy as np
+        import soundfile as sf
+        from scripts.core.library import LibraryManager
+
+        lib = tmp_path / "lib"
+        lib.mkdir()
+        song = lib / "EnhancedOnlySong"
+        song.mkdir()
+        (song / "full_enhanced.wav").write_bytes(b"\x00" * (5 * 1024 * 1024))
+        tone = (0.1 * np.sin(2 * np.pi * 440 * np.arange(4410) / 44100)).astype(np.float32)
+        for stem in ("vocals", "drums", "bass", "other"):
+            sf.write(str(song / f"{stem}.wav"), tone, 44100)
+
+        mgr = LibraryManager(library_dir=lib, max_size_gb=0.0000001)
+        mgr.register("EnhancedOnlySong")
+        evicted = mgr.evict_lru()
+
+        assert not (song / "full_enhanced.wav").exists()
+        assert (song / "vocals.wav").exists(), (
+            "Pass 1 should reclaim full_enhanced.wav directly instead of "
+            "escalating straight to whole-directory deletion in Pass 2"
+        )
+        assert "EnhancedOnlySong" in evicted
+
+    def test_index_lock_is_reentrant(self, tmp_path):
+        """Must be threading.RLock, not Lock — evict_lru() calls
+        list_songs() and then prune_raw()/prune_enhanced() internally, each
+        of which acquires self._index_lock again from the same thread. A
+        plain Lock would deadlock the moment a locked method called another
+        locked method without releasing first."""
+        import threading
+        from scripts.core.library import LibraryManager
+
+        lib = tmp_path / "lib"
+        lib.mkdir()
+        mgr = LibraryManager(library_dir=lib)
+        assert type(mgr._index_lock) is type(threading.RLock())
+
+        done = threading.Event()
+
+        def _nested_call():
+            with mgr._index_lock:
+                mgr.touch("nonexistent-song")  # acquires the same lock again
+            done.set()
+
+        t = threading.Thread(target=_nested_call, daemon=True)
+        t.start()
+        t.join(timeout=2.0)
+        assert done.is_set(), "nested lock acquisition hung — lock is not reentrant"
+
+    def test_concurrent_register_does_not_corrupt_index(self, tmp_path):
+        """Many threads registering different songs concurrently (mirrors
+        task_batch_stem_split's ThreadPoolExecutor workers, each calling
+        register()/prune_raw() for its own song) must not lose entries to
+        interleaved _load_index() -> mutate -> _save_index() cycles."""
+        import threading
+        from scripts.core.library import LibraryManager
+
+        lib = tmp_path / "lib"
+        lib.mkdir()
+        mgr = LibraryManager(library_dir=lib)
+
+        n = 20
+        for i in range(n):
+            song = lib / f"Song{i}"
+            song.mkdir()
+            (song / "full.wav").write_bytes(b"\x00" * 128)
+
+        errors = []
+
+        def _register(i):
+            try:
+                mgr.register(f"Song{i}")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=_register, args=(i,)) for i in range(n)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+
+        assert not errors
+        songs = mgr.list_songs()
+        assert len(songs) == n, (
+            f"expected {n} songs in the index after concurrent register(), got "
+            f"{len(songs)} — an unlocked read-modify-write silently drops entries "
+            f"when two threads' index saves interleave"
+        )
+
+
+class TestPlaylistArtifactGuard:
+    """
+    Regression: library/Walking_playlist — a concatenated playlist download
+    (full.wav held multiple tracks; full.info.json carried playlist metadata)
+    was adopted by list_songs()' self-healing and dominated /recommend
+    because its averaged features "matched" nearly everything. Directories
+    with playlist-style full.info.json must never be adopted as songs.
+    """
+
+    @staticmethod
+    def _make_song(lib: Path, name: str, info: dict | None = None) -> Path:
+        d = lib / name
+        d.mkdir(parents=True)
+        (d / "full.wav").write_bytes(b"\x00" * 256)
+        if info is not None:
+            (d / "full.info.json").write_text(json.dumps(info))
+        return d
+
+    def test_concat_playlist_entry_not_adopted(self, tmp_path):
+        """The Walking_playlist form: per-entry info.json with n_entries > 1."""
+        from scripts.core.library import LibraryManager
+        lib = tmp_path / "lib"
+        self._make_song(lib, "RealSong", {"_type": "video", "title": "Real Song"})
+        self._make_song(lib, "Walking_playlist", {
+            "_type": "video", "title": "Desolate Lands",
+            "playlist": "Walking", "n_entries": 73, "playlist_count": 73,
+        })
+
+        names = {s.name for s in LibraryManager(library_dir=lib).list_songs()}
+        assert names == {"RealSong"}
+
+    def test_playlist_manifest_not_adopted(self, tmp_path):
+        """The manifest form: _type == 'playlist' / top-level entries list."""
+        from scripts.core.library import LibraryManager
+        lib = tmp_path / "lib"
+        self._make_song(lib, "ManifestTyped", {"_type": "playlist", "title": "Mix"})
+        self._make_song(lib, "ManifestEntries", {
+            "title": "Mix", "entries": [{"title": "a"}, {"title": "b"}],
+        })
+
+        assert LibraryManager(library_dir=lib).list_songs() == []
+
+    def test_single_song_from_playlist_free_download_adopted(self, tmp_path):
+        """Normal single-track info.json (no playlist keys) is still adopted,
+        as are songs with no info.json at all."""
+        from scripts.core.library import LibraryManager
+        lib = tmp_path / "lib"
+        self._make_song(lib, "WithInfo", {"_type": "video", "title": "Song"})
+        self._make_song(lib, "NoInfo")
+
+        names = {s.name for s in LibraryManager(library_dir=lib).list_songs()}
+        assert names == {"WithInfo", "NoInfo"}
+
+    def test_rebuild_index_skips_playlist_artifact(self, tmp_path):
+        """_rebuild_index() (index lost/corrupt path) applies the same guard."""
+        from scripts.core.library import LibraryManager
+        lib = tmp_path / "lib"
+        self._make_song(lib, "RealSong", {"_type": "video", "title": "Real Song"})
+        self._make_song(lib, "Walking_playlist", {"n_entries": 73, "playlist_count": 73})
+
+        index = LibraryManager(library_dir=lib)._rebuild_index()
+        assert set(index) == {"RealSong"}
+
+    def test_corrupt_info_json_does_not_block_adoption(self, tmp_path):
+        """An unparsable info.json must not make the guard reject a song."""
+        from scripts.core.library import LibraryManager
+        lib = tmp_path / "lib"
+        d = self._make_song(lib, "CorruptInfo")
+        (d / "full.info.json").write_text("{not json")
+
+        names = {s.name for s in LibraryManager(library_dir=lib).list_songs()}
+        assert names == {"CorruptInfo"}
+
+    def test_music_index_rebuild_drops_stale_and_playlist(self, tmp_path, monkeypatch):
+        """
+        MusicIndex.rebuild() must (a) never index playlist artifacts and
+        (b) drop records whose library directory no longer exists — moving
+        Walking_playlist out of library/ has to actually remove it from
+        /library/similar results, not just stop refreshing it.
+        """
+        import shutil
+
+        import scripts.core.music_index as mi
+
+        lib = tmp_path / "lib"
+        for name in ("RealSong", "Ghost"):
+            d = lib / name
+            d.mkdir(parents=True)
+            (d / "meta.json").write_text(json.dumps({"bpm": 128.0, "key": "C"}))
+        wp = self._make_song(lib, "Walking_playlist", {"n_entries": 73})
+        (wp / "meta.json").write_text(json.dumps({"bpm": 129.2, "key": "F"}))
+
+        monkeypatch.setattr(mi, "LIBRARY_DIR", lib)
+        monkeypatch.setattr(mi, "DATA_DIR", tmp_path / "data")
+        monkeypatch.setattr(mi, "INDEX_PATH", tmp_path / "data" / "music_index.json")
+
+        idx = mi.MusicIndex()
+        stats = idx.rebuild(library_dir=lib)
+        assert stats["skipped_playlists"] == 1
+        assert set(idx._songs) == {"RealSong", "Ghost"}
+
+        shutil.rmtree(lib / "Ghost")
+        stats = idx.rebuild(library_dir=lib)
+        assert stats["removed"] == 1
+        assert set(idx._songs) == {"RealSong"}
 
 
 # ---------------------------------------------------------------------------
@@ -517,6 +862,65 @@ class TestDJTransitionPlanner:
         ]
         return SongStructure(bpm=bpm, duration=total_bars * bar_sec,
                              bars=bars, sections=sections)
+
+    def _make_structure_with_keys(self, bpm, whole_key, whole_mode,
+                                   local_key=None, local_mode=None, local_conf=0.0,
+                                   total_bars=64):
+        """Like _make_structure, but with whole-track key_name/mode/key_confidence
+        set, and optionally a uniform per-section (local) key/mode/confidence —
+        used to test DJ_ENGINE_IMPROVEMENT_PLAN.md §1.3's local-phrase-key
+        override in plan_transition()'s harmonic_score computation."""
+        struct = self._make_structure(bpm, total_bars=total_bars)
+        struct.key_name = whole_key
+        struct.mode = whole_mode
+        struct.key_confidence = 0.9
+        if local_key:
+            for sec in struct.sections:
+                sec.key_name = local_key
+                sec.mode = local_mode
+                sec.key_confidence = local_conf
+        return struct
+
+    def test_local_phrase_key_overrides_whole_track_key_when_confident(self):
+        """DJ_ENGINE_IMPROVEMENT_PLAN.md §1.3 — a high-confidence local phrase
+        key at the actual exit/entry sections should drive harmonic_score,
+        not the whole-track key, when the two disagree."""
+        from scripts.core.dj_engine import plan_transition
+
+        # Whole-track keys are a tritone apart (worst-case clash) on both
+        # tracks, but every section (including the outro/intro actually used
+        # at the transition point) carries a matching, high-confidence local
+        # key. The resulting score must reflect the LOCAL match, not the
+        # whole-track clash.
+        a_baseline = self._make_structure_with_keys(128.0, "C", "major")
+        b_baseline = self._make_structure_with_keys(128.0, "F#", "major")
+        baseline_score = plan_transition(a_baseline, b_baseline).harmonic_score
+
+        a_local = self._make_structure_with_keys(
+            128.0, "C", "major", local_key="C", local_mode="major", local_conf=0.9)
+        b_local = self._make_structure_with_keys(
+            128.0, "F#", "major", local_key="C", local_mode="major", local_conf=0.9)
+        local_score = plan_transition(a_local, b_local).harmonic_score
+
+        assert local_score > baseline_score
+
+    def test_low_confidence_local_key_falls_back_to_whole_track(self):
+        """A local key below the confidence gate must NOT override the
+        whole-track key — same "0.0/low == unknown, don't trust it" pattern
+        used throughout compatibility_score()."""
+        from scripts.core.dj_engine import plan_transition
+
+        a_baseline = self._make_structure_with_keys(128.0, "C", "major")
+        b_baseline = self._make_structure_with_keys(128.0, "F#", "major")
+        baseline_score = plan_transition(a_baseline, b_baseline).harmonic_score
+
+        a_lowconf = self._make_structure_with_keys(
+            128.0, "C", "major", local_key="C", local_mode="major", local_conf=0.05)
+        b_lowconf = self._make_structure_with_keys(
+            128.0, "F#", "major", local_key="C", local_mode="major", local_conf=0.05)
+        lowconf_score = plan_transition(a_lowconf, b_lowconf).harmonic_score
+
+        assert lowconf_score == pytest.approx(baseline_score)
 
     def test_plan_returns_transition(self):
         from scripts.core.dj_engine import plan_transition
@@ -1012,6 +1416,66 @@ class TestSSMBoundaries:
         )
         assert plan.exit_time_a > 0, (
             f"exit_time_a should be > 0, got {plan.exit_time_a}"
+        )
+
+
+@pytest.mark.dj_analysis
+class TestPerPhraseKeyDetection:
+    """
+    DJ_ENGINE_IMPROVEMENT_PLAN.md §1.3 — analyze_structure() now wires the
+    previously-unused key_detection.detect_key_segments() into
+    SongStructure.key_segments and per-Section key_name/mode/camelot/
+    key_confidence, instead of relying purely on one whole-track
+    detect_key() call that can't represent a track that modulates key
+    mid-song.
+    """
+
+    def test_key_segments_populated_and_well_formed(self):
+        """analyze_structure on audio longer than one 30s window must return
+        multiple (start_time, KeyResult) entries with valid fields, and the
+        whole-track key_name/key_confidence must remain populated exactly as
+        before (backward compatibility — see plan §1.3 constraints)."""
+        from scripts.core.dj_analysis import analyze_structure
+
+        audio = _make_audio(duration=50.0, bpm=128.0, freq=261.63)
+        struct = analyze_structure(audio, SR, key_profile="ks")
+
+        assert struct.key_name, "whole-track key_name must still be populated (backward compat)"
+        assert isinstance(struct.key_confidence, float)
+
+        assert struct.key_segments, "key_segments should be populated for audio > one segment window"
+        assert len(struct.key_segments) >= 2, "50s of audio at 50% overlap / 30s windows should yield >=2 segments"
+        for start_s, kr in struct.key_segments:
+            assert isinstance(start_s, float)
+            assert kr.key_name in _VALID_KEY_NAMES
+            assert kr.mode in _VALID_MODES
+            assert 0.0 <= kr.confidence <= 1.0
+
+        if struct.sections:
+            assert any(s.key_name for s in struct.sections), (
+                "at least one Section should have received a per-phrase key_name from the wiring"
+            )
+
+    def test_mid_song_key_change_produces_distinct_phrase_keys(self):
+        """A clip spliced from two very different pitch centers (simulating a
+        mid-song key change) should be represented by more than one distinct
+        camelot value across its segments — the exact failure mode a single
+        whole-track detect_key() call cannot represent."""
+        from scripts.core.dj_analysis import analyze_structure
+
+        # C4 and F#4 (a tritone) — maximally distinct tonal centers, spliced
+        # back-to-back as a stand-in for a mid-song key change.
+        half_a = _make_audio(duration=25.0, bpm=128.0, freq=261.63)
+        half_b = _make_audio(duration=25.0, bpm=128.0, freq=369.99)
+        audio = np.concatenate([half_a, half_b])
+
+        struct = analyze_structure(audio, SR, key_profile="ks")
+
+        camelots = [kr.camelot for _start_s, kr in struct.key_segments]
+        assert len(set(camelots)) >= 2, (
+            f"expected the mid-clip pitch change to produce >=2 distinct "
+            f"per-segment keys instead of one averaged whole-track guess, "
+            f"got {camelots}"
         )
 
 

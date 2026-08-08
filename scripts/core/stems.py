@@ -130,21 +130,40 @@ def separate_song_stems(
     model: str         = "htdemucs",
     device: str        = "auto",
     progress_cb=None,                # optional callable(float, str) for progress updates
+    preview_seconds: Optional[float] = None,
+    output_dir: Optional[Path]       = None,
 ) -> StemResult:
     """
     Enhance and split a single library song into vocal / drum / bass / other stems.
 
     Parameters
     ----------
-    song_name   : exact folder name inside library/
-    enhance     : run audio-enhancement chain before Demucs (recommended)
-    model       : Demucs model name  (htdemucs | htdemucs_ft | mdx_extra)
-    device      : 'auto' (detect GPU), 'mps', 'cuda', or 'cpu'
-    progress_cb : optional callable(progress: float, message: str)
+    song_name       : exact folder name inside library/
+    enhance         : run audio-enhancement chain before Demucs (recommended)
+    model           : Demucs model name  (htdemucs | htdemucs_ft | mdx_extra)
+    device          : 'auto' (detect GPU), 'mps', 'cuda', or 'cpu'
+    progress_cb     : optional callable(progress: float, message: str)
+    preview_seconds : DJ_ENGINE_IMPROVEMENT_PLAN.md §2.2 — when set, only the
+        first `preview_seconds` of audio are separated, cutting Demucs
+        wall-clock roughly linearly. For interactive contexts (live preview,
+        PiP widget) where a user is waiting on the result — NOT for
+        producing a song's permanent library stems, which always want the
+        full track. Requires `output_dir` (see below).
+    output_dir      : where to write stem files. Defaults to library/<song>/
+        (the permanent location) when `preview_seconds` is None — full
+        parity with prior behaviour. Required when `preview_seconds` is set,
+        specifically so a truncated preview separation can never land in
+        and silently clobber a song's real library/<song>/{stem}.wav files;
+        pass e.g. a tempfile.TemporaryDirectory() path.
 
     Returns
     -------
     StemResult with .success, .stems, .enhance_info, .error
+
+    Raises
+    ------
+    ValueError
+        If `preview_seconds` is set without an explicit `output_dir`.
     """
     import numpy as np
     import soundfile as sf
@@ -157,6 +176,13 @@ def separate_song_stems(
 
     from scripts.core.paths import song_dir as _song_dir
 
+    if preview_seconds is not None and output_dir is None:
+        raise ValueError(
+            "preview_seconds requires an explicit output_dir — a preview "
+            "separation must never be written into library/<song>/, which "
+            "would silently truncate that song's permanent stems."
+        )
+
     def _prog(p: float, msg: str) -> None:
         log.info("[stems] %.0f%%  %s", p * 100, msg)
         if progress_cb:
@@ -165,12 +191,29 @@ def separate_song_stems(
             except Exception:
                 pass
 
-    dest_dir = _song_dir(song_name)
-    wav_path = dest_dir / "full.wav"
+    from scripts.core.audio_source import resolve_source_file
 
-    if not wav_path.exists():
+    dest_dir  = _song_dir(song_name)          # permanent location — read-only below
+    write_dir = Path(output_dir) if output_dir is not None else dest_dir
+    write_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve the best available source, same priority order the render/
+    # analysis path already uses (scripts/core/audio_source.py): full.wav
+    # first, falling back to full_enhanced.wav. A song can end up with ONLY
+    # full_enhanced.wav and no stems — e.g. Demucs failed *after* the
+    # enhancement step had already written its output, or full.wav was later
+    # reclaimed by storage/eviction before separation ever completed. Without
+    # this fallback such a song can never be re-split again: the enhanced
+    # mix is a perfectly good, full-length Demucs input already sitting on
+    # disk, but the old full.wav-only check would reject it and force a
+    # re-download from source to recover.
+    source_path = resolve_source_file(song_name)
+    if source_path is None:
         return StemResult(song=song_name, success=False,
-                          error=f"full.wav not found in library/{song_name}/")
+                          error=f"No source audio (full.wav or full_enhanced.wav) "
+                                f"found in library/{song_name}/")
+    wav_path = source_path
+    reused_enhanced = source_path.name == "full_enhanced.wav"
 
     # ── 1. Load audio ────────────────────────────────────────────────────
     _prog(0.03, f"Loading {song_name[:40]}…")
@@ -181,11 +224,40 @@ def separate_song_stems(
         return StemResult(song=song_name, success=False,
                           error=f"Could not load audio: {exc}")
 
+    if preview_seconds is not None:
+        max_samples = int(preview_seconds * sr)
+        if len(audio) > max_samples:
+            log.info("[stems] Preview mode: truncating %.1fs → %.1fs before separation",
+                     len(audio) / sr, preview_seconds)
+            audio = audio[:max_samples]
+
+    # Preview mode's truncated `audio` only reaches Demucs if something on
+    # disk actually reflects it — the enhance=True path below always writes
+    # a fresh file built from `audio`, but enhance=False (and the "enhancement
+    # itself failed" fallback) previously pointed straight at wav_path, the
+    # ORIGINAL untruncated file, silently defeating the whole point of
+    # preview_seconds. _preview_input() writes the truncated audio once and
+    # is the fallback target in both of those cases instead of wav_path.
+    _preview_input_path: Optional[Path] = None
+
+    def _preview_input() -> Path:
+        nonlocal _preview_input_path
+        if _preview_input_path is None:
+            _preview_input_path = write_dir / "preview_input.wav"
+            sf.write(str(_preview_input_path), audio, sr, subtype="PCM_24")
+        return _preview_input_path
+
     # ── 2. Enhancement chain ──────────────────────────────────────────────
-    demucs_input = wav_path
+    demucs_input = _preview_input() if preview_seconds is not None else wav_path
     enhance_info: dict = {}
 
-    if enhance:
+    if enhance and reused_enhanced:
+        # source_path is already a full_enhanced.wav from a prior attempt —
+        # re-running the enhancement chain on already-enhanced audio would
+        # double-apply LUFS normalisation/compression. Feed it to Demucs as
+        # produced (preview_seconds truncation above still applies).
+        enhance_info = {"reused_existing_enhanced_file": True}
+    elif enhance:
         _prog(0.08, "Enhancing audio (HP · compress · air EQ · LUFS −14)…")
         try:
             from scripts.core.audio_enhance import enhance_audio, EnhanceOptions
@@ -198,8 +270,8 @@ def separate_song_stems(
                 lufs_target    = -14.0,
                 true_peak_ceil = -1.0,
             )
-            enh_audio, enh_report = enhance_audio(audio, sr, opts)
-            enh_path = dest_dir / "full_enhanced.wav"
+            enh_audio, enh_report = enhance_audio(audio, sr, opts)   # audio already truncated above
+            enh_path = write_dir / "full_enhanced.wav"
             sf.write(str(enh_path), enh_audio, sr, subtype="PCM_24")
             demucs_input = enh_path
             enhance_info = {
@@ -213,7 +285,7 @@ def separate_song_stems(
         except Exception as exc:
             log.warning("Enhancement failed for '%s': %s — using raw WAV", song_name, exc)
             enhance_info = {"skipped": True, "error": str(exc)}
-            demucs_input = wav_path
+            demucs_input = _preview_input() if preview_seconds is not None else wav_path
     else:
         enhance_info = {"skipped": True}
 
@@ -275,12 +347,13 @@ def separate_song_stems(
                         f"Searched for {model}/{demucs_input.stem}/"
                     )
 
-            # ── Move stems into library/<song>/ ──────────────────────────
-            _prog(0.80, "Moving stems into library…")
+            # ── Move stems into write_dir (library/<song>/, unless this is a
+            #    preview separation — see output_dir above) ────────────────
+            _prog(0.80, "Moving stems…" if write_dir != dest_dir else "Moving stems into library…")
             for stem_name in ("vocals", "drums", "bass", "other"):
                 src = stem_src_dir / f"{stem_name}.wav"
                 if src.exists():
-                    dst = dest_dir / f"{stem_name}.wav"
+                    dst = write_dir / f"{stem_name}.wav"
                     shutil.move(str(src), str(dst))
                     produced[stem_name] = dst
                     log.info("[stems] ✓ %s.wav", stem_name)
@@ -339,7 +412,14 @@ def separate_song_stems(
 
 
 # ---------------------------------------------------------------------------
-# Batch helper (used by task_batch_stem_split)
+# Batch helper — NOT used by task_batch_stem_split (that function has its
+# own independent loop in scripts/api/task_modules/stems.py, with its own
+# skip_existing/all-4-stems check and its own _prune_after_split() call).
+# Nothing in this codebase currently calls separate_batch(); kept as a
+# library-level convenience for scripting, but its skip_existing check below
+# only looks at vocals.wav — the same "1/4 stems counts as done" bug fixed
+# in task_batch_stem_split's own loop — if this ever gets wired up for real,
+# fix that first.
 # ---------------------------------------------------------------------------
 
 def separate_batch(
@@ -394,6 +474,7 @@ def separate_batch(
 
 if __name__ == "__main__":
     import argparse
+    import time
 
     logging.basicConfig(level=logging.INFO,
                         format="%(levelname)s  %(message)s")
@@ -408,6 +489,15 @@ if __name__ == "__main__":
                     help="Skip audio enhancement before split")
     ap.add_argument("--dry-run", action="store_true",
                     help="Show which Python/Demucs would be used, then exit")
+    ap.add_argument("--preview-seconds", type=float, default=None,
+                    help="DJ_ENGINE_IMPROVEMENT_PLAN.md §2.2 — only separate the first N "
+                         "seconds (preview-tier). Writes to a temp dir, never into library/.")
+    ap.add_argument("--benchmark", action="store_true",
+                    help="Run full-quality AND --preview-seconds (default 60s if not given) "
+                         "back-to-back on this song and print wall-clock time for each. This "
+                         "is the real benchmark for §2.2 — run it on your own machine (with "
+                         "the actual MPS/CUDA device this engine uses), not in a generic "
+                         "sandbox, since device acceleration is the whole point of the timing.")
     args = ap.parse_args()
 
     if args.dry_run:
@@ -415,11 +505,46 @@ if __name__ == "__main__":
         print(f"Demucs  : {shutil.which('demucs') or 'not on PATH'}")
         sys.exit(0)
 
+    if args.benchmark:
+        preview_s = args.preview_seconds or 60.0
+
+        t0 = time.monotonic()
+        full_result = separate_song_stems(args.song, enhance=args.enhance, model=args.model)
+        t_full = time.monotonic() - t0
+
+        with tempfile.TemporaryDirectory() as tmp:
+            t0 = time.monotonic()
+            preview_result = separate_song_stems(
+                args.song, enhance=args.enhance, model=args.model,
+                preview_seconds=preview_s, output_dir=Path(tmp),
+            )
+            t_preview = time.monotonic() - t0
+
+        print(f"\n📊  Benchmark — {args.song}")
+        print(f"   full  ({'ok' if full_result.success else 'FAILED'}):    {t_full:6.1f}s")
+        print(f"   preview {preview_s:.0f}s ({'ok' if preview_result.success else 'FAILED'}): {t_preview:6.1f}s")
+        if full_result.success and preview_result.success and t_full > 0:
+            print(f"   speedup: {t_full / max(t_preview, 1e-6):.2f}×")
+        sys.exit(0 if (full_result.success and preview_result.success) else 1)
+
+    # Unlike --benchmark's tempfile.TemporaryDirectory(), this dir is NOT
+    # auto-cleaned — the whole point of --preview-seconds on the CLI is to
+    # leave inspectable output behind after the process exits, so deleting
+    # it here would defeat that. It does mean repeated invocations
+    # accumulate stems_preview_* dirs in the OS temp dir with nothing to
+    # remove them; the path is printed below so it's at least visible and
+    # the caller can clean up manually (`rm -rf <path>`).
+    preview_output_dir = (
+        Path(tempfile.mkdtemp(prefix="stems_preview_"))
+        if args.preview_seconds is not None else None
+    )
+
     result = separate_song_stems(
         args.song,
         enhance=args.enhance,
         model=args.model,
-        progress_cb=lambda p, m: print(f"  [{int(p*100):3d}%] {m}"),
+        preview_seconds=args.preview_seconds,
+        output_dir=preview_output_dir,
     )
 
     if result.success:
@@ -427,6 +552,9 @@ if __name__ == "__main__":
         for name, info in result.stem_info.items():
             rms = info.get("rms_db", "?")
             print(f"   {name:<8}  {rms} dB RMS  → {info.get('path', '?')}")
+        if preview_output_dir is not None:
+            print(f"\n📁  Preview output dir (not auto-cleaned — remove manually "
+                  f"when done): {preview_output_dir}")
     else:
         print(f"\n❌  Failed: {result.error}")
         sys.exit(1)

@@ -57,6 +57,12 @@ class RemixConfig:
 class SeparationConfig:
     model: str  = "htdemucs"
     device: str = "auto"
+    # DJ_ENGINE_IMPROVEMENT_PLAN.md §2.2 — default window (seconds) for
+    # preview-tier separation (live preview / PiP widget), used by callers
+    # that pass preview_seconds to separate_song_stems(); has no effect on
+    # full-quality library separation, which always processes the whole
+    # track regardless of this value.
+    preview_seconds: float = 60.0
 
 
 @dataclass
@@ -87,7 +93,10 @@ class DJConfig:
     hp_filter_end_hz: float      = 80.0
     bass_crossover_hz: float     = 150.0
     # Masking-aware multiband EQ (scripts/core/spectral_mixing.py), read by
-    # dj_engine.py. masking_eq_enabled is the A/B kill switch.
+    # dj_engine.py. masking_eq_enabled is the A/B kill switch — strength does
+    # NOT go to zero effect at 0.0 (Eq.(2)'s multiplier is 2**strength, so
+    # 0.0 still applies a full 1x masking gain); see masking_gain_curve()'s
+    # docstring. Use masking_eq_enabled=False to actually disable this.
     masking_eq_enabled: bool         = True
     masking_eq_strength: float       = 0.0
     masking_eq_max_atten_db: float   = 6.0
@@ -100,6 +109,13 @@ class DJConfig:
     # post-render multiband EQ easing the overlap's spectrum A→B over time.
     spectral_sync: bool              = True
     spectral_sync_max_db: float      = 4.0
+    # Confidence gate on the render path (DJ_ENGINE_IMPROVEMENT_PLAN.md §2.1):
+    # below this threshold, task_dj_remix falls back to the plain render()
+    # crossfade instead of committing to the full stem-aware blend, even when
+    # both songs' stems are on disk. Reuses the same 0.35 "harmonic clash"
+    # cutoff plan_transition() already applies to shorten transition_bars —
+    # see scripts/api/task_modules/remix.py::_should_use_stem_blend().
+    transition_confidence_threshold: float = 0.30
 
 
 @dataclass

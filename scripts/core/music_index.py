@@ -557,10 +557,22 @@ class MusicIndex:
 
         Returns
         -------
-        dict with keys: total, indexed, failed, duration_sec
+        dict with keys: total, indexed, failed, removed, skipped_playlists,
+        duration_sec
         """
         lib = library_dir or LIBRARY_DIR
-        dirs = [d for d in lib.iterdir() if d.is_dir()]
+        try:
+            from scripts.core.library import is_playlist_artifact
+        except Exception:
+            def is_playlist_artifact(_p: Path) -> bool:
+                return False
+
+        all_dirs = [d for d in lib.iterdir() if d.is_dir()]
+        skipped  = [d.name for d in all_dirs if is_playlist_artifact(d)]
+        dirs     = [d for d in all_dirs if d.name not in skipped]
+        if skipped:
+            log.warning("MusicIndex.rebuild: skipping %d playlist artifact(s): %s",
+                        len(skipped), ", ".join(skipped[:10]))
 
         total   = len(dirs)
         indexed = 0
@@ -578,15 +590,33 @@ class MusicIndex:
             else:
                 failed.append(d.name)
 
+        # Self-heal: rebuild only upserts, so songs whose directory was
+        # moved/deleted (or is now excluded as a playlist artifact) would
+        # otherwise linger in the index — and in /library/similar — forever.
+        keep = {d.name for d in dirs}
+        removed = []
+        with self._lock:
+            for name in list(self._songs.keys()):
+                if name not in keep:
+                    del self._songs[name]
+                    removed.append(name)
+            if removed:
+                self._save()
+        if removed:
+            log.info("MusicIndex.rebuild: removed %d stale record(s): %s",
+                     len(removed), ", ".join(removed[:10]))
+
         if progress_cb:
             progress_cb(1.0, f"Index rebuild done — {indexed}/{total} songs indexed")
 
         return {
-            "total":        total,
-            "indexed":      indexed,
-            "failed":       len(failed),
-            "failed_names": failed[:20],
-            "duration_sec": round(time.time() - t0, 1),
+            "total":             total,
+            "indexed":           indexed,
+            "failed":            len(failed),
+            "failed_names":      failed[:20],
+            "removed":           len(removed),
+            "skipped_playlists": len(skipped),
+            "duration_sec":      round(time.time() - t0, 1),
         }
 
     # ── Stats ─────────────────────────────────────────────────────────────────

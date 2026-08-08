@@ -31,6 +31,7 @@ The neural registry creates one small online MLP per adaptive feature:
 | `beatgrid_confidence` | Manual beatgrid correction labels | Beatgrid confidence |
 | `stem_quality` | Stem quality/bleed labels | Stem usefulness |
 | `waveform_interest` | User jumps/cue placements | Section salience |
+| `spectral_entry_match` | 24-band trajectory similarities + render verdict | Entry-candidate score (research prototype, see `reports/spectral_entry_match_prototype.md`) |
 
 ## Architecture
 

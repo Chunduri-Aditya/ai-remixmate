@@ -18,7 +18,7 @@ import {
   ListMusic,
   RefreshCw,
 } from 'lucide-react'
-import { libraryApi, analysisApi } from '@/lib/api'
+import { libraryApi, analysisApi, feedbackApi } from '@/lib/api'
 import { CamelotWheel } from '@/components/CamelotWheel'
 import type { SimilarTrack, SongInfo } from '@/types'
 import './Widget.css'
@@ -132,6 +132,16 @@ function WidgetPanel({
   }
 
   function queueTrack(name: string) {
+    // Queuing anything other than the top-ranked recommendation is an
+    // implicit "disagree with the auto-suggestion" signal — one of the
+    // strongest available per SELF_IMPROVING_DJ_RESEARCH.md §2's signal
+    // inventory ("Direct disagreement with setlist_planner.py's ordering").
+    // Fire-and-forget; never let telemetry affect the actual queue action.
+    if (seedTrack && recs.length > 0 && recs[0]?.name !== name) {
+      feedbackApi
+        .logEvent({ eventType: 'reorder', songA: seedTrack, songB: name })
+        .catch(() => {})
+    }
     setSetList((sl) => (sl[sl.length - 1] === name ? sl : [...sl, name]))
   }
 

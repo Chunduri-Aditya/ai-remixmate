@@ -12,6 +12,7 @@ from scripts.api.routers import (
     crates,
     downloads,
     events,
+    feedback,
     generative,
     jobs,
     library,
@@ -38,3 +39,4 @@ router.include_router(jobs.router)
 router.include_router(crates.router)
 router.include_router(events.router)
 router.include_router(setlist.router)
+router.include_router(feedback.router)

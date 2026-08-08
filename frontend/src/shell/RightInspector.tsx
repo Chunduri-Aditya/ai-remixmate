@@ -4,12 +4,13 @@
    Updates in real-time from Zustand (fed by SSE).
    ============================================================ */
 
-import { X, Activity, ListOrdered, Cpu, RotateCcw } from 'lucide-react'
+import { useState } from 'react'
+import { X, Activity, ListOrdered, Cpu, RotateCcw, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore, selectRecentJobs, type ActivityEntry } from '@/stores/appStore'
 import { useJobTimer } from '@/hooks/useJobTimer'
-import { remixApi } from '@/lib/api'
+import { remixApi, feedbackApi } from '@/lib/api'
 import type { Job } from '@/types'
 import './RightInspector.css'
 
@@ -58,9 +59,34 @@ function RunningTimer({ job }: { job: Job }) {
   )
 }
 
+// Song-pair context for feedback telemetry (SELF_IMPROVING_DJ_RESEARCH.md
+// §3) — dj_chain jobs carry songs[] instead of song_a/song_b; first/last is
+// an approximation, same tradeoff MixVault.tsx makes for the same reason.
+function feedbackSongPair(job: Job): { songA?: string; songB?: string } {
+  const meta = (job.meta as { song_a?: string; song_b?: string; songs?: string[] }) ?? {}
+  const songA = meta.song_a ?? meta.songs?.[0]
+  const songB = meta.song_b ?? (meta.songs && meta.songs.length > 1 ? meta.songs[meta.songs.length - 1] : undefined)
+  return { songA, songB }
+}
+
 function JobCard({ job }: { job: Job }) {
   const cancelJob = useAppStore((s) => s.removeJob)
   const navigate = useNavigate()
+  const [feedbackSent, setFeedbackSent] = useState<'up' | 'down' | null>(null)
+
+  function handleThumbs(direction: 'up' | 'down') {
+    if (feedbackSent) return   // one verdict per render, same convention as
+                               // the existing spectral-matching feedback buttons
+    const { songA, songB } = feedbackSongPair(job)
+    if (!songA) return
+    setFeedbackSent(direction)
+    feedbackApi
+      .logEvent({
+        eventType: direction === 'up' ? 'thumbs_up' : 'thumbs_down',
+        songA, songB, jobId: job.job_id,
+      })
+      .catch(() => setFeedbackSent(null))   // let the user retry if the request actually failed
+  }
 
   function handleCardClick(e: React.MouseEvent) {
     // Don't hijack clicks on the cancel/retry buttons inside the card.
@@ -159,6 +185,29 @@ function JobCard({ job }: { job: Job }) {
         <button className="inspector-job-card__retry" onClick={handleRetry}>
           ↺ Retry
         </button>
+      )}
+
+      {job.status === 'COMPLETED' && (job.type === 'dj_remix' || job.type === 'dj_chain') && (
+        <div className="inspector-job-card__feedback">
+          <button
+            className={`inspector-job-card__thumb ${feedbackSent === 'up' ? 'inspector-job-card__thumb--active' : ''}`}
+            onClick={() => handleThumbs('up')}
+            disabled={feedbackSent !== null}
+            title="This transition worked"
+            aria-label="Thumbs up"
+          >
+            <ThumbsUp size={11} />
+          </button>
+          <button
+            className={`inspector-job-card__thumb ${feedbackSent === 'down' ? 'inspector-job-card__thumb--active' : ''}`}
+            onClick={() => handleThumbs('down')}
+            disabled={feedbackSent !== null}
+            title="This transition didn't work"
+            aria-label="Thumbs down"
+          >
+            <ThumbsDown size={11} />
+          </button>
+        </div>
       )}
     </div>
   )

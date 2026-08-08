@@ -6,7 +6,8 @@
   display: grid;
   grid-template-columns: var(--shell-rail-width) 1fr;
   grid-template-rows: 1fr;
-  height: 100dvh;
+  /* Global PlayerBar is fixed at the bottom — keep the shell above it */
+  height: calc(100dvh - var(--player-bar-height, 68px));
   width: 100dvw;
   overflow: hidden;
   background: var(--color-bg-void);

@@ -2,7 +2,9 @@
 scripts/api/routers/analysis.py — Music analysis and recommendation endpoints.
 
 POST /compatibility                    — instant Camelot + BPM check
+GET  /compatibility/matches/{name}     — ranked compatible-songs list (cached analyses only)
 POST /analyze                          — genre + structure analysis (queued job)
+GET  /analysis/v1/{name}/structure     — versioned bars/beats/segments/per-phrase-key structure
 GET  /recommend/{name}                 — top compatible songs for a track
 GET  /library/similar/{name}           — RAG vector similarity search
 GET  /library/crate-search             — CLAP 512-D semantic similarity search
@@ -19,10 +21,14 @@ from scripts.api import jobs as job_store
 from scripts.api.routers._helpers import _require_song, _check_job_cap
 from scripts.api.schemas import (
     AnalyzeRequest,
+    BeatInfo,
     CompatibilityRequest,
     CompatibilityResult,
     JobResponse,
     JobType,
+    KeySegmentInfo,
+    SectionInfo,
+    StructureV1Response,
 )
 from scripts.api.tasks import task_analyze, task_rebuild_index
 from scripts.core.logging_utils import get_logger
@@ -86,6 +92,8 @@ def check_compatibility(req: CompatibilityRequest):
                         # (REMIX_QUALITY_INSIGHTS.md finding #1).
                         energy=float(cached["energy_mean"]) if cached.get("energy_mean") is not None else 0.5,
                         vocal_density=float(cached.get("vocal_density") or 0.0),
+                        vocal_mean_pitch_hz=float(cached.get("vocal_mean_pitch_hz") or 0.0),
+                        vocal_voiced_fraction=float(cached.get("vocal_voiced_fraction") or 0.0),
                         spectral_centroid_hz=float(cached.get("spectral_centroid_hz") or 0.0),
                     )
                     return meta, cached.get("genre")
@@ -115,6 +123,8 @@ def check_compatibility(req: CompatibilityRequest):
                     genres=[result["genre"]] if result.get("genre") else [],
                     energy=float(cached_extra["energy_mean"]) if cached_extra.get("energy_mean") is not None else 0.5,
                     vocal_density=float(cached_extra.get("vocal_density") or 0.0),
+                    vocal_mean_pitch_hz=float(cached_extra.get("vocal_mean_pitch_hz") or 0.0),
+                    vocal_voiced_fraction=float(cached_extra.get("vocal_voiced_fraction") or 0.0),
                     spectral_centroid_hz=float(cached_extra.get("spectral_centroid_hz") or 0.0),
                 )
                 return meta, result.get("genre")
@@ -146,6 +156,133 @@ def check_compatibility(req: CompatibilityRequest):
         camelot_b=meta_b.camelot,
         genre_a=genre_a,
         genre_b=genre_b,
+    )
+
+
+@router.get("/compatibility/matches/{name}", tags=["analysis"])
+def compatibility_matches(
+    name: str,
+    min_score: float = Query(85.0, ge=0.0, le=100.0,
+                             description="Keep only matches at/above this score (0–100)"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Ranked list of library songs compatible with ``name``.
+
+    Every analyzed song is scored with the full compatibility scorer (the
+    same key/BPM/energy/genre/timbre/vocal model behind POST /compatibility),
+    filtered to ``min_score`` and sorted best-first. Instant — cached
+    analyses only; ``skipped_unanalyzed`` says how many songs weren't
+    scored (run POST /library/analyze-missing to widen the pool).
+    """
+    from scripts.core.recommend import top_compatibility_matches
+
+    src = _require_song(name)
+    result = top_compatibility_matches(src, LIBRARY_DIR, min_score=min_score, limit=limit)
+    if result.get("error"):
+        raise HTTPException(status_code=409, detail=result["error"])
+    return {"song": name, "min_score": min_score, **result}
+
+
+@router.get(
+    "/analysis/v1/{name}/structure",
+    response_model=StructureV1Response,
+    tags=["analysis"],
+)
+def song_structure_v1(
+    name: str,
+    key_profile: str = Query(
+        "auto",
+        description=(
+            "Tonal profile for key detection: "
+            "'ks' (Krumhansl-Schmuckler), 'edma' (EDM major), "
+            "'edmm' (EDM major+minor), 'auto' (spectral-centroid-based selection)"
+        ),
+    ),
+    include_beats: bool = Query(
+        True,
+        description=(
+            "Include the full per-beat list (index/time/bar/beat_in_bar). "
+            "Set false for a lighter payload on long tracks — bars/sections/"
+            "key_segments are unaffected."
+        ),
+    ),
+):
+    """
+    Versioned bars/beats/segments/per-phrase-key structure for a library
+    track (DJ_ENGINE_IMPROVEMENT_PLAN.md §3.1).
+
+    None of the other analysis routes expose this: POST /analyze's
+    meta.json/analysis.json cache only carries the flat whole-track summary
+    (bpm/key/camelot/phrase_boundaries) — no bars, no per-beat grid, no
+    per-phrase key/confidence (added in §1.3). Those richer fields live only
+    on the in-memory SongStructure dj_analysis.py computes, so this endpoint
+    recomputes it from audio on every call rather than reading a cache.
+
+    Unlike POST /analyze's internal 120 s analysis window (tuned for fast
+    genre/BPM caching), this loads the FULL track — a structure endpoint
+    that silently truncated to the first two minutes would miss the outro
+    section and its key entirely, which is the whole point of exposing
+    per-phrase key here. analyze_structure() runs ~2-5 s for a typical
+    5-minute track, so this is still a synchronous GET, not a queued job.
+    """
+    from scripts.core.analysis_pipeline import _load_song_audio
+    from scripts.core.dj_analysis import analyze_structure
+    from scripts.core.paths import song_dir
+
+    _require_song(name)
+    sr = 44100
+    try:
+        audio = _load_song_audio(name, sr=sr, duration=None)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    struct = analyze_structure(audio, sr, key_profile=key_profile, stems_dir=song_dir(name))
+
+    return StructureV1Response(
+        song=name,
+        bpm=round(struct.bpm, 1),
+        duration=round(struct.duration, 1),
+        total_bars=struct.total_bars,
+        key_name=struct.key_name,
+        mode=struct.mode,
+        camelot=struct.camelot,
+        key_confidence=round(struct.key_confidence, 3),
+        bars=[(round(float(s), 3), round(float(e), 3)) for s, e in struct.bars],
+        beats=(
+            [
+                BeatInfo(index=b.index, time=round(b.time, 3), bar=b.bar, beat_in_bar=b.beat_in_bar)
+                for b in struct.beats
+            ]
+            if include_beats
+            else []
+        ),
+        sections=[
+            SectionInfo(
+                type=s.type,
+                start_bar=s.start_bar,
+                end_bar=s.end_bar,
+                start_time=round(s.start_time, 2),
+                end_time=round(s.end_time, 2),
+                avg_energy=round(s.avg_energy, 3),
+                avg_spectral=round(s.avg_spectral, 3),
+                key_name=s.key_name,
+                mode=s.mode,
+                camelot=s.camelot,
+                key_confidence=round(s.key_confidence, 3),
+            )
+            for s in struct.sections
+        ],
+        key_segments=[
+            KeySegmentInfo(
+                start_time=round(float(t), 2),
+                key_name=kr.key_name,
+                mode=kr.mode,
+                camelot=kr.camelot,
+                confidence=round(kr.confidence, 3),
+            )
+            for t, kr in struct.key_segments
+        ],
+        downbeat_times=[round(float(t), 3) for t in struct.downbeat_times],
     )
 
 
