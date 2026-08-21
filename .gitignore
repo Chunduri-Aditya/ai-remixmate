@@ -99,3 +99,6 @@ AI_RemixMate_Launch_Plan.md
 
 # Vite's config loader writes a throwaway compiled config on every dev/build start
 frontend/vite.config.ts.timestamp-*.mjs
+
+# Graphify local output, never pushed
+graphify-out
