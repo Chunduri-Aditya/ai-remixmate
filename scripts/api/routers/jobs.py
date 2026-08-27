@@ -6,7 +6,7 @@ GET    /jobs/{job_id}    — poll a specific job
 DELETE /jobs/{job_id}    — cancel a pending or running job
 """
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -18,9 +18,22 @@ router = APIRouter()
 
 
 @router.get("/jobs", response_model=List[JobResponse], tags=["jobs"])
-def list_jobs(limit: int = Query(20, ge=1, le=100)):
-    """Return the most recent jobs, newest first."""
-    return [job_store.job_to_response(j) for j in job_store.list_jobs(limit)]
+def list_jobs(
+    limit: int = Query(20, ge=1, le=100),
+    job_type: Optional[str] = Query(None, description="Filter by job type, e.g. 'dj_remix'"),
+    status: Optional[str] = Query(None, description="Filter by status, e.g. 'done'"),
+):
+    """
+    Return the most recent jobs, newest first.
+
+    Filters apply before the limit, so ``?job_type=dj_remix&status=done`` returns the
+    newest completed remixes rather than the completed remixes that happen to fall in
+    the newest ``limit`` jobs overall.
+    """
+    return [
+        job_store.job_to_response(j)
+        for j in job_store.list_jobs(limit, job_type=job_type, status=status)
+    ]
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse, tags=["jobs"])

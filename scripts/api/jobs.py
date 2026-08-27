@@ -289,10 +289,96 @@ def get_job(job_id: str) -> Optional[Dict]:
     return _jobs.get(job_id)
 
 
-def list_jobs(limit: int = 50) -> list[Dict]:
-    """Return the most recent jobs, newest first."""
+def _enum_forms(value: str) -> list[str]:
+    """
+    The two lowercased spellings a single enum value can have on disk.
+
+    Rows written at different times persisted either the value ('dj_remix') or
+    the repr ('JobType.DJ_REMIX'), so a lookup has to accept both.
+    """
+    bare = value.split(".")[-1].lower()
+    return [bare, f"jobtype.{bare}", f"jobstatus.{bare}"]
+
+
+def _query_db(job_type: Optional[str], status: Optional[str]) -> list[Dict]:
+    """
+    Read matching jobs straight from SQLite.
+
+    The in-memory dict only holds the newest 500 rows (see _load_from_db), so a
+    filtered lookup answered from memory silently omits anything older — which is
+    how Mix Vault came to hide completed mixes. SQLite is the full record.
+    """
+    clauses: list[str] = []
+    params: list[str] = []
+
+    for column, value in (("job_type", job_type), ("status", status)):
+        if value is None:
+            continue
+        forms = _enum_forms(value)
+        clauses.append(f"lower({column}) IN ({','.join('?' * len(forms))})")
+        params.extend(forms)
+
+    sql = "SELECT * FROM jobs"
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY created_at DESC"
+
+    try:
+        with closing(_get_conn()) as conn:
+            rows = conn.execute(sql, params).fetchall()
+    except Exception as exc:  # noqa: BLE001
+        # Fall back to the in-memory view rather than failing the request; the
+        # caller still gets the newest jobs, just not the full history.
+        logger.warning(f"Filtered job query fell back to memory: {exc}")
+        with _lock:
+            return list(_jobs.values())
+
+    jobs = []
+    for row in rows:
+        job = _row_to_dict(row)
+        job["status"] = _status_value(job["status"])
+        job["job_type"] = _type_value(job["job_type"])
+        jobs.append(job)
+    return jobs
+
+
+def list_jobs(
+    limit: int = 50,
+    job_type: Optional[str] = None,
+    status: Optional[str] = None,
+) -> list[Dict]:
+    """
+    Return the most recent jobs, newest first.
+
+    ``job_type``/``status`` filter before the limit is applied, so callers after a
+    specific slice (Mix Vault wanting completed remixes) get that slice rather than
+    whatever happens to sit in the newest N rows.
+
+    Both sides of each comparison go through _type_value/_status_value because the
+    store holds two serializations of the same enums — legacy rows persisted the
+    repr ('JobType.DJ_REMIX', 'JobStatus.DONE') alongside newer rows holding the
+    value ('dj_remix', 'done'). Comparing raw strings silently drops the legacy set.
+    """
+    if job_type is None and status is None:
+        with _lock:
+            jobs = list(_jobs.values())
+        return sorted(jobs, key=lambda j: j["created_at"], reverse=True)[:limit]
+
+    jobs = _query_db(job_type=job_type, status=status)
+
+    # The in-memory copy is the fresher of the two for a job still being worked
+    # on, so let it win where both hold the same id.
     with _lock:
-        jobs = list(_jobs.values())
+        jobs = [_jobs.get(j["job_id"], j) for j in jobs]
+
+    if job_type is not None:
+        wanted_type = _type_value(job_type)
+        jobs = [j for j in jobs if _type_value(j.get("job_type")) == wanted_type]
+
+    if status is not None:
+        wanted_status = _status_value(status)
+        jobs = [j for j in jobs if _status_value(j.get("status")) == wanted_status]
+
     return sorted(jobs, key=lambda j: j["created_at"], reverse=True)[:limit]
 
 
