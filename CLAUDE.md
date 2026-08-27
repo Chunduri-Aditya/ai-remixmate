@@ -243,6 +243,15 @@ auto-fires; its rules are authoritative for those tasks.
 - **`StructuredLogger.warning(msg, extra=None)`** takes a dict as its second arg, not printf-style
   varargs. Never call `logger.warning("...%s", exc)` — the exception gets treated as the `extra` dict
   and crashes inside Python's logging internals. Use an f-string or pass `exc` inside a dict.
+- **Two logging setups exist and only one runs.** `configure_structured_logging()` in
+  `logging_utils.py` builds the `StructuredJsonFormatter` / `StructuredConsoleFormatter`
+  handlers, and has zero callers (`grep -rn configure_structured_logging .` returns only its
+  own `def`, as of 2026-08-27). The path that actually runs is `configure_logging()` in
+  `config.py`, called from `main.py`'s lifespan, which uses `logging.basicConfig` with a plain
+  format string. So anything attached to the structured formatters is dead code that still
+  looks wired: attach handler-level behaviour in `config.configure_logging()` instead, which
+  is where `LogInjectionFilter` (CR/LF scrubbing, guards against forged log lines) lives.
+  `tests/adversarial/test_log_injection.py` asserts that path installs it.
 - **SSE from worker threads** — the event loop is captured once in `main.py`'s lifespan via
   `asyncio.get_running_loop()` and closed over by `_sync_emit`. Never call `asyncio.get_event_loop()`
   from inside a `ThreadPoolExecutor` worker — raises `RuntimeError` on Python 3.12 with no running
