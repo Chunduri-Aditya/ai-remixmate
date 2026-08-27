@@ -310,6 +310,26 @@ class AnalyzeRequest(BaseModel):
     song: str = Field(..., description="Song name (must exist in library)")
 
 
+class CrateCreateRequest(BaseModel):
+    """Body for POST /crates. Typed so a non-string `name` is a 422, not a 500."""
+    name: str = Field(..., description="Crate display name")
+
+
+class CrateRenameRequest(BaseModel):
+    """Body for PATCH /crates/{crate_id}."""
+    name: str = Field(..., description="New crate display name")
+
+
+class CrateAddSongRequest(BaseModel):
+    """Body for POST /crates/{crate_id}/songs."""
+    song_name: str = Field(..., description="Song name to add to the crate")
+
+
+class SongTagRequest(BaseModel):
+    """Body for POST /library/{song_name}/tags."""
+    tag: str = Field(..., description="Tag to attach to the song")
+
+
 # ---------------------------------------------------------------------------
 # Music intelligence result models
 # ---------------------------------------------------------------------------

@@ -28,32 +28,23 @@ client = TestClient(app, raise_server_exceptions=False)
 # AttributeError -> HTTP 500 where a 422/400 is correct.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(reason="crates.py:46 `(body.get('name') or '').strip()` "
-                          "AttributeErrors on list -> 500; expected 422/400",
-                   strict=True)
 def test_create_crate_rejects_non_string_name_without_500():
     r = client.post("/crates", json={"name": ["not", "a", "string"]})
     assert r.status_code != 500, r.text
     assert r.status_code in (400, 422)
 
 
-@pytest.mark.xfail(reason="crates.py:74 rename_crate same .strip() type-confusion",
-                   strict=True)
 def test_rename_crate_rejects_non_string_name_without_500():
     # Crate id need not exist — the crash happens before any lookup.
     r = client.patch("/crates/does-not-matter", json={"name": [1, 2]})
     assert r.status_code != 500, r.text
 
 
-@pytest.mark.xfail(reason="crates.py:93 add_to_crate same .strip() type-confusion",
-                   strict=True)
 def test_add_to_crate_rejects_non_string_song_without_500():
     r = client.post("/crates/does-not-matter/songs", json={"song_name": 123})
     assert r.status_code != 500, r.text
 
 
-@pytest.mark.xfail(reason="crates.py:139 add_song_tag same .strip() type-confusion",
-                   strict=True)
 def test_add_song_tag_rejects_non_string_tag_without_500():
     r = client.post("/library/anything/tags", json={"tag": {"a": 1}})
     assert r.status_code != 500, r.text
@@ -66,9 +57,6 @@ def test_add_song_tag_rejects_non_string_tag_without_500():
 # the crate/favorites DB with phantom rows for songs that don't exist.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(reason="add_song_tag skips _require_song -> phantom tag rows "
-                          "for nonexistent / traversal-named songs",
-                   strict=True)
 def test_tag_write_rejects_nonexistent_song():
     name = "QA_PHANTOM_SONG_THAT_DOES_NOT_EXIST_0xdeadbeef"
     r = client.post(f"/library/{name}/tags", json={"tag": "qa-should-not-persist"})
@@ -79,9 +67,6 @@ def test_tag_write_rejects_nonexistent_song():
         client.delete(f"/library/{name}/tags/qa-should-not-persist")
 
 
-@pytest.mark.xfail(reason="add_favorite skips _require_song -> phantom favorite "
-                          "rows for nonexistent songs",
-                   strict=True)
 def test_favorite_write_rejects_nonexistent_song():
     name = "QA_PHANTOM_FAV_0xdeadbeef"
     r = client.post(f"/favorites/{name}")
@@ -100,9 +85,6 @@ def test_favorite_write_rejects_nonexistent_song():
 # names). A nonexistent pair should 404 or clearly signal "unknown", not a score.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(reason="/compatibility returns compatible:true overall~0.575 "
-                          "for two nonexistent songs instead of 404/unknown",
-                   strict=True)
 def test_compatibility_does_not_fabricate_score_for_unknown_songs():
     r = client.post("/compatibility", json={
         "song_a": "Nonexistent Song ZZZ", "song_b": "Also Fake QQQ",
@@ -120,17 +102,24 @@ def test_compatibility_does_not_fabricate_score_for_unknown_songs():
     assert not fabricated, f"fabricated confident score: {body}"
 
 
-def test_compatibility_accepts_path_traversal_names_characterization():
-    """CHARACTERIZATION (passes today): /compatibility never sanitizes song
-    names, so traversal payloads are accepted with a 200 instead of a 400.
-    No file contents leak (analysis falls through to defaults), but the missing
-    _require_song is inconsistent with every other song-taking endpoint."""
+@pytest.mark.parametrize("hostile", [
+    "../../../../../../etc/passwd",
+    "..",
+    "foo/bar",
+    "foo%00bar",
+    "a" * 10000,
+])
+def test_compatibility_rejects_hostile_song_names(hostile):
+    """/compatibility shape-validates both names against the shared allowlist.
+
+    It deliberately does NOT require the song to exist (song_a is documented
+    as "Song name or search query" and falls through to an external metadata
+    lookup), so this asserts the name *shape* gate only."""
     r = client.post("/compatibility", json={
-        "song_a": "../../../../../../etc/passwd",
-        "song_b": "../../../../../../etc/hosts",
+        "song_a": hostile, "song_b": hostile,
         "artist_a": "x", "artist_b": "y",
     })
-    assert r.status_code == 200  # documents the gap; flip to 400 once fixed
+    assert r.status_code == 400, r.text
 
 
 # ---------------------------------------------------------------------------

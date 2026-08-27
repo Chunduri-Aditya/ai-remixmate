@@ -31,6 +31,13 @@ Favorites:
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
+from scripts.api.routers._helpers import _require_song
+from scripts.api.schemas import (
+    CrateAddSongRequest,
+    CrateCreateRequest,
+    CrateRenameRequest,
+    SongTagRequest,
+)
 from scripts.core import crates as crate_store
 
 router = APIRouter()
@@ -41,9 +48,9 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 @router.post("/crates", status_code=201, tags=["crates"])
-def create_crate(body: dict):
+def create_crate(body: CrateCreateRequest):
     """Create a new crate. Body: { "name": "..." }"""
-    name = (body.get("name") or "").strip()
+    name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="'name' is required")
     try:
@@ -69,9 +76,9 @@ def delete_crate(crate_id: str):
 
 
 @router.patch("/crates/{crate_id}", tags=["crates"])
-def rename_crate(crate_id: str, body: dict):
+def rename_crate(crate_id: str, body: CrateRenameRequest):
     """Rename a crate. Body: { "name": "new name" }"""
-    new_name = (body.get("name") or "").strip()
+    new_name = body.name.strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="'name' is required")
     updated = crate_store.rename_crate(crate_id, new_name)
@@ -88,9 +95,9 @@ def get_crate_songs(crate_id: str):
 
 
 @router.post("/crates/{crate_id}/songs", status_code=201, tags=["crates"])
-def add_to_crate(crate_id: str, body: dict):
+def add_to_crate(crate_id: str, body: CrateAddSongRequest):
     """Add a song to a crate. Body: { "song_name": "..." }"""
-    song_name = (body.get("song_name") or "").strip()
+    song_name = body.song_name.strip()
     if not song_name:
         raise HTTPException(status_code=400, detail="'song_name' is required")
     added = crate_store.add_to_crate(crate_id, song_name)
@@ -134,9 +141,16 @@ def get_song_tags(song_name: str):
 
 
 @router.post("/library/{song_name:path}/tags", status_code=201, tags=["tags"])
-def add_song_tag(song_name: str, body: dict):
-    """Add a tag to a song. Body: { "tag": "..." }"""
-    tag = (body.get("tag") or "").strip()
+def add_song_tag(song_name: str, body: SongTagRequest):
+    """Add a tag to a song. Body: { "tag": "..." }
+
+    Writes are gated on the song actually existing: an unchecked name let
+    traversal-shaped and nonexistent songs persist phantom tag rows.
+    Reads and deletes stay ungated so pre-existing phantoms remain
+    listable and removable.
+    """
+    _require_song(song_name)
+    tag = body.tag.strip()
     if not tag:
         raise HTTPException(status_code=400, detail="'tag' is required")
     added = crate_store.add_tag(song_name, tag)
@@ -167,7 +181,12 @@ def list_favorites():
 
 @router.post("/favorites/{song_name:path}", status_code=201, tags=["favorites"])
 def add_favorite(song_name: str):
-    """Mark a song as a favorite."""
+    """Mark a song as a favorite.
+
+    Gated on existence for the same reason as add_song_tag; DELETE stays
+    ungated so already-persisted phantom favorites can be cleaned up.
+    """
+    _require_song(song_name)
     crate_store.set_favorite(song_name, value=True)
     return {"song_name": song_name, "favorited": True}
 

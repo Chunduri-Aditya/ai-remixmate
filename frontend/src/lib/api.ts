@@ -323,7 +323,10 @@ export const cratesApi = {
   rename:  (id: number, name: string)   => patch<Crate>(`/crates/${id}`, { name }),
   delete:  (id: number)                 => del<void>(`/crates/${id}`),
   songs:   (id: number)                 => get<string[]>(`/crates/${id}/songs`),
-  addSong: (id: number, name: string)   => post<void>(`/crates/${id}/songs`, { name }),
+  // Backend POST /crates/{id}/songs reads `song_name`, not `name` — sending
+  // `name` made every add-to-crate from Library Atlas 400 with
+  // "'song_name' is required". Same shape-mismatch class as favoritesApi.list.
+  addSong: (id: number, name: string)   => post<void>(`/crates/${id}/songs`, { song_name: name }),
   removeSong: (id: number, name: string) =>
     del<void>(`/crates/${id}/songs/${encodeURIComponent(name)}`),
 }

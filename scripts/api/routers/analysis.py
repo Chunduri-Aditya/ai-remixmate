@@ -13,6 +13,7 @@ POST /index/rebuild                    — rebuild RAG index (queued job)
 POST /library/build-clap-index         — build / update CLAP embedding index (queued job)
 """
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
@@ -32,7 +33,7 @@ from scripts.api.schemas import (
 )
 from scripts.api.tasks import task_analyze, task_rebuild_index
 from scripts.core.logging_utils import get_logger
-from scripts.core.paths import LIBRARY_DIR
+from scripts.core.paths import LIBRARY_DIR, SONG_NAME_RE
 
 _log = get_logger(__name__)
 
@@ -63,6 +64,25 @@ def check_compatibility(req: CompatibilityRequest):
     """
     from scripts.core.track_metadata import TrackMetadata, MetadataClient
     from scripts.core.analysis_pipeline import has_analysis, run_song_analysis
+
+    # Shape-only validation. Unlike every other song-taking endpoint this one
+    # accepts songs that aren't in the library (step 3 below is a deliberate
+    # external lookup for a free-text search query), so _require_song's
+    # existence check would delete that feature. The allowlist regex and the
+    # Path().name check are what actually matter here: they reject the
+    # traversal-shaped names this endpoint used to wave through with a 200.
+    # NB: ".." clears both the regex (dots are in the allowlist) and the
+    # Path().name check (pathlib reports ".." as its own final component), so
+    # the confinement check below is load-bearing, not belt-and-braces. It is
+    # _require_song's layer 3 without the existence requirement.
+    _library_root = str(LIBRARY_DIR.resolve())
+    for _field, _value in (("song_a", req.song_a), ("song_b", req.song_b)):
+        if (
+            not SONG_NAME_RE.match(_value)
+            or Path(_value).name != _value
+            or not str((LIBRARY_DIR / _value).resolve()).startswith(_library_root)
+        ):
+            raise HTTPException(status_code=400, detail=f"Invalid song name in '{_field}'")
 
     client = MetadataClient()
 
@@ -137,6 +157,23 @@ def check_compatibility(req: CompatibilityRequest):
 
     meta_a, genre_a = _meta_for(req.song_a, req.artist_a)
     meta_b, genre_b = _meta_for(req.song_b, req.artist_b)
+
+    # A song that resolves to nothing (no cached analysis, live analysis
+    # failed or it isn't local, and the external API returned all-defaults)
+    # yields bpm=0.0 / camelot=None. Scoring two of those produces a
+    # confident-looking "compatible: true, energy_score 1.0" that is really a
+    # comparison of two empty objects. Refuse rather than fabricate.
+    for _field, _name, _meta in (
+        ("song_a", req.song_a, meta_a),
+        ("song_b", req.song_b, meta_b),
+    ):
+        if _meta.bpm == 0.0 and _meta.camelot is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No usable analysis or metadata for {_field}={_name!r}; "
+                       "cannot compute a compatibility score.",
+            )
+
     score = client.compatibility_score(meta_a, meta_b)
 
     return CompatibilityResult(
