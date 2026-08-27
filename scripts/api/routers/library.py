@@ -35,7 +35,10 @@ from scripts.api.schemas import (
     StorageStatusResponse,
 )
 from scripts.api.tasks import task_analyze_missing, task_initialize_library, task_scan_broken
+from scripts.core.logging_utils import get_logger
 from scripts.core.paths import LIBRARY_DIR, OUTPUTS_DIR
+
+_log = get_logger(__name__)
 
 router = APIRouter()
 
@@ -328,7 +331,10 @@ def delete_songs_batch(req: DeleteBatchRequest):
         except HTTPException as e:
             failed.append({"name": name, "error": str(e.detail)})
         except Exception as e:
-            failed.append({"name": name, "error": str(e)})
+            # Log the detail, return a generic message: str(e) on an arbitrary
+            # exception leaks filesystem paths and internals to the client.
+            _log.warning(f"bulk delete failed for '{name}': {e}")
+            failed.append({"name": name, "error": "deletion failed"})
     return {"deleted": deleted, "failed": failed}
 
 

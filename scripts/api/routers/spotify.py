@@ -20,6 +20,7 @@ User library (requires login):
 """
 
 import re
+import urllib.parse
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -75,7 +76,11 @@ def spotify_callback(code: str = None, state: str = None, error: str = None):
     Redirects back to the Streamlit UI on success.
     """
     if error:
-        return RedirectResponse(url=f"http://127.0.0.1:8501?spotify_error={error}")
+        # `error` is an attacker-influenceable query param. The host is fixed,
+        # but interpolating it raw allows extra params / fragments to be
+        # smuggled into the redirect target.
+        safe_error = urllib.parse.quote(error, safe="")
+        return RedirectResponse(url=f"http://127.0.0.1:8501?spotify_error={safe_error}")
 
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing code or state parameter.")
@@ -188,10 +193,11 @@ def spotify_import(body: dict):
 
         def _write_meta():
             try:
-                from scripts.core.recommend import write_meta_cache
-                from scripts.core.paths import LIBRARY_DIR
                 # Wait briefly for the download job to complete before writing
                 import time
+
+                from scripts.core.paths import LIBRARY_DIR
+                from scripts.core.recommend import write_meta_cache
                 for _ in range(60):  # up to 60 s
                     job = job_store.get_job(job_id)
                     if job and job.get("status") in ("done", "failed"):

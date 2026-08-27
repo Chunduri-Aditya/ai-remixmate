@@ -308,15 +308,42 @@ class MetadataCache:
 
 _USER_AGENT = "AI-RemixMate/0.2 (portfolio project; github.com/ai-remixmate)"
 
+# Every provider host this module is allowed to reach. Song titles and artist
+# names are user-controlled and get interpolated into the URLs below, so the
+# request boundary re-derives the host from the assembled URL and checks it
+# rather than trusting that a hardcoded BASE prefix survived the join.
+_ALLOWED_HOSTS = frozenset({
+    "api.getsongbpm.com",
+    "ws.audioscrobbler.com",
+    "musicbrainz.org",
+})
+
+
+def _redact_url(url: str) -> str:
+    """Strip the query string before logging — it carries `api_key`."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+    except ValueError:
+        return "<unparseable url>"
+
 
 def _get_json(url: str, timeout: int = 8) -> Optional[dict]:
     """Simple GET → JSON with a custom User-Agent.  Returns None on any error."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or parts.hostname not in _ALLOWED_HOSTS:
+        log.error(
+            "Refusing request to non-allowlisted metadata host: %s",
+            _redact_url(url),
+        )
+        return None
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
-        log.debug("HTTP GET failed [%s]: %s", url, e)
+        # Never log the raw URL: it carries api_key in its query string.
+        log.debug("HTTP GET failed [%s]: %s", _redact_url(url), e)
         return None
 
 
@@ -349,7 +376,7 @@ class GetSongBPMProvider:
             return None
 
         query = f"{title} {artist}".strip()
-        encoded = urllib.parse.quote(query)
+        encoded = urllib.parse.quote(query, safe="")
         url = f"{self.BASE}/search/?api_key={self.api_key}&type=song&lookup={encoded}"
 
         data = _get_json(url)
@@ -489,7 +516,7 @@ class MusicBrainzProvider:
         query = f'recording:"{title}"'
         if artist:
             query += f' AND artist:"{artist}"'
-        encoded = urllib.parse.quote(query)
+        encoded = urllib.parse.quote(query, safe="")
         url = f"{self.BASE}/recording/?query={encoded}&fmt=json&limit=1"
 
         data = _get_json(url)
