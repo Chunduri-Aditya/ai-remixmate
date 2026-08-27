@@ -1,18 +1,6 @@
-import { createContext, useContext, useState } from 'react'
+import { useState } from 'react'
+import { ToastContext, type ToastItem } from './toastContext'
 import './Toast.css'
-
-export interface ToastItem {
-  id: string
-  message: string
-  level: 'success' | 'error' | 'info'
-  jobId?: string
-}
-
-const ToastContext = createContext<{ push: (t: Omit<ToastItem, 'id'>) => void }>(
-  { push: () => {} },
-)
-
-export function useToast() { return useContext(ToastContext) }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([])

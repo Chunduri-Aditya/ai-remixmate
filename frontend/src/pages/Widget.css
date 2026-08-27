@@ -120,8 +120,9 @@
   outline: none;
 }
 
-.wgt-search__input:focus {
+.wgt-search__input:focus-visible {
   border-color: var(--color-amber-500);
+  box-shadow: 0 0 0 2px var(--color-amber-glow);
 }
 
 .wgt-search__input::placeholder {

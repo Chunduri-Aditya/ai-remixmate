@@ -44,7 +44,7 @@
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
-.la-search:focus {
+.la-search:focus-visible {
   border-color: var(--color-amber-500);
   box-shadow: 0 0 0 2px var(--color-amber-glow);
 }
@@ -545,7 +545,10 @@
 }
 
 .la-action-btn:disabled {
-  opacity: 0.2;
+  /* 0.2 leaves a disabled control effectively invisible against the row.
+     0.45 still reads as off, but keeps the icon legible enough that its
+     absence is not mistaken for a missing feature. */
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -557,7 +560,7 @@ a.la-action-btn {
 }
 
 .la-action-btn--disabled {
-  opacity: 0.2;
+  opacity: 0.45;
   cursor: not-allowed;
   pointer-events: auto;
 }

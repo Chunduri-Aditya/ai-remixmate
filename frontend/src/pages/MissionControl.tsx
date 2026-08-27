@@ -249,7 +249,9 @@ export default function MissionControl() {
 
   const { data: jobs } = useQuery({
     queryKey: ['jobs-init'],
-    queryFn: jobsApi.list,
+    // Wrapped, not passed by reference: react-query hands queryFn a context
+    // object, which would land in jobsApi.list's filters parameter.
+    queryFn: () => jobsApi.list(),
     refetchInterval: false,   // SSE handles updates; this is just initial hydration
     staleTime: 0,
   })

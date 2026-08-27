@@ -5,6 +5,8 @@
 .md-body {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: var(--space-6);
 }
 
@@ -77,7 +79,7 @@
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
-.md-select:focus {
+.md-select:focus-visible {
   border-color: var(--deck-color);
   box-shadow: 0 0 0 2px var(--deck-glow);
 }
@@ -320,8 +322,9 @@
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
-.md-input:focus {
+.md-input:focus-visible {
   border-color: var(--color-amber-500);
+  box-shadow: 0 0 0 2px var(--color-amber-glow);
 }
 
 .md-input::placeholder { color: var(--color-text-faint); }
@@ -403,6 +406,9 @@
   justify-content: center;
   gap: var(--space-4);
   min-height: 240px;
+  /* absorb the space under the decks so the prompt sits in the middle of the
+     region it is talking about, rather than above ~425px of empty canvas */
+  flex: 1;
   text-align: center;
   color: var(--color-text-faint);
 }

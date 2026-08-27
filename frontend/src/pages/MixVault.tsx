@@ -3,7 +3,7 @@
    Completed mix browser: in-page audio player, download,
    metadata (BPM, Camelot, harmonic score, LUFS).
    ============================================================ */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Archive,
@@ -60,10 +60,16 @@ function WaveformPlayer({ src, songA, songB, jobId }: WaveformPlayerProps) {
   const [volume, setVolume]     = useState(1)
 
   // Fire-and-forget — never let a feedback-logging hiccup affect playback.
-  function logEvent(eventType: 'play_start' | 'complete', positionSec?: number) {
-    if (!songA) return
-    feedbackApi.logEvent({ eventType, songA, songB, jobId, positionSec }).catch(() => {})
-  }
+  // Memoized on its telemetry inputs so the WaveSurfer effect below can depend
+  // on it honestly: songA/songB/jobId are static per card, so this identity is
+  // stable and the effect still only re-runs when `src` changes.
+  const logEvent = useCallback(
+    (eventType: 'play_start' | 'complete', positionSec?: number) => {
+      if (!songA) return
+      feedbackApi.logEvent({ eventType, songA, songB, jobId, positionSec }).catch(() => {})
+    },
+    [songA, songB, jobId],
+  )
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -88,10 +94,7 @@ function WaveformPlayer({ src, songA, songB, jobId }: WaveformPlayerProps) {
     })
     wsRef.current = ws
     return () => ws.destroy()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- songA/songB/jobId
-    // are static per-card props (a card never swaps which job it represents),
-    // only src should re-run the WaveSurfer setup.
-  }, [src])
+  }, [src, logEvent])
 
   function togglePlay() {
     const startingPlayback = !playing
@@ -110,7 +113,11 @@ function WaveformPlayer({ src, songA, songB, jobId }: WaveformPlayerProps) {
     <div className="mv-waveform-player">
       <div ref={containerRef} className="mv-waveform-canvas" />
       <div className="mv-waveform-controls">
-        <button className="mv-icon-btn" onClick={togglePlay}>
+        <button
+          className="mv-icon-btn"
+          onClick={togglePlay}
+          aria-label={playing ? 'Pause' : 'Play'}
+        >
           {playing ? <Pause size={16} /> : <Play size={16} />}
         </button>
         <span className="text-muted font-mono" style={{ fontSize: 'var(--text-xs)' }}>
@@ -268,18 +275,18 @@ export default function MixVault() {
   const upsertJob = useAppStore((s) => s.upsertJob)
 
   useEffect(() => {
-    jobsApi
-      .list()
-      .then((list) =>
-        list
-          .filter(
-            (j) =>
-              (j.type === 'dj_remix' || j.type === 'dj_chain') &&
-              j.status === 'COMPLETED',
-          )
-          .forEach(upsertJob),
-      )
-      .catch(() => { /* silent — API may not be reachable */ })
+    // Ask the server for exactly the completed remixes and chains. Fetching the
+    // unfiltered list and filtering here only ever saw the newest `limit` jobs,
+    // so a busy job store (hundreds of analyze/download rows) pushed every real
+    // mix out of the window and the page rendered its empty state instead.
+    Promise.all([
+      jobsApi.list({ jobType: 'dj_remix', status: 'done', limit: 100 }),
+      jobsApi.list({ jobType: 'dj_chain', status: 'done', limit: 100 }),
+    ])
+      .then(([remixes, chains]) => [...remixes, ...chains].forEach(upsertJob))
+      .catch((err) => {
+        console.warn('[MixVault] could not load completed mixes', err)
+      })
   }, [upsertJob])
 
   const mixes = useMemo(

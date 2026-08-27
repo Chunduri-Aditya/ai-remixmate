@@ -3,6 +3,8 @@
    Self-contained, no CSS file — all styles inline.
    ============================================================ */
 
+import { normalizeKey } from './camelotKey'
+
 const CAMELOT: Record<string, { pos: number; type: 'A' | 'B' }> = {
   'Am':  { pos: 1,  type: 'A' }, 'C':   { pos: 1,  type: 'B' },
   'Em':  { pos: 2,  type: 'A' }, 'G':   { pos: 2,  type: 'B' },
@@ -16,15 +18,6 @@ const CAMELOT: Record<string, { pos: number; type: 'A' | 'B' }> = {
   'Cm':  { pos: 10, type: 'A' }, 'Eb':  { pos: 10, type: 'B' },
   'Gm':  { pos: 11, type: 'A' }, 'Bb':  { pos: 11, type: 'B' },
   'Dm':  { pos: 12, type: 'A' }, 'F':   { pos: 12, type: 'B' },
-}
-
-// Backend returns "C major", "A minor", "F# major" — strip qualifier.
-export function normalizeKey(key?: string): string | undefined {
-  if (!key) return undefined
-  const k = key.trim()
-  if (k.endsWith(' major')) return k.slice(0, -6).trim()
-  if (k.endsWith(' minor')) return k.slice(0, -6).trim() + 'm'
-  return k
 }
 
 function toRad(deg: number) { return (deg * Math.PI) / 180 }

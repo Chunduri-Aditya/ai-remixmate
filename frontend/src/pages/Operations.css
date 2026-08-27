@@ -82,7 +82,7 @@
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
-.ops-input:focus {
+.ops-input:focus-visible {
   border-color: var(--color-amber-500);
   box-shadow: 0 0 0 2px var(--color-amber-glow);
 }

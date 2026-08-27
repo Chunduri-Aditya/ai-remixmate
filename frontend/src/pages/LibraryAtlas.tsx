@@ -898,7 +898,11 @@ export default function LibraryAtlas() {
             onChange={(e) => setSearch(e.target.value)}
           />
           {search && (
-            <button className="la-search-clear" onClick={() => setSearch('')}>
+            <button
+              className="la-search-clear"
+              onClick={() => setSearch('')}
+              aria-label="Clear search"
+            >
               <X size={12} />
             </button>
           )}

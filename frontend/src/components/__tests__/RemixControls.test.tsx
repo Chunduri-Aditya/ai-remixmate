@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { RemixControls, REMIX_DEFAULTS } from '../RemixControls'
+import { RemixControls } from '../RemixControls'
+import { REMIX_DEFAULTS } from '../remixOptions'
 
 describe('RemixControls', () => {
   it('renders all three transition bar options', () => {

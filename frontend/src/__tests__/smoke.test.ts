@@ -160,7 +160,7 @@ const ROUTES = [
   { path: '/signal-search', heading: 'Signal Search' },
   { path: '/ai-lab', heading: 'AI Lab' },
   { path: '/mix-vault', heading: 'Mix Vault' },
-  { path: '/operations', heading: 'Downloads' },
+  { path: '/operations', heading: 'Operations' },
 ]
 
 function renderRoute(path: string) {

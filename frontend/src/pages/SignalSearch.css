@@ -6,9 +6,13 @@
   display: grid;
   grid-template-columns: 280px 1fr;
   gap: var(--space-6);
-  align-items: start;
+  /* stretch, not start: the results column has to absorb the column height or
+     the page renders a short control card above ~590px of empty canvas. The
+     control panel opts back out with align-self below. */
+  align-items: stretch;
   overflow: hidden;
   flex: 1;
+  min-height: 0;
   padding: var(--space-5) var(--space-6);
 }
 
@@ -27,6 +31,8 @@
   gap: var(--space-4);
   position: sticky;
   top: 0;
+  /* the grid stretches its children; this one keeps its content height */
+  align-self: start;
 }
 
 .ss-panel__section {
@@ -77,8 +83,9 @@
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
-.ss-select:focus {
+.ss-select:focus-visible {
   border-color: var(--color-amber-500);
+  box-shadow: 0 0 0 2px var(--color-amber-glow);
 }
 
 .ss-ref-meta {
@@ -164,8 +171,9 @@
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
-.ss-mini-input:focus {
+.ss-mini-input:focus-visible {
   border-color: var(--color-amber-500);
+  box-shadow: 0 0 0 2px var(--color-amber-glow);
 }
 
 .ss-mini-input--full {
@@ -186,7 +194,10 @@
   flex-direction: column;
   gap: var(--space-3);
   overflow-y: auto;
-  max-height: calc(100vh - 200px);
+  /* fill the grid cell rather than guessing at the viewport: the shell already
+     subtracts the rail, header, and player bar for us */
+  min-height: 0;
+  height: 100%;
 }
 
 .ss-splash {
@@ -196,6 +207,7 @@
   justify-content: center;
   gap: var(--space-4);
   min-height: 300px;
+  height: 100%;
   text-align: center;
   color: var(--color-text-faint);
 }

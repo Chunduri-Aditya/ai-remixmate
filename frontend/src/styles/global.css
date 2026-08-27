@@ -253,3 +253,34 @@ button:disabled {
   cursor: not-allowed;
   opacity: 0.4;
 }
+
+/* --- Keyboard focus ---
+   Components that draw their own focus ring override this; everything else
+   (most of the ~100 buttons and links, which previously showed nothing) gets a
+   visible indicator. :focus-visible, so pointer users never see it. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-amber-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* --- Reduced motion ---
+   The UI carries 13 keyframe animations and ~70 transitions (spinners, pulsing
+   job dots, toast slides, the visualizer). Honour the OS setting centrally so
+   each component does not have to remember to.
+
+   Durations collapse to ~0 rather than 0 so animation/transition end events
+   still fire — code that waits on one keeps working. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

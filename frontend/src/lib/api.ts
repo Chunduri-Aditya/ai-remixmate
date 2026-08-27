@@ -305,8 +305,26 @@ export const remixApi = {
 
 // --- Jobs ---
 
+export interface JobListFilters {
+  limit?: number
+  /** Backend enum value, e.g. 'dj_remix'. Filtered server-side, before the limit. */
+  jobType?: string
+  /** Backend enum value, e.g. 'done' (not the uppercase frontend 'COMPLETED'). */
+  status?: string
+}
+
 export const jobsApi = {
-  list:   () => get<RawJob[]>('/jobs').then((js) => js.map(normalizeJob)),
+  // Filters are applied server-side on purpose: /jobs returns the newest `limit`
+  // jobs, so filtering client-side hides every match that falls outside that
+  // window — which is what made Mix Vault look empty against a full job store.
+  list: (filters: JobListFilters = {}) => {
+    const qs = new URLSearchParams()
+    if (filters.limit   !== undefined) qs.set('limit', String(filters.limit))
+    if (filters.jobType !== undefined) qs.set('job_type', filters.jobType)
+    if (filters.status  !== undefined) qs.set('status', filters.status)
+    const suffix = qs.toString() ? `?${qs}` : ''
+    return get<RawJob[]>(`/jobs${suffix}`).then((js) => js.map(normalizeJob))
+  },
   get:    (id: string) => get<RawJob>(`/jobs/${id}`).then(normalizeJob),
   cancel: (id: string) => del<void>(`/jobs/${id}`),
 }

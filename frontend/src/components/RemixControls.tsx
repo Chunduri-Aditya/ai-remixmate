@@ -2,25 +2,8 @@
    RemixControls — compact card exposing DJ remix parameters.
    Shared by MixDeck and SetBuilder.
    ============================================================ */
+import type { RemixOptions } from './remixOptions'
 import './RemixControls.css'
-
-export interface RemixOptions {
-  transition_bars: 8 | 16 | 32
-  preset: string
-  transition_effect: string
-  bridge_beat_mode: 'none' | 'auto'
-  bridge_beat_genre: string
-  bridge_beat_intensity: number
-}
-
-export const REMIX_DEFAULTS: RemixOptions = {
-  transition_bars: 16,
-  preset: 'auto',
-  transition_effect: 'auto',
-  bridge_beat_mode: 'none',
-  bridge_beat_genre: 'auto',
-  bridge_beat_intensity: 0.38,
-}
 
 const BAR_OPTIONS: Array<8 | 16 | 32> = [8, 16, 32]
 const PRESETS   = ['auto', 'techno', 'house', 'hiphop', 'trap', 'dnb', 'ambient']

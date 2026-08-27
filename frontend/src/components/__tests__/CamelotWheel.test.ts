@@ -1,4 +1,4 @@
-import { normalizeKey } from '../CamelotWheel'
+import { normalizeKey } from '../camelotKey'
 
 describe('normalizeKey', () => {
   it('strips " major"',        () => expect(normalizeKey('C major')).toBe('C'))

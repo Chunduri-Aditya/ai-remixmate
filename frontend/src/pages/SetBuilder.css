@@ -78,7 +78,10 @@
   outline: none;
 }
 
-.sb-search:focus { border-color: var(--color-amber-500); }
+.sb-search:focus-visible {
+  border-color: var(--color-amber-500);
+  box-shadow: 0 0 0 2px var(--color-amber-glow);
+}
 .sb-search::placeholder { color: var(--color-text-faint); }
 
 .sb-pool__list {

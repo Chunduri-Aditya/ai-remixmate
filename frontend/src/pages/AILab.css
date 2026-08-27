@@ -6,6 +6,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+  flex: 1;
+  min-height: 0;
 }
 
 /* Mode tabs */
@@ -46,7 +48,11 @@
   display: grid;
   grid-template-columns: 320px 1fr;
   gap: var(--space-6);
-  align-items: start;
+  /* stretch so the output panel absorbs the height; the config column opts
+     back out below. With `start` the page left ~415px of empty canvas. */
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
 }
 
 @media (max-width: 860px) {
@@ -55,6 +61,7 @@
 
 /* Config panel */
 .al-config {
+  align-self: start;
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-lg);
@@ -105,8 +112,9 @@
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
-.al-select:focus {
+.al-select:focus-visible {
   border-color: var(--color-amber-500);
+  box-shadow: 0 0 0 2px var(--color-amber-glow);
 }
 
 .al-input {
@@ -122,7 +130,10 @@
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
-.al-input:focus { border-color: var(--color-amber-500); }
+.al-input:focus-visible {
+  border-color: var(--color-amber-500);
+  box-shadow: 0 0 0 2px var(--color-amber-glow);
+}
 
 /* Params accordion */
 .al-params {
@@ -213,6 +224,7 @@
   border-radius: var(--radius-lg);
   padding: var(--space-5);
   min-height: 260px;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useAppStore } from '@/stores/appStore'
-import { useToast } from '@/components/Toast'
+import { useToast } from '@/components/toastContext'
 import type { Job } from '@/types'
 
 export function useJobToasts() {

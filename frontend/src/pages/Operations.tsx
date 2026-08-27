@@ -515,9 +515,9 @@ export default function Operations() {
       <header className="page-base__header">
         <Download size={20} strokeWidth={1.5} className="page-base__header-icon" />
         <div>
-          <h1 className="page-base__title font-display">Downloads</h1>
+          <h1 className="page-base__title font-display">Operations</h1>
           <p className="page-base__sub text-muted">
-            Search, batch and playlist downloads · auto stem separation · live progress
+            Downloads · processing status · storage · library maintenance
           </p>
         </div>
       </header>

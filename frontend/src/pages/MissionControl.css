@@ -95,6 +95,12 @@
   gap: var(--space-3);
 }
 
+/* The jobs column is the grid child that absorbs the slack; it has to pass that
+   height down to the list inside it rather than shrinking to its content. */
+.mc-section--jobs {
+  min-height: 0;
+}
+
 .mc-section__header {
   display: flex;
   align-items: center;
@@ -225,7 +231,11 @@
   display: grid;
   grid-template-columns: 1fr 280px;
   gap: var(--space-5);
-  align-items: start;
+  /* stretch so the jobs column absorbs the height left under the stat cards;
+     the quick-actions rail opts back out below */
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
 }
 
 @media (max-width: 1000px) {
@@ -236,6 +246,9 @@
 .mc-jobs-list {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   gap: 2px;
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-subtle);
@@ -314,6 +327,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  /* centre in the filled list rather than sitting as a thin strip at the top */
+  flex: 1;
   padding: var(--space-6) var(--space-4);
   font-size: var(--text-sm);
 }
@@ -323,6 +338,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  align-self: start;
 }
 
 .mc-quick-action {

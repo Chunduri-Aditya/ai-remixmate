@@ -68,7 +68,11 @@ function MiniPlayer({ src }: { src: string }) {
         }}
         onEnded={() => setPlaying(false)}
       />
-      <button className="al-mini-play" onClick={toggle}>
+      <button
+        className="al-mini-play"
+        onClick={toggle}
+        aria-label={playing ? 'Pause preview' : 'Play preview'}
+      >
         {playing ? <Pause size={14} /> : <Play size={14} />}
       </button>
       <div className="al-mini-seek">
