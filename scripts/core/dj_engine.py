@@ -585,6 +585,42 @@ def _extract_rhythmic_loop(
     return audio[-loop_samples:].astype(np.float32)
 
 
+
+def _clamp_entry_sample(entry_sample: int, track_len: int, trans_samples: int,
+                        sr: int, context: str = "render") -> int:
+    """Clamp Song B's entry so a full transition window of B still exists.
+
+    Clamping only to ``len - 1`` leaves a 1-sample slice plus zero padding when
+    the plan puts the entry near the end of B: the incoming track is absent for
+    the whole second half and the transition renders into silence, with no
+    error and no warning. Back the entry up to the latest position that still
+    yields ``trans_samples`` of material, and say so in the log.
+
+    plan_transition() snaps entries to phrase boundaries and normally avoids
+    this, so a clamp here means an externally supplied or hand-edited plan.
+    """
+    if trans_samples <= 0 or track_len <= 0:
+        return 0
+    latest = track_len - trans_samples
+    if latest < 0:
+        log.warning(
+            "[%s] Song B (%.2fs) is shorter than the %.2fs transition; "
+            "entering at 0 — the transition will run past the end of B.",
+            context, track_len / sr, trans_samples / sr,
+        )
+        return 0
+    if entry_sample > latest:
+        log.warning(
+            "[%s] entry_time_b lands %.2fs past the last position that fits a "
+            "%.2fs transition; backing the entry up to %.2fs so Song B is "
+            "actually audible.",
+            context, (entry_sample - latest) / sr,
+            trans_samples / sr, latest / sr,
+        )
+        return latest
+    return max(0, entry_sample)
+
+
 def _stem_crossfade_curves(
     trans_samples: int,
     similarity: float,
@@ -843,7 +879,8 @@ class DJEngine:
         # time_stretch(rate=r) speeds up by r×, so t → t/r in stretched time.
         safe_ratio     = _safe_ratio(plan.tempo_shift_ratio)
         entry_sample_b = int(plan.entry_time_b * sr / safe_ratio)
-        entry_sample_b = max(0, min(entry_sample_b, len(track_b_stretched) - 1))
+        entry_sample_b = _clamp_entry_sample(
+            entry_sample_b, len(track_b_stretched), trans_samples, sr, "render")
         exit_sample_a  = max(0, min(exit_sample_a,  len(track_a) - 1))
 
         # --- Beat-grid lock ---
@@ -1103,8 +1140,9 @@ class DJEngine:
             exit_sample_a  = _orig_to_stretched(plan.exit_time_a, i)
             entry_sample_b = _orig_to_stretched(plan.entry_time_b, i + 1)
             exit_sample_a  = max(0, min(exit_sample_a,  len(audio_a) - 1))
-            entry_sample_b = max(0, min(entry_sample_b, len(audio_b) - 1))
             trans_s        = _trans_samples(plan)
+            entry_sample_b = _clamp_entry_sample(
+                entry_sample_b, len(audio_b), trans_s, sr, f"chain[{i}]")
             mid            = trans_s // 2
 
             # Beat-grid lock
@@ -1385,7 +1423,8 @@ class DJEngine:
         trans_samples = int(plan.transition_seconds * sr)
         safe_ratio    = _safe_ratio(plan.tempo_shift_ratio)
         entry_sample_b = int(plan.entry_time_b * sr / safe_ratio)
-        entry_sample_b = max(0, min(entry_sample_b, len(track_b_stretched) - 1))
+        entry_sample_b = _clamp_entry_sample(
+            entry_sample_b, len(track_b_stretched), trans_samples, sr, "render_stems")
         exit_sample_a  = max(0, min(exit_sample_a,  len(track_a) - 1))
 
         # Beat-grid correction

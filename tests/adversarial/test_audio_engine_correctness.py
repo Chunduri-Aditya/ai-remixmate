@@ -93,9 +93,6 @@ def test_master_mix_true_loudness_is_spectrum_independent():
 # (Requires an out-of-range plan; plan_transition normally avoids it.)
 # ===========================================================================
 
-@pytest.mark.xfail(reason="dj_engine.py:846 clamps entry_sample_b but never "
-                          "guards entry past end of B -> transition into "
-                          "silence with no error/warning", strict=True)
 def test_render_entry_past_end_of_b_is_not_silent():
     from scripts.core.dj_engine import DJEngine
     from scripts.core.dj_analysis import TransitionPlan, EQPlan
@@ -112,6 +109,37 @@ def test_render_entry_past_end_of_b_is_not_silent():
     rms_db = 20 * np.log10(np.sqrt(np.mean(second_half.astype(np.float64) ** 2)) + 1e-12)
     # B should be rising to full here; -74 dB means it never entered.
     assert rms_db > -40, f"transition 2nd-half RMS {rms_db:.1f} dB — B is absent (silent transition)"
+
+
+def test_render_late_entry_backs_up_instead_of_going_silent():
+    """Second branch of the entry clamp: B is long enough for the transition,
+    but the plan puts the entry too near the end. The engine must back the
+    entry up to the latest position that still fits, not clamp to len-1.
+
+    The sibling test above covers the other branch (B shorter than the whole
+    transition); without this one that branch is the only path exercised.
+    """
+    from scripts.core.dj_engine import DJEngine
+    from scripts.core.dj_analysis import TransitionPlan, EQPlan
+    eng = DJEngine(sr=SR)
+    # A must run out before the second half of the transition, otherwise its
+    # own tail keeps RMS above the threshold and the assertion measures A
+    # rather than B. (Verified: with a 20 s A this test stayed green even with
+    # the back-up branch disabled.)
+    A = (0.3 * np.sin(2 * np.pi * 220 * np.arange(SR * 10) / SR)).astype(np.float32)
+    B = (0.3 * np.sin(2 * np.pi * 330 * np.arange(SR * 30) / SR)).astype(np.float32)
+    bars = 8
+    trans_secs = bars * (60 / 120) * 4          # 16 s
+    eq = EQPlan(400, 80, bars // 2, bars // 2, 150, 0, bars, 0, bars)
+    # entry at 29 s of a 30 s B: only 1 s of material, but B itself is long
+    # enough — the latest workable entry is 30 - 16 = 14 s.
+    plan = TransitionPlan(0, 4.0, 0, 29.0, bars, trans_secs,
+                          120.0, 120.0, 1.0, eq, 0.8)
+    out = eng.render(A, B, plan, full_output=True)
+    exit_s = int(4.0 * SR); ts = int(trans_secs * SR); mid = ts // 2
+    second_half = out[exit_s + mid: exit_s + ts]
+    rms_db = 20 * np.log10(np.sqrt(np.mean(second_half.astype(np.float64) ** 2)) + 1e-12)
+    assert rms_db > -40, f"transition 2nd-half RMS {rms_db:.1f} dB — B is absent"
 
 
 # ===========================================================================
