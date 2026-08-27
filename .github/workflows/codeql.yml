@@ -29,6 +29,7 @@ jobs:
           languages: python
           # Queries: security-extended catches more issues than the default set
           queries: security-extended
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3

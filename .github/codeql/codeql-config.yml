@@ -1,0 +1,14 @@
+# CodeQL scan configuration.
+#
+# archive/ holds frozen snapshots of superseded generations of this project
+# (archive/legacy-v1 is the 2025 Streamlit/monolith build). It is not
+# imported by scripts/, not served, and not executed — but it was still being
+# scanned, contributing 10 of the repo's open alerts and burying the live
+# findings. Excluding it here rather than dismissing those alerts one by one
+# keeps future archived code out of the results too.
+name: "ai-remixmate CodeQL config"
+
+paths-ignore:
+  - "archive/**"
+  - "frontend/dist/**"
+  - "**/node_modules/**"

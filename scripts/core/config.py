@@ -361,12 +361,18 @@ def jamendo_client_id() -> str:
 
 def configure_logging() -> None:
     """Set up root logger from config. Call this in main entry points."""
+    from scripts.core.logging_utils import LogInjectionFilter
+
     lc = cfg.logging
     handlers: list[logging.Handler] = [logging.StreamHandler()]
     if lc.file:
         log_path = Path(lc.file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         handlers.append(logging.FileHandler(log_path))
+    # User-controlled text (song names, tags, search queries) reaches log calls
+    # across scripts/core/. Scrub CR/LF here so no call site can forge a line.
+    for _h in handlers:
+        _h.addFilter(LogInjectionFilter())
     logging.basicConfig(
         level=getattr(logging, lc.level.upper(), logging.INFO),
         format=lc.format,

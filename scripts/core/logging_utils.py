@@ -215,6 +215,44 @@ class StructuredConsoleFormatter(logging.Formatter):
 
 
 # ---------------------------------------------------------------------------
+# Log-injection scrubbing
+# ---------------------------------------------------------------------------
+
+# Newlines and carriage returns are what let user-controlled text forge a log
+# line: a song name containing "\nERROR  admin deleted library" renders as two
+# entries, the second indistinguishable from a real one. Song names, search
+# queries, tags and playlist titles all reach log calls across scripts/core/.
+#
+# Scrubbing at the handler covers every stdlib `logging.getLogger(__name__)`
+# in the process at one point, instead of editing ~25 call sites that would
+# drift the moment someone adds a 26th.
+_LOG_INJECTION_CHARS = str.maketrans({"\r": "\\r", "\n": "\\n"})
+
+
+def _scrub(value: Any) -> Any:
+    """Escape CR/LF in a string; pass anything else through untouched."""
+    return value.translate(_LOG_INJECTION_CHARS) if isinstance(value, str) else value
+
+
+class LogInjectionFilter(logging.Filter):
+    """Escape CR/LF in the message and its printf args before formatting.
+
+    Applied to handlers rather than loggers so it runs regardless of which
+    logger in the hierarchy emitted the record. Returns True always: this
+    filter rewrites records, it never drops them.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = _scrub(record.msg)
+        if record.args:
+            if isinstance(record.args, dict):
+                record.args = {k: _scrub(v) for k, v in record.args.items()}
+            else:
+                record.args = tuple(_scrub(a) for a in record.args)
+        return True
+
+
+# ---------------------------------------------------------------------------
 # Structured Logger class
 # ---------------------------------------------------------------------------
 
