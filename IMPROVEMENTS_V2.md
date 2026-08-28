@@ -637,7 +637,7 @@ or add to library.py, tests/test_crate_digger.py.
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| TIVlib not on PyPI — vendoring adds maintenance burden | Medium | Pin to a specific commit hash in requirements or a script; document in CLAUDE.md |
+| TIVlib not on PyPI — vendoring adds maintenance burden | Medium | Pin to a specific commit hash in requirements or a script; document in DEVELOPING.md |
 | Beat This! model (~300 MB) makes first-run slow | Low | Lazy-load; cache after first download; add to Dockerfile |
 | CLAP model (~300 MB) second large model | Low | Same lazy-load pattern; share ModelManager with MusicGen |
 | CUE-DETR training requires GPU + 380h dataset | High (for Stage 4B) | Gate on Stage 1–2 completion; use a university compute cluster |
@@ -646,7 +646,7 @@ or add to library.py, tests/test_crate_digger.py.
 
 ---
 
-## CLAUDE.md Additions (append after this plan is validated)
+## DEVELOPING.md Additions (append after this plan is validated)
 
 Add to **Gotchas** section:
 ```

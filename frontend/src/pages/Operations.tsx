@@ -629,6 +629,12 @@ export default function Operations() {
               ? ' BPM/key/structure analysis also runs automatically, so it’s remix-ready immediately.'
               : ' Analysis is off — run it later from Library Atlas or the AI Lab before remixing.'}
           </p>
+
+          <p className="ops-note ops-note--legal">
+            Downloading from YouTube or YouTube Music may breach those platforms’ Terms of Service.
+            Use this for personal listening and remixing on tracks you have rights to. For a
+            licensed catalogue, prefer Jamendo, the Free Music Archive, or Musopen.
+          </p>
         </section>
 
         {/* --- Live queue --- */}

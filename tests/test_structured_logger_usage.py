@@ -10,7 +10,7 @@ which crashes inside stdlib logging's makeRecord when it tries to iterate the
 string as a mapping). Either way the log call raises and the surrounding job
 fails — this is not a logging nicety, it's a crash bug.
 
-CLAUDE.md already documents this exact bug class being fixed at 8 sites in
+DEVELOPING.md already documents this exact bug class being fixed at 8 sites in
 api/jobs.py during the June 28 2026 audit. This test was added 2026-06-30
 after the same bug was found live (via job history in data/jobs.db) crashing
 every single AI Lab Style Transfer and Inpainting job at style_transfer.py and

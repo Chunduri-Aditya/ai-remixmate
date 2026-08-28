@@ -1,18 +1,12 @@
-# CLAUDE.md
+# Developing AI RemixMate
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Practical notes for working in this codebase: how to run it, the design decisions that are not
+obvious from the code, and the traps that have each cost real debugging time at least once.
 
-## What this project is
+For the system map see [ARCHITECTURE.md](ARCHITECTURE.md). For what changed when, see
+[CHANGELOG.md](CHANGELOG.md).
 
-A real-time DJ engine built end-to-end in Python + React. Core capability: take two songs, analyze
-them for BPM/key/bar structure, lock downbeats at the sample level, time-stretch to match tempo,
-apply a stem-aware crossfade (drums/bass/vocals fade independently), optionally synthesize a bridge
-beat, then master the output to −14 LUFS broadcast standard (ITU-R BS.1770-4).
-
-Wrapped around the transition engine: a setlist planner (Camelot wheel + BPM continuity + energy arc
-+ Markov blending), a lyric-matching "wordplay" layer (Genius API), a FastAPI backend with an async
-job queue + SQLite persistence + SSE live stream, and a React frontend (Vite + TypeScript) with 8
-pages plus a floating PiP DJ widget.
+---
 
 ## Running locally
 
@@ -68,63 +62,6 @@ npm run lint            # eslint, --max-warnings 0
 npm run typecheck       # tsc --noEmit
 npm test                # vitest
 ```
-
-## Architecture
-
-```
-scripts/
-├── api/
-│   ├── main.py              # FastAPI app — lifespan captures event loop, CORS, request-ID middleware
-│   ├── routes.py             # Aggregates 12 routers into one APIRouter; ORDER MATTERS (see Gotchas)
-│   ├── jobs.py                # Write-through SQLite job store (data/jobs.db) + in-memory dict
-│   ├── schemas.py             # Pydantic request/response models
-│   ├── routers/                # system, library, downloads, stems, analysis, remix, generative,
-│   │                           #   spotify, jobs, crates, events, setlist
-│   └── task_modules/           # Async task functions run inside submit_job()'s ThreadPoolExecutor
-├── core/                        # ~46 modules — the audio engine
-│   ├── dj_engine.py             # Renderer: beat-grid lock, stem crossfade, dynamic EQ, bass ramp
-│   ├── dj_analysis.py           # SongStructure/TransitionPlan, phrase-boundary + bar-grid snapping
-│   ├── classic_engine/          # Vendored AI_REMIXMATE_BEST_MIXING_ALGO mix path (frozen — see
-│   │                            #   Key design decisions → Two mixing engines)
-│   ├── beat_tracker.py          # BeatTracker protocol: librosa backend + optional Beat This! (ISMIR 2024)
-│   ├── key_detection.py         # Krumhansl-Schmuckler + Camelot wheel (canonical CAMELOT/NOTE_NAMES)
-│   ├── tiv_scoring.py            # Tonal Interval Vector harmonic scoring (Bernardes et al. 2016)
-│   ├── mastering.py              # ITU-R BS.1770-4 LUFS + true-peak limiter + per-stem-type LUFS norm
-│   ├── beat_synth.py              # Procedural bridge-beat synthesis, 6 genre presets, Strudel export
-│   ├── stems.py                   # Demucs stem separation wrapper
-│   ├── setlist_planner.py          # Greedy optimizer (Camelot/BPM/energy) + Markov blending
-│   ├── energy_profiler.py           # Essentia arousal/valence, numpy fallback
-│   ├── wordplay.py                   # Genius API lyric n-gram matching between adjacent setlist tracks
-│   ├── cue_export.py                  # rekordbox XML + Serato GEOB cue export
-│   ├── crate_digger.py                 # CLAP 512-D semantic search over the library (35-D fallback)
-│   ├── music_index.py                   # 35-dim numpy embedding index, JSON-persisted, no FAISS
-│   ├── style_transfer.py / inpainting.py # DAC-token style transfer / VampNet inpainting (optional[generative] extra)
-│   ├── library.py                        # Song library index, self-healing adopt/unregister
-│   ├── gpu.py                              # MPS / CUDA / CPU auto-detection
-│   ├── paths.py                             # Canonical path constants + sanitize_song_name()
-│   └── config.py                             # YAML config loader, see precedence above
-└── ui/app.py                     # Streamlit dashboard (legacy; React is primary)
-                                  # ui/static/ now serves only a redirect page — the old static DJ UI
-                                  # was merged into the React app (archive/legacy-static-ui/)
-
-frontend/src/
-├── pages/                # 8 pages: MissionControl, LibraryAtlas, MixDeck, SetBuilder,
-│                         #   SignalSearch, AILab, MixVault, Operations (+ Widget)
-├── shell/                # AppShell (3-zone grid), LeftRail, RightInspector, global PlayerBar
-├── components/PlayerBar.tsx # Persistent bottom player: transport, queue, 3-band EQ knobs, visualizer
-├── stores/appStore.ts    # Zustand: nav, health, live jobs, activity log
-├── stores/playerStore.ts  # Global player state — pages enqueue via playTrack/playQueue/playUrl
-├── lib/playerEngine.ts     # Singleton Web Audio chain (lowshelf/peaking/highshelf → gain → analyser)
-├── lib/api.ts               # Thin fetch wrapper for all API namespaces; normalizeJob() lives here
-├── hooks/useSSE.ts            # SSE connection + job store hydration; falls back to polling on disconnect
-└── types/index.ts              # TypeScript types mirroring FastAPI Pydantic schemas (kept in sync manually)
-
-tests/                    # pytest + librosa-probe conftest guard + e2e/smoke suites
-ai_remixmate_feature_lab/ # Isolated experimental area — imports nothing from scripts/, not wired to UI by design
-```
-
-The runtime data layout (gitignored): `library/` for downloaded songs, `outputs/` for rendered mixes,
-`data/` for SQLite stores + JSON caches + the audit log, `models/` for Demucs/CLAP weights.
 
 ## Key design decisions
 
@@ -239,6 +176,61 @@ check there before hardcoding a color or spacing value.
 `stem-processing` project skill (`.claude/skills/stem-processing/`) carries the procedures and
 auto-fires; its rules are authoritative for those tasks.
 
+## Frontend pages
+
+| Page | Route | Status |
+|---|---|---|
+| Mission Control | `/mission-control` | ✅ Full — stats, live jobs, quick actions |
+| Library Atlas | `/library-atlas` | ✅ Full — sortable table, search, filters, favorites |
+| Mix Deck | `/mix-deck` | ✅ Full — dual deck, compat score, preview + remix |
+| Set Builder | `/set-builder` | ✅ Full — pool, ordered set, energy arc, chain remix |
+| Signal Search | `/signal-search` | ✅ Full — similarity search, score rings, breakdown |
+| AI Lab | `/ai-lab` | ✅ Full — style transfer, inpaint, tokenize |
+| Mix Vault | `/mix-vault` | ✅ Full — audio player, download, metadata |
+| Operations | `/operations` | ✅ Full — single/batch/playlist downloads |
+| DJ Widget | `/widget` | ✅ Floating PiP window for live mixing |
+
+## Design system
+
+All tokens in `frontend/src/styles/tokens.css`. Key values:
+
+- **Accents**: amber (`--color-amber-500: #f59e0b`), ice (`--color-ice-400: #38bdf8`), green (`--color-green-500: #34d399`), crimson (`--color-crimson-500: #f87171`), violet (`--color-violet-400: #a78bfa`)
+- **Surfaces**: void `#05050a` → base `#09090b` → surface `#111113` → elevated `#18181b` → overlay `#1c1c20`
+- **Fonts**: Space Grotesk (display), Inter (UI), JetBrains Mono (mono)
+- **Shell**: 64px left rail + variable right inspector (316px) + canvas
+
+New pages follow the `PageBase.css` layout pattern (`page-base` → `page-base__header` → `page-base__body`). Each page gets its own CSS file. No Tailwind.
+
+## Stem processing (Demucs)
+
+Separating tracks into stems and keeping the library clean. CPU is slow — plan for it.
+
+**Where things live**
+
+- Config: `config.yaml` → `separation:` block — `model` (`htdemucs` | `htdemucs_ft` | `mdx_extra`),
+  `device` (`auto` | `cpu` | `cuda` | `mps`), `keep_raw_after_separation`, `prune_on_download`,
+  `max_vram_gb`.
+- Download plus optional separation: `scripts/download.py` (skips the split if `demucs` is absent).
+- Bridge integration: `scripts/remixmate_cli.py` → `generate_stems_and_params(base, match, out_dir)`.
+- Cleanup: `scripts/purge_library.py` flags songs with neither a full mix nor stems.
+
+**Rules**
+
+- Set the device deliberately. On Apple Silicon use `device: mps`; Demucs on CPU runs 2–5× real
+  time, so batch and expect latency.
+- Respect `max_vram_gb` (default 12) so separation and the other AI models do not OOM each other.
+- Missing stems are not a crash. A song folder with no `full.wav` and no stems is a failed or shell
+  download — route it through `purge_library.py` rather than silently producing an empty remix.
+- Stem paths and mix params come from the CLI helper, never from hardcoded guesses.
+- Never commit keys. `config.local.yaml` is gitignored; secrets live there.
+
+**Before calling stem work done**
+
+- Does the device match the machine (`mps` on Apple Silicon)?
+- Is the VRAM budget respected?
+- Are missing-stem songs handled rather than silently mixed?
+- Do stem paths come from the CLI helper?
+
 ## Gotchas
 
 - **New config.yaml keys need a matching dataclass field.** `_dict_to_config()` in
@@ -302,8 +294,3 @@ auto-fires; its rules are authoritative for those tasks.
 - **`ai_remixmate_feature_lab/`** is intentionally isolated — it has its own test suite and imports
   nothing from `scripts/`; it is not wired into the UI by design, not because it's abandoned.
 
-## Where history lives
-
-Don't add dated "Session Update" logs to this file — that's what `CHANGELOG.md` and
-`SESSION_HANDOFF.md` are for. `IMPROVEMENTS.md` / `IMPROVEMENTS_V2.md` track the staged feature
-roadmap; `ARCHITECTURE.md` has a deeper system map if you need more than the summary above.

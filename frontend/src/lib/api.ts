@@ -334,7 +334,7 @@ export const jobsApi = {
 export const cratesApi = {
   // Backend GET /crates returns { crates: [...] } — an object, not a bare
   // array (same shape mismatch class as the favoritesApi.list bug noted in
-  // CLAUDE.md). Unwrapping here is what actually crashed Library Atlas:
+  // DEVELOPING.md). Unwrapping here is what actually crashed Library Atlas:
   // allCrates.map() inside CratesSection on an object with no .map().
   list:    ()                           => get<{ crates: Crate[] }>('/crates').then((r) => r.crates ?? []),
   create:  (name: string)               => post<Crate>('/crates', { name }),

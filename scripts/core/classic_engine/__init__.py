@@ -4,7 +4,7 @@ scripts/core/classic_engine — the vendored AI_REMIXMATE_BEST_MIXING_ALGO mix p
 This package is a frozen copy of the April 2026 snapshot's mixing logic
 (analysis → transition planning → rendering → mastering), kept byte-for-byte
 faithful so renders sound exactly like the originals. It is selected at render
-time via config `dj.mixing_engine: classic` (the default) and consumed only by
+time via config `dj.mixing_engine: classic` and consumed only by
 scripts/api/task_modules/remix.py; everything else in the app (analysis
 endpoints, setlist planner, Library Atlas metadata) still uses the current
 engine modules.

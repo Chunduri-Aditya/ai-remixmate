@@ -46,7 +46,7 @@ The tracked file list is unchanged from the baseline.
 
 Created file groups:
 
-- Top-level lab docs: `README.md`, `AGENTS.md`
+- Top-level lab docs: `README.md`, `DEVELOPING.md`
 - Product and architecture docs: `docs/*.md`
 - JSON Schemas: `schemas/*.schema.json`
 - Neural learning plan: `docs/10_neural_learning_plan.md`

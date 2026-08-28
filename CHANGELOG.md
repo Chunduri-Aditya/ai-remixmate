@@ -51,7 +51,7 @@ All notable changes to this project are documented here in reverse-chronological
 - `MissionControl` passed `jobsApi.list` by reference to react-query, which hands `queryFn` a
   context object.
 - README claimed drums and bass enter ahead of vocals and that "vocals are delayed". No such
-  stem-type-specific timing exists; an adversarial audit disproved it in 2026-07 and `CLAUDE.md`
+  stem-type-specific timing exists; an adversarial audit disproved it in 2026-07 and `DEVELOPING.md`
   already recorded the correction. The README now describes the similarity-shaped curves.
 
 ---

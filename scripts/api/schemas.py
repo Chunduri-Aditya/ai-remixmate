@@ -399,7 +399,7 @@ class StructureV1Response(BaseModel):
     GET /analysis/v1/{name}/structure — DJ_ENGINE_IMPROVEMENT_PLAN.md §3.1.
 
     Versioned so later changes to dj_analysis.py's SongStructure data model
-    (a "current"-engine-only construct — see CLAUDE.md's "Two mixing
+    (a "current"-engine-only construct — see DEVELOPING.md's "Two mixing
     engines") don't silently change this response shape out from under
     external consumers; a breaking change should ship as /analysis/v2/...
     instead of mutating this one.

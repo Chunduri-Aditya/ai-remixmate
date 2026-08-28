@@ -1,6 +1,6 @@
 # DJ Engine Improvement Plan — Code-Verified (July 2026)
 
-Supersedes §5 of `COMMERCIAL_DJ_LANDSCAPE.md`. That backlog was written against `CLAUDE.md`'s
+Supersedes §5 of `COMMERCIAL_DJ_LANDSCAPE.md`. That backlog was written against `DEVELOPING.md`'s
 architecture *description*. This one is written against the actual source, read directly and
 cross-checked by three independent passes (two subagents + my own file reads) — every claim below
 has a file:line citation. Two of the original six items turned out to be mis-scoped, one premise was

@@ -59,8 +59,8 @@ asserted from docs.
   with no stem-name argument.
 - **Severity note:** called MEDIUM in the original review; this session's assessment is it's closer
   to HIGH — it's not an edge case, it's the default behavior of a documented headline feature.
-- **Resolution:** user chose "fix the docs" over "implement the feature" (2026-07). `CLAUDE.md`,
-  `ARCHITECTURE.md`, and `AGENTS.md` corrected to describe actual (similarity-driven) behavior.
+- **Resolution:** user chose "fix the docs" over "implement the feature" (2026-07). `DEVELOPING.md`,
+  `ARCHITECTURE.md`, and `DEVELOPING.md` corrected to describe actual (similarity-driven) behavior.
   Implementing genuine stem-type-aware timing (drums/bass leading vocals by design, not by
   similarity coincidence) remains a real, unclaimed feature opportunity — not on the roadmap here.
 
@@ -322,7 +322,7 @@ render**
 - Backend returns `{"tags": [...]}` / `{"song_name": ..., "tags": [...]}`
   (`crates.py:117-120,130-133`); frontend calls `get<string[]>(...)` with no `.then(r => r.tags)`
   unwrap, unlike `favoritesApi.list` right below it which does unwrap. Same class of bug
-  CLAUDE.md documents as already fixed for `favoritesApi`. Currently dormant (zero component usages
+  DEVELOPING.md documents as already fixed for `favoritesApi`. Currently dormant (zero component usages
   of `tagsApi.list`/`songTags` found) but will break the instant a Tags UI is wired up.
 
 ### Part 2 — `job.progress` / `normalizeJob` discipline — ℹ️ confirmed clean
@@ -337,7 +337,7 @@ through a discipline that otherwise works correctly.
 
 **8. MEDIUM — `library_changed` documented and handled but never emitted**
 - `emit_library_changed()` is defined (`events.py:176-178`) but nothing in `scripts/` ever calls it
-  — not downloads, library delete, stem-split, or crate mutation. CLAUDE.md and `events.py`'s own
+  — not downloads, library delete, stem-split, or crate mutation. DEVELOPING.md and `events.py`'s own
   docstring both list it as emitted; it isn't. `useSSE.ts:120-123` handles it correctly, but the
   handler will never fire. (Backend actually emits 8 types including `job_cancelled` and
   `system_status`, both correctly handled — frontend is more complete than the documented list, it's

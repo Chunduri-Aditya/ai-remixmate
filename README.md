@@ -275,6 +275,25 @@ This is a personal portfolio project, not a product. The download integrations (
 
 ---
 
+## Legal
+
+**Downloading audio.** The library builder uses `yt-dlp` to fetch audio. yt-dlp itself is open source (Unlicense), but **downloading from YouTube or YouTube Music may violate those platforms' Terms of Service**, particularly for anything commercial. `ytmusicapi` is used only for search and metadata; it does not download audio.
+
+That makes this appropriate for personal and local remix workflows, and for portfolio or educational demos. It is **not** appropriate as-is for a production service — consult a lawyer first, and prefer a licensed catalogue:
+
+- [Jamendo](https://www.jamendo.com) — official API, Creative Commons
+- [Free Music Archive](https://freemusicarchive.org) — Creative Commons
+- [Musopen](https://musopen.org) — public-domain classical
+- Audionautix / Incompetech — CC BY
+
+**Lyrics.** The wordplay layer fetches lyrics through the Genius API for local phrase matching between adjacent tracks. Lyrics are copyrighted by their authors and publishers; they are never redistributed by this project.
+
+Nothing copyrighted is committed to this repository. `library/`, `outputs/`, `data/` and `models/` are gitignored, and no audio or model weights appear anywhere in its history.
+
+The same summary lives in `requirements.txt`, next to the dependencies it concerns.
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
