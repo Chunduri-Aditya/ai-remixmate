@@ -1,13 +1,23 @@
+# CodeQL static analysis for the Python backend.
+#
+# DISABLED on push/PR/schedule (2026-08-28). Code scanning is only free on public
+# repos; on a private one it needs GitHub Advanced Security. This repo is
+# private, so every run finished by failing at the upload step with:
+#   "Code scanning is not enabled for this repository."
+# The scan itself ran fine (170/170 Python files) — only the result upload is
+# gated. The workflow is kept intact; restore the triggers below once the repo
+# is public or Advanced Security is available.
 name: CodeQL
 
 on:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
-  schedule:
-    # Weekly scan — Monday 8 AM UTC
-    - cron: "0 8 * * 1"
+  # push:
+  #   branches: ["main"]
+  # pull_request:
+  #   branches: ["main"]
+  # schedule:
+  #   # Weekly scan — Monday 8 AM UTC
+  #   - cron: "0 8 * * 1"
+  workflow_dispatch:
 
 jobs:
   analyze:

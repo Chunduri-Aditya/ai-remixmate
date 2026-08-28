@@ -5,14 +5,23 @@
 #   1. Enable Pages: repo Settings → Pages → Source: "GitHub Actions"
 #   2. Start the API locally:  ./start.sh api
 #   3. Open https://chunduri-aditya.github.io/ai-remixmate/
+#
+# DISABLED on push (2026-08-28). GitHub Pages is only free on public repos; on a
+# private one it needs Pro/Team/Enterprise. This repo is private, so every push
+# to main failed with:
+#   "Failed to create deployment (status: 404) ... Ensure GitHub Pages has been
+#    enabled"
+# The workflow itself is correct and is kept intact. To turn it back on, make
+# the repo public (or upgrade the plan), enable Pages as in step 1 above, and
+# restore the `push:` trigger below.
 name: Deploy frontend to GitHub Pages
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "frontend/**"
-      - ".github/workflows/pages.yml"
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "frontend/**"
+  #     - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
