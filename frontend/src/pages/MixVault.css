@@ -6,6 +6,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  flex: 1;
+  min-height: 0;
 }
 
 /* Toggle button */
@@ -44,6 +46,9 @@
   justify-content: center;
   gap: var(--space-4);
   min-height: 300px;
+  /* centre in the filled body — a first-run vault otherwise puts this strip at
+     the top with ~500px of empty canvas under it */
+  flex: 1;
   text-align: center;
   color: var(--color-text-faint);
 }

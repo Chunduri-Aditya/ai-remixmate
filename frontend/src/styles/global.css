@@ -283,4 +283,21 @@ a:focus-visible,
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  /* Spinners and the live job dot are status, not decoration: frozen at frame
+     one they read as hung rather than working. Keep them looping, slowed to a
+     non-distracting rate. Any new indicator has to be added here — everything
+     else is stopped by the blanket rule above. */
+  .page-fallback__spinner,
+  .pulse-dot,
+  .la-spin,
+  .md-spin,
+  .al-spin,
+  .ss-spin,
+  .sb-spin,
+  .wgt-spin,
+  .ops-spin {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
 }

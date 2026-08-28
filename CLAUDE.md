@@ -190,6 +190,10 @@ Camelot answers "is this move common in DJ practice," TIV answers "how tonally c
 
 **Job store** — SQLite write-through with an in-memory dict for O(1) reads. Jobs recorded as RUNNING
 at process start are rolled back to FAILED on restart. Cancel via `DELETE /jobs/{id}`.
+The dict holds only the newest 500 rows (`_load_from_db`), so it is **not** the full record: an
+unfiltered `list_jobs()` reads it, but a call passing `job_type`/`status` reads through to SQLite
+instead, because a filtered lookup answered from memory silently omits everything older. That is
+what made Mix Vault render "Vault is empty" over 35 real mixes. Filters apply before the limit.
 
 **SSE** — `GET /events/stream` pushes heartbeat, job_created, job_updated, job_completed, job_failed,
 library_changed. Frontend falls back to polling when SSE disconnects.
@@ -240,6 +244,13 @@ auto-fires; its rules are authoritative for those tasks.
 - **`JobResponse.status` is `str`, not the `JobStatus` enum.** The internal enum is lowercase
   (`pending`, `running`, `done`, `failed`, `cancelled`); REST/SSE both normalize to uppercase
   (`PENDING|RUNNING|COMPLETED|FAILED|CANCELLED`) via `_norm_status()` in `jobs.py`.
+- **`data/jobs.db` stores two spellings of the same enums.** Older rows persisted the repr
+  (`JobType.DJ_REMIX`, `JobStatus.DONE`), newer rows the value (`dj_remix`, `done`); both forms are
+  live in the same table. A raw `WHERE job_type = 'dj_remix'` returns a plausible-looking undercount
+  (29 of 35 completed remixes, as of 2026-08-27). Always normalize both sides through
+  `_type_value()` / `_status_value()` in `scripts/api/jobs.py` — they already collapse either form.
+  `normalizeJob()` in `frontend/src/lib/api.ts` does the same for the client.
+  `tests/test_job_list_filters.py` guards this.
 - **`StructuredLogger.warning(msg, extra=None)`** takes a dict as its second arg, not printf-style
   varargs. Never call `logger.warning("...%s", exc)` — the exception gets treated as the `extra` dict
   and crashes inside Python's logging internals. Use an f-string or pass `exc` inside a dict.

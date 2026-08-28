@@ -6,8 +6,11 @@
   display: grid;
   grid-template-columns: 300px 1fr;
   gap: var(--space-6);
-  align-items: start;
+  /* stretch so the set-list column can absorb the height; the pool column
+     manages its own scrolling */
+  align-items: stretch;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -153,7 +156,9 @@
   flex-direction: column;
   gap: var(--space-4);
   overflow-y: auto;
-  max-height: calc(100vh - 200px);
+  /* fill the grid cell instead of guessing at the viewport; the shell already
+     subtracts the rail, header, and player bar */
+  min-height: 0;
 }
 
 /* Energy arc */
@@ -275,6 +280,7 @@
   justify-content: center;
   gap: var(--space-4);
   min-height: 240px;
+  flex: 1;
   text-align: center;
   color: var(--color-text-faint);
 }
