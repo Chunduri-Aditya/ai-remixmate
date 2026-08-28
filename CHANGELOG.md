@@ -4,6 +4,58 @@ All notable changes to this project are documented here in reverse-chronological
 
 ---
 
+## [Unreleased] — Beat-quantized crossfade, job filtering, frontend health pass
+
+### Added
+
+- **Stepped crossfade** (`transition_effect: "stepped"`). Divides the stem crossfade into one step
+  per beat (`transition_bars × 4`) instead of a continuous sweep: Song A steps down and Song B steps
+  up in equal increments locked to the bar grid. Increments are equal in **power**
+  (`fade_out[k] = sqrt(1 - k/(N-1))`), not amplitude — equal-amplitude steps put both curves at 0.5
+  mid-transition, a −3.01 dB dip that `TestEqualPowerCrossfade` already guards against. Bypasses
+  loop extension so the staircase shapes Song A's own audio rather than a tiled loop; leaves bass to
+  `_stem_bass_ramp()`; `render()`/`render_chain()` treat it as `"auto"` for the exit effect so
+  stem-less songs keep their echo/filter. Selectable in Mix Deck.
+  New: `scripts/core/dj_engine.py::_stepped_crossfade_curves()`, `tests/test_stepped_crossfade.py`.
+- **Server-side job filtering.** `GET /jobs` accepts `job_type` and `status`, applied before the
+  limit. Filtered queries read through to SQLite because the in-memory dict only holds the newest
+  500 rows. Both enum serializations (`dj_remix` and `JobType.DJ_REMIX`) match.
+  New: `tests/test_job_list_filters.py`.
+- **ESLint flat config** for the frontend. `npm run lint` had never executed — ESLint 9 was
+  installed with no config file at all, so the documented `--max-warnings 0` guarantee was
+  unchecked. New: `frontend/eslint.config.js`.
+- `prefers-reduced-motion` support, with the nine status spinners exempted so they read as working
+  rather than hung.
+
+### Changed
+
+- **`dj.mixing_engine` default is now `current`, was `classic`.** This moves mastering from −8 to
+  −14 LUFS, so mixes render noticeably quieter than before. `classic` stays available and frozen.
+- Mix Deck's effect dropdown gains `stepped`.
+- Operations page header renamed from "Downloads" to "Operations" — it covers downloads, processing,
+  storage and maintenance, and the rail already called it OPS.
+- Input focus styles moved from `:focus` to `:focus-visible`, each with a visible ring; buttons and
+  links gained a global focus ring where they previously showed none.
+- Page layouts now fill the canvas. Measured trailing slack at one desktop width: signal-search
+  588 → 20px, mix-deck 425 → 20px, ai-lab 415 → 20px.
+
+### Fixed
+
+- **Mix Vault showed "Vault is empty" over 35 completed mixes.** It fetched the unfiltered job list
+  and filtered client-side, but `GET /jobs` returns only the newest 20; on a 725-job store every
+  mix fell outside the window. Now requests exactly what it needs. Verified 0 → 35.
+- `MixVault` carried an `eslint-disable` positioned above a comment continuation rather than the
+  dependency array, so it had never applied. `logEvent` is memoized instead.
+- Three component files exported non-components alongside their component, breaking fast refresh.
+  Split into `toastContext.ts`, `remixOptions.ts`, `camelotKey.ts`.
+- `MissionControl` passed `jobsApi.list` by reference to react-query, which hands `queryFn` a
+  context object.
+- README claimed drums and bass enter ahead of vocals and that "vocals are delayed". No such
+  stem-type-specific timing exists; an adversarial audit disproved it in 2026-07 and `CLAUDE.md`
+  already recorded the correction. The README now describes the similarity-shaped curves.
+
+---
+
 ## [Unreleased] — Initialize Library: dynamic live dashboard
 
 **What changed** (`scripts/ui/app.py`):

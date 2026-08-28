@@ -224,6 +224,9 @@ JobResponse(
 - `DJRemixRequest(song_a, song_b, transition_bars, preset, bridge_beat_*)`
 - `DJChainRequest(songs[], transition_bars, ...)`
 - `DJPreviewRequest(song_a, song_b, transition_bars, transition_effect)`
+  - `transition_effect`: `auto | echo | filter | reverb | stepped | none`. `stepped` is a
+    crossfade *curve* (one equal-power step per beat), not an exit effect — it keeps the
+    `auto` exit treatment and applies only when both songs have stems.
 - `StemSplitRequest(song, enhance, model)`
 - `CompatibilityRequest(song_a, song_b, artist_a, artist_b)`
 - `AnalyzeRequest(song)`
@@ -650,7 +653,7 @@ interface DJRemixRequest {
   song_b: string
   transition_bars?: number
   preset?: string
-  transition_effect?: string
+  transition_effect?: string   // auto | echo | filter | reverb | stepped | none
   bridge_beat_mode?: string
   bridge_beat_genre?: string
   bridge_beat_intensity?: number

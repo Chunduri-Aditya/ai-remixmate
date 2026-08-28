@@ -53,7 +53,7 @@ metadata:                       # Metadata API clients
 
 # ---------------------------------------------------------------------------
 dj:                             # DJ-style transition engine
-  mixing_engine: classic        # "classic" = vendored AI_REMIXMATE_BEST_MIXING_ALGO path
+  mixing_engine: current        # "classic" = vendored AI_REMIXMATE_BEST_MIXING_ALGO path
                                 #   (scripts/core/classic_engine/ — old analysis, renderer,
                                 #   and −8 LUFS mastering, faithful to the reference renders);
                                 #   "current" = latest engine (masking EQ, stem bass ramp,

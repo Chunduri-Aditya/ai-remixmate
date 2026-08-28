@@ -7,7 +7,9 @@ import './RemixControls.css'
 
 const BAR_OPTIONS: Array<8 | 16 | 32> = [8, 16, 32]
 const PRESETS   = ['auto', 'techno', 'house', 'hiphop', 'trap', 'dnb', 'ambient']
-const EFFECTS   = ['auto', 'echo', 'filter', 'reverb', 'none']
+// 'stepped' is a crossfade curve rather than an exit effect: it quantizes the
+// stem fade to one equal-power step per beat. It keeps the 'auto' exit effect.
+const EFFECTS   = ['auto', 'echo', 'filter', 'reverb', 'stepped', 'none']
 const GENRES    = ['auto', 'techno', 'house', 'hiphop', 'trap', 'dnb', 'ambient']
 
 function label(s: string) {

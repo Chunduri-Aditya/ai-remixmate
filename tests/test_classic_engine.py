@@ -105,16 +105,24 @@ class TestClassicPackageSurface:
 # ---------------------------------------------------------------------------
 
 class TestEngineSelection:
-    def test_default_is_classic(self):
+    # These pin dj.mixing_engine rather than reading the ambient config, the
+    # same way test_current_selects_live_engine below does. They guard how the
+    # value RESOLVES, which is the invariant; which value config.yaml happens
+    # to ship is a product decision that has changed once already.
+    def test_classic_selects_the_frozen_engine(self, monkeypatch):
         from scripts.api.task_modules.remix import _resolve_engine
+        from scripts.core.config import cfg
+        monkeypatch.setattr(cfg.dj, "mixing_engine", "classic")
         eng = _resolve_engine()
         assert eng.name == "classic"
         assert eng.dj_target_lufs == -8.0
 
-    def test_classic_components_come_from_classic_package(self):
+    def test_classic_components_come_from_classic_package(self, monkeypatch):
         import inspect
 
         from scripts.api.task_modules.remix import _resolve_engine
+        from scripts.core.config import cfg
+        monkeypatch.setattr(cfg.dj, "mixing_engine", "classic")
         eng = _resolve_engine()
         assert "classic_engine" in inspect.getfile(eng.DJEngine)
         assert "classic_engine" in inspect.getmodule(eng.master_mix).__file__

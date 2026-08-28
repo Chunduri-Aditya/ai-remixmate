@@ -621,9 +621,67 @@ def _clamp_entry_sample(entry_sample: int, track_len: int, trans_samples: int,
     return max(0, entry_sample)
 
 
+def _stepped_crossfade_curves(trans_samples: int, steps: int) -> tuple:
+    """
+    Beat-quantized staircase crossfade: A steps down and B steps up in equal
+    increments, holding each level for one beat instead of sweeping smoothly.
+
+    The increments are equal in POWER, not in amplitude. Two different songs are
+    uncorrelated, so their powers add during the overlap: equal amplitude steps
+    would put both curves at 0.5 mid-transition, summing to 0.5 power — an
+    audible −3.01 dB dip in the middle of every transition. That is the
+    equal-gain mistake `TestEqualPowerCrossfade` in tests/test_behavioral.py
+    exists to catch. Taking equal slices of power instead keeps
+    ``fade_out² + fade_in² == 1`` while still moving in identical, beat-locked
+    increments::
+
+        fade_out[k] = sqrt(1 - k/(N-1))     fade_in[k] = sqrt(k/(N-1))
+
+    Dividing by ``N-1`` rather than ``N`` is what makes the last plateau land on
+    exactly (0.0, 1.0). Dividing by ``N`` would leave A at sqrt(1/64) ≈ 0.125 when
+    the window ends, breaking the exact handoff `_seam_blend()` assumes when it
+    splices this window back into the surrounding mix.
+
+    Parameters
+    ----------
+    trans_samples : int
+        Length of the transition window in samples.
+    steps : int
+        Number of plateaus, normally ``plan.transition_bars * 4`` (one per beat
+        in 4/4). Values below 2 fall back to a plain linear-in-power ramp,
+        since a staircase needs at least a start and an end level.
+    """
+    n = trans_samples
+    if n <= 0:
+        empty = np.zeros(0, dtype=np.float32)
+        return empty, empty.copy()
+
+    steps = max(int(steps), 1)
+    if steps < 2 or steps > n:
+        # Degenerate: fewer than two plateaus, or more plateaus than samples.
+        # Fall back to the continuous equal-power ramp these would quantize to.
+        t = np.linspace(0.0, 1.0, n, dtype=np.float32)
+        return np.sqrt(1.0 - t).astype(np.float32), np.sqrt(t).astype(np.float32)
+
+    k = np.arange(steps, dtype=np.float64) / (steps - 1)   # 0.0 … 1.0 inclusive
+    level_out = np.sqrt(1.0 - k)
+    level_in = np.sqrt(k)
+
+    # Equal plateaus; the remainder from integer division goes on the last one so
+    # the returned arrays are exactly trans_samples long.
+    base = n // steps
+    widths = np.full(steps, base, dtype=int)
+    widths[-1] += n - base * steps
+
+    fade_out = np.repeat(level_out, widths).astype(np.float32)
+    fade_in = np.repeat(level_in, widths).astype(np.float32)
+    return fade_out, fade_in
+
+
 def _stem_crossfade_curves(
     trans_samples: int,
     similarity: float,
+    steps: "Optional[int]" = None,
 ) -> tuple:
     """
     Compute (fade_out_a, fade_in_b) envelope arrays for a single stem pair
@@ -635,8 +693,16 @@ def _stem_crossfade_curves(
     Low    (< 0.40):           quick handoff — A exits fast, B enters late
                                 to create contrast rather than mud
 
+    When ``steps`` is given (the "stepped" transition effect), the similarity
+    bands are bypassed entirely and a beat-quantized staircase is returned
+    instead — see :func:`_stepped_crossfade_curves`. ``steps=None`` is the
+    default and leaves every existing caller on the curves above, unchanged.
+
     Both envelopes are float32 numpy arrays of length ``trans_samples``.
     """
+    if steps is not None:
+        return _stepped_crossfade_curves(trans_samples, steps)
+
     n = trans_samples
     t = np.linspace(0.0, 1.0, n, dtype=np.float32)
 
@@ -933,8 +999,11 @@ class DJEngine:
         b_trans = _pad_or_trim(b_trans, trans_samples)
 
         # --- Smart transition effect on Song A's exit window ---
+        # "stepped" names a crossfade curve, not an exit effect, and this path
+        # has no stems to step. Treat it as "auto" so a stem-less song keeps the
+        # exit treatment it gets today instead of silently losing it.
         _eff = transition_effect
-        if _eff == "auto":
+        if _eff in ("auto", "stepped"):
             if plan.harmonic_score >= 0.0 and plan.harmonic_score < 0.35:
                 _eff = "filter"   # clashing keys → close with LP sweep
             else:
@@ -1163,8 +1232,10 @@ class DJEngine:
             b_trans = _pad_or_trim(audio_b[b_start : b_start + trans_s], trans_s)
 
             # Smart transition effect on Song A's exit window
+            # "stepped" is a crossfade curve, not an exit effect — fall through
+            # to the auto choice rather than dropping the effect entirely.
             _eff = transition_effect
-            if _eff == "auto":
+            if _eff in ("auto", "stepped"):
                 if plan.harmonic_score >= 0.0 and plan.harmonic_score < 0.35:
                     _eff = "filter"
                 else:
@@ -1421,6 +1492,22 @@ class DJEngine:
         # ── Compute transition boundaries ─────────────────────────────────
         exit_sample_a = int(plan.exit_time_a * sr)
         trans_samples = int(plan.transition_seconds * sr)
+
+        # "stepped": quantize the stem crossfade to one equal-power step per
+        # beat instead of a continuous sweep. transition_seconds is itself
+        # derived as transition_bars * 4 * (60/bpm_a) in dj_analysis, so
+        # transition_bars * 4 equal slices of trans_samples land exactly on the
+        # beat grid — no drift against the sample-level lock. None everywhere
+        # else, which leaves the similarity curves untouched.
+        stepped = str(transition_effect).lower() == "stepped"
+        fade_steps = (plan.transition_bars * 4) if stepped else None
+        if stepped:
+            log.info(
+                "Stepped crossfade: %d beats over %d bars (%.2fs), "
+                "equal-power increments of 1/%d",
+                fade_steps, plan.transition_bars, plan.transition_seconds,
+                max(fade_steps - 1, 1),
+            )
         safe_ratio    = _safe_ratio(plan.tempo_shift_ratio)
         entry_sample_b = int(plan.entry_time_b * sr / safe_ratio)
         entry_sample_b = _clamp_entry_sample(
@@ -1567,9 +1654,9 @@ class DJEngine:
                     continue   # Skip the generic stem A/B slice code below
 
                 # If one stem is missing, fall back to generic crossfade
-                fade_out, fade_in = _stem_crossfade_curves(trans_samples, sim)
+                fade_out, fade_in = _stem_crossfade_curves(trans_samples, sim, fade_steps)
             else:
-                fade_out, fade_in = _stem_crossfade_curves(trans_samples, sim)
+                fade_out, fade_in = _stem_crossfade_curves(trans_samples, sim, fade_steps)
 
             # ── Stem A segment: exit window ───────────────────────────────
             if stem_a_full is not None:
@@ -1577,7 +1664,10 @@ class DJEngine:
                 a_end   = min(a_start + trans_samples, len(stem_a_full))
                 a_slice = stem_a_full[a_start:a_end]
 
-                if sim >= 0.75:
+                # Loop extension is skipped under "stepped": the staircase is
+                # meant to step Song A's own outgoing audio down, and tiling its
+                # last 2 bars would apply it to a synthetic loop instead.
+                if sim >= 0.75 and not stepped:
                     # Loop extension: extract last 2 bars, tile to fill window
                     loop = _extract_rhythmic_loop(stem_a_full[:exit_sample_a],
                                                   plan.bpm_a, sr, bars=2)

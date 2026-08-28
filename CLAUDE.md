@@ -129,7 +129,9 @@ The runtime data layout (gitignored): `library/` for downloaded songs, `outputs/
 ## Key design decisions
 
 **Two mixing engines** — `dj.mixing_engine` in config selects the render path for the remix/chain/
-preview tasks. `classic` (the default) is `scripts/core/classic_engine/`, a frozen vendored copy of
+preview tasks. **`current` is the default as of 2026-08-27** (it was `classic` before that; the
+switch moved mastering from −8 to −14 LUFS, so every mix rendered after it is quieter).
+`classic` is `scripts/core/classic_engine/`, a frozen vendored copy of
 the April 2026 AI_REMIXMATE_BEST_MIXING_ALGO snapshot (its own analysis, planner, renderer, and
 mastering at −8 LUFS) — kept byte-faithful to the reference renders, so never fold current-engine
 fixes into it. `current` is the live `dj_engine.py` path described below. Only
@@ -156,6 +158,19 @@ crossfade. The standard
 uncorrelated, so amplitude-complementary curves dip ~3 dB at the midpoint. The stem-summed transition
 window splices into the surrounding original mixes through ~30 ms equal-gain seam blends
 (`_seam_blend()` — equal-gain there because seam material is correlated).
+
+**Stepped (beat-quantized) crossfade** — `transition_effect="stepped"` replaces the similarity
+curves with a staircase: `_stepped_crossfade_curves()` holds one level per beat
+(`plan.transition_bars * 4`) instead of sweeping. Increments are equal in **power**
+(`fade_out[k] = sqrt(1 - k/(N-1))`), not amplitude — equal-amplitude steps put both curves at 0.5
+mid-transition and reintroduce the ~3 dB dip that `TestEqualPowerCrossfade` exists to catch. The
+`N-1` divisor is what lands the last plateau on exactly (0.0, 1.0); dividing by `N` leaves A at
+`sqrt(1/64) ≈ 0.125` and breaks the handoff `_seam_blend()` assumes. Three things to know: it
+**bypasses loop extension** (a staircase on tiled loop audio is not "fade Song A down"), it does
+**not** touch bass (`_stem_bass_ramp()` still `continue`s past the curve), and it only applies on
+the stem path — `render()`/`render_chain()` treat `"stepped"` as `"auto"` for the exit effect so a
+stem-less song does not silently lose its echo/filter. `steps=None` is the default everywhere else
+and leaves the similarity bands byte-identical. Guarded by `tests/test_stepped_crossfade.py`.
 
 **Dynamic EQ** — A low-shelf filter pulls Song A's bass down as Song B's rises, preventing bass-clash
 from simultaneous dual-track playback.

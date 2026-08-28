@@ -248,7 +248,10 @@ class DJRemixRequest(BaseModel):
     )
     transition_effect: str = Field(
         "auto",
-        description="Effect on the outgoing track: 'auto' | 'echo' | 'filter' | 'reverb' | 'none'",
+        description="Effect on the outgoing track: 'auto' | 'echo' | 'filter' | 'reverb' | 'none' | "
+        "'stepped'. 'stepped' quantizes the stem crossfade to one equal-power "
+        "step per beat instead of a smooth sweep; it keeps the 'auto' exit "
+        "effect, and applies only when both songs have stems.",
     )
 
 
@@ -284,7 +287,10 @@ class DJChainRequest(BaseModel):
     bridge_beat_path: Optional[str] = Field(None, description="WAV path for mode='file'")
     transition_effect: str = Field(
         "auto",
-        description="Effect on the outgoing track: 'auto' | 'echo' | 'filter' | 'reverb' | 'none'",
+        description="Effect on the outgoing track: 'auto' | 'echo' | 'filter' | 'reverb' | 'none' | "
+        "'stepped'. 'stepped' quantizes the stem crossfade to one equal-power "
+        "step per beat instead of a smooth sweep; it keeps the 'auto' exit "
+        "effect, and applies only when both songs have stems.",
     )
 
 
@@ -295,7 +301,10 @@ class DJPreviewRequest(BaseModel):
     transition_bars: int = Field(16, ge=8, le=64, description="8 | 16 | 32 bars for the preview window")
     transition_effect: str = Field(
         "auto",
-        description="Effect on the outgoing track: 'auto' | 'echo' | 'filter' | 'reverb' | 'none'",
+        description="Effect on the outgoing track: 'auto' | 'echo' | 'filter' | 'reverb' | 'none' | "
+        "'stepped'. 'stepped' quantizes the stem crossfade to one equal-power "
+        "step per beat instead of a smooth sweep; it keeps the 'auto' exit "
+        "effect, and applies only when both songs have stems.",
     )
 
 

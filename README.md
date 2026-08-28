@@ -80,7 +80,11 @@ entry_sample_b = int(entry_time_b * sr / stretch_ratio)
 
 Easy to get wrong. I got it wrong about six times before it locked.
 
-**Stem-aware crossfading.** When Demucs stems are available (vocals, drums, bass, other), the engine fades each one on its own envelope. Drums and bass from Song B come in earlier in the window. Vocals are delayed. This is the move that makes the output sound like a person did it.
+**Stem-aware crossfading.** When Demucs stems are available (vocals, drums, bass, other), the engine fades each one on its own envelope, shaped by how acoustically similar that stem pair is: near-identical drums get a long overlapping blend, clashing ones get a fast handoff. Bass is the exception — it gets a dedicated cosine-taper swap at a single point rather than a crossfade, because two basslines overlapping is the thing that makes automated mixes sound muddy.
+
+The curves are equal-power (`cos`/`sin`), not equal-gain. Two different songs are uncorrelated, so their powers add rather than their amplitudes; amplitude-complementary curves dip about 3 dB right at the midpoint of every transition. That is the single most common mistake in automated crossfaders and it is audible.
+
+**Beat-quantized fades.** Setting the transition effect to `stepped` divides the crossfade into one step per beat instead of a smooth sweep — Song A steps down and Song B steps up in equal increments, locked to the bar grid. The increments are equal in *power*, so the staircase is perceptually even and still avoids the midpoint dip.
 
 **Dynamic EQ fade.** Two tracks playing simultaneously stack low frequencies and the result sounds like mud. A low-shelf filter pulls Song A's bass down as Song B's bass rises. Solves the bass-clash problem that breaks most automated mixes.
 
@@ -240,6 +244,11 @@ pytest -m "not dj_analysis"   # skip librosa-dependent tests
 `config.yaml` exposes the tuneable parameters. Override locally with `config.local.yaml` (gitignored).
 
 ```yaml
+dj:
+  mixing_engine: current    # "current" = live engine (masking EQ, stem bass ramp,
+                            #   stepped crossfade, config-driven target_lufs)
+                            # "classic" = frozen April 2026 snapshot, masters at -8 LUFS
+
 audio:
   sample_rate: 22050
   transition_bars: 16
