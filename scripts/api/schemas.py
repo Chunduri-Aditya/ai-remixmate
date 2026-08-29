@@ -58,6 +58,10 @@ class SongInfo(BaseModel):
     has_analysis: bool = False
     license_type: Optional[str] = None
     source: Optional[str] = None
+    # Attribution for the shared CC catalogue — from license.json, rendered as a
+    # credit line in Library Atlas / Mix Vault.
+    artist_name: Optional[str] = None
+    license_ccurl: Optional[str] = None
     last_accessed: Optional[float] = None
     # Populated from meta.json when has_analysis is True — these are what
     # Mix Deck / Library Atlas actually render (BPM, Key, Camelot, Energy).

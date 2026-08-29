@@ -6,7 +6,6 @@ song validation, stem file lookup, and rate limiting.
 """
 
 from pathlib import Path
-from typing import Optional
 
 from fastapi import HTTPException
 
@@ -49,6 +48,8 @@ def _song_info(song_dir: Path) -> SongInfo:
     ]
     license_type = None
     source = None
+    artist_name = None
+    license_ccurl = None
     try:
         import json
         lic_path = song_dir / "license.json"
@@ -56,6 +57,8 @@ def _song_info(song_dir: Path) -> SongInfo:
             lic = json.loads(lic_path.read_text())
             license_type = lic.get("license_type")
             source = lic.get("source")
+            artist_name = lic.get("artist_name")
+            license_ccurl = lic.get("license_url")  # LicenseInfo.license_url is the CC deed
     except Exception:
         pass
 
@@ -101,6 +104,8 @@ def _song_info(song_dir: Path) -> SongInfo:
         duration=duration,
         license_type=license_type,
         source=source,
+        artist_name=artist_name,
+        license_ccurl=license_ccurl,
     )
 
 

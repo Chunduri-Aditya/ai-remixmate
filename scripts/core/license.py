@@ -71,8 +71,13 @@ class LicenseInfo:
     redistribution_ok: bool = False     # sharing the track (or remix) publicly OK?
     share_alike: bool = False           # remixes must use the same licence?
 
-    license_url: Optional[str] = None   # canonical URL for the licence
+    license_url: Optional[str] = None   # canonical CC deed URL (a.k.a. license_ccurl)
     notes: str = ""                     # human-readable extra info
+
+    # Attribution / provenance — populated at catalogue ingest, surfaced in the
+    # library API and written into every mix's CREDITS.txt / manifest.json.
+    artist_name: Optional[str] = None
+    source_url: Optional[str] = None    # the track's page on its origin site
 
 
 # ---------------------------------------------------------------------------
