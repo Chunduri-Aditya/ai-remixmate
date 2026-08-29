@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
+import os
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
@@ -40,7 +40,8 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class LicenseType(str, Enum):
-    CC0          = "cc0"           # Public Domain — use freely, no attribution needed
+    CC0            = "cc0"           # CC0 rights waiver — use freely, no attribution
+    PUBLIC_DOMAIN  = "public_domain" # Public domain (expired copyright / gov work / PDM)
     CC_BY        = "cc_by"         # Attribution required, otherwise free
     CC_BY_SA     = "cc_by_sa"      # Attribution + ShareAlike (remixes must share-alike)
     CC_BY_ND     = "cc_by_nd"      # Attribution + NoDerivatives — remixes NOT allowed
@@ -104,9 +105,12 @@ def parse_cc_url(url: str) -> Optional[LicenseType]:
         return None
     url_lower = url.lower()
 
-    # Public domain / CC0
-    if "publicdomain" in url_lower or "cc0" in url_lower or "/zero/" in url_lower:
+    # CC0 — an explicit rights waiver (…/publicdomain/zero/1.0/, "cc0")
+    if "cc0" in url_lower or "/zero/" in url_lower:
         return LicenseType.CC0
+    # Public Domain Mark / other public-domain assertion (…/publicdomain/mark/1.0/)
+    if "publicdomain" in url_lower:
+        return LicenseType.PUBLIC_DOMAIN
 
     if "creativecommons.org" not in url_lower and "cc.org" not in url_lower:
         return None
@@ -119,13 +123,50 @@ def parse_cc_url(url: str) -> Optional[LicenseType]:
     return None
 
 
+def _cc_type_from_text(text: Optional[str]) -> Optional[LicenseType]:
+    """
+    Best-effort LicenseType from a free-text licence label.
+
+    ccMixter / FMA / Internet Archive report licences as short strings
+    ("Attribution-NonCommercial", "CC BY 3.0", "Public Domain") rather than a
+    clean CC URL. Normalise separators, then match longest slug first so
+    "by-nc-sa" wins over "by-nc" / "by".
+    """
+    if not text:
+        return None
+    t = text.lower().replace(" ", "-").replace("_", "-").strip()
+    if "publicdomain" in t or "public-domain" in t or t in ("pdm", "pd"):
+        return LicenseType.PUBLIC_DOMAIN
+    if "cc0" in t or "-zero-" in t or t == "zero":
+        return LicenseType.CC0
+    # Slug form ("cc-by-nc-sa-3.0") — longest key first so "by-nc-sa" beats "by".
+    for slug, lt in sorted(_CC_URL_MAP.items(), key=lambda kv: len(kv[0]), reverse=True):
+        s = slug.strip("/")
+        if s and s in t:
+            return lt
+    # Word form ("Attribution-NonCommercial-NoDerivatives") — compound first.
+    for needle, lt in (
+        ("noncommercial-noderiv", LicenseType.CC_BY_NC_ND),
+        ("noncommercial-sharealike", LicenseType.CC_BY_NC_SA),
+        ("noncommercial", LicenseType.CC_BY_NC),
+        ("noderiv", LicenseType.CC_BY_ND),
+        ("sharealike", LicenseType.CC_BY_SA),
+    ):
+        if needle in t:
+            return lt
+    if "attribution" in t or "creativecommons" in t.replace("-", ""):
+        return LicenseType.CC_BY  # bare "Creative Commons" / "Attribution" → base licence
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Rights derivation table
 # ---------------------------------------------------------------------------
 
 # (commercial_ok, attribution_required, derivatives_ok, redistribution_ok, share_alike)
 _RIGHTS: dict[LicenseType, tuple[bool, bool, bool, bool, bool]] = {
-    LicenseType.CC0:         (True,  False, True,  True,  False),
+    LicenseType.CC0:           (True,  False, True,  True,  False),
+    LicenseType.PUBLIC_DOMAIN: (True,  False, True,  True,  False),
     LicenseType.CC_BY:       (True,  True,  True,  True,  False),
     LicenseType.CC_BY_SA:    (True,  True,  True,  True,  True),
     LicenseType.CC_BY_ND:    (True,  True,  False, True,  False),
@@ -140,6 +181,40 @@ _RIGHTS: dict[LicenseType, tuple[bool, bool, bool, bool, bool]] = {
 
 def _rights_from_type(lt: LicenseType) -> tuple[bool, bool, bool, bool, bool]:
     return _RIGHTS.get(lt, _RIGHTS[LicenseType.UNKNOWN])
+
+
+# ---------------------------------------------------------------------------
+# Publish gate — which licences may enter a hosted, multi-user catalogue
+# ---------------------------------------------------------------------------
+
+# Licences that permit commercial hosting, derivative works (remixes), and
+# public redistribution of those derivatives, with at most an attribution
+# requirement. Deliberately excludes:
+#   • CC-BY-SA  — ShareAlike is viral: a mix containing a BY-SA stem must itself
+#                 be BY-SA, which we cannot promise users about their exports.
+#   • *_NC      — NonCommercial; a hosted product is the commercial case.
+#   • *_ND      — NoDerivatives forbids remixing outright.
+#   • UNKNOWN / YOUTUBE_TOS / PROPRIETARY — no clear grant.
+PERMITTED_LICENSES: frozenset[LicenseType] = frozenset({
+    LicenseType.CC0,
+    LicenseType.PUBLIC_DOMAIN,
+    LicenseType.CC_BY,
+})
+
+
+def is_publishable(info: LicenseInfo) -> bool:
+    """True if this licence may enter the shared hosted catalogue (see PERMITTED_LICENSES)."""
+    return info.license_type in PERMITTED_LICENSES
+
+
+def license_enforce_enabled() -> bool:
+    """
+    Whether the catalogue-ingest pipeline should hard-reject non-publishable tracks.
+
+    Off by default so a local dev library (full of youtube_tos tracks) still
+    loads; set REMIXMATE_LICENSE_ENFORCE=1 for ingest and in production.
+    """
+    return os.environ.get("REMIXMATE_LICENSE_ENFORCE", "").strip().lower() in ("1", "true", "yes")
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +271,33 @@ def classify_license(
         cc_type = parse_cc_url(license_url or "") if license_url else None
         lt = cc_type if cc_type else LicenseType.CC_BY  # Jamendo default is CC-BY
         notes = f"Jamendo track — {license_url or 'CC licence'}"
+
+    # --- CC-community catalogues (ccMixter / Free Music Archive / Internet Archive) ---
+    # Each reports licence as a CC URL, a free-text label, or nothing. Resolve
+    # from whichever is present; an unresolved licence stays UNKNOWN so the
+    # publish gate rejects it rather than guessing.
+    elif src in ("ccmixter", "cc_mixter"):
+        lt = parse_cc_url(license_url or "") or _cc_type_from_text(license_str) or LicenseType.UNKNOWN
+        notes = f"ccMixter track — {license_url or license_str or 'licence unstated'}"
+
+    elif src in ("fma", "freemusicarchive", "free_music_archive"):
+        lt = parse_cc_url(license_url or "") or _cc_type_from_text(license_str) or LicenseType.UNKNOWN
+        notes = f"Free Music Archive track — {license_url or license_str or 'licence unstated'}"
+
+    elif src in ("internetarchive", "archive.org", "archive_org", "ia"):
+        lt = parse_cc_url(license_url or "") or _cc_type_from_text(license_str) or LicenseType.UNKNOWN
+        notes = f"Internet Archive item — {license_url or license_str or 'licence unstated'}"
+
+    # --- Musopen (public-domain classical) ---
+    elif src == "musopen":
+        # The catalogue is overwhelmingly public domain and tracks frequently
+        # carry no per-item licence field. Absent a contradicting signal, PD.
+        lt = (
+            parse_cc_url(license_url or "")
+            or _cc_type_from_text(license_str)
+            or LicenseType.PUBLIC_DOMAIN
+        )
+        notes = f"Musopen track — {license_url or license_str or 'public domain (no per-track field)'}"
 
     # --- SoundCloud ---
     elif src == "soundcloud":
