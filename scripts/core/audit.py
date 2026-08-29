@@ -15,12 +15,16 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, Optional
+
+from scripts.core.paths import DATA_DIR
 
 log = logging.getLogger(__name__)
 
-_AUDIT_PATH = Path("data/audit.jsonl")
+# Was Path("data/audit.jsonl") — CWD-relative, so it broke whenever the process
+# ran from anywhere but the repo root. Derive from DATA_DIR (honours
+# REMIXMATE_DATA_DIR; pointed at a throwaway dir by the test suite).
+_AUDIT_PATH = DATA_DIR / "audit.jsonl"
 
 
 def log_audit(

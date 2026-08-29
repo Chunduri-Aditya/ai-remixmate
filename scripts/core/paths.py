@@ -21,6 +21,7 @@ Backwards-compatible aliases are preserved so existing code keeps working
 without any changes until it is migrated to the new names.
 """
 
+import os
 import re
 from pathlib import Path
 
@@ -75,11 +76,14 @@ def sanitize_song_name(name: str) -> str:
 # library.library_dir / library.outputs_dir in config.yaml,
 # config.local.yaml, or REMIXMATE_LIBRARY_LIBRARY_DIR /
 # REMIXMATE_LIBRARY_OUTPUTS_DIR to move storage onto an external drive or
-# NAS mount. A relative value resolves against PROJECT_ROOT; an absolute
-# value (e.g. "/Volumes/MusicDrive/remixmate-library") is used as-is.
-# This is a filesystem path only — NOT object storage (S3/GCS); every
-# script in this codebase reads/writes stems with plain pathlib/soundfile
-# calls, so the target must be locally mounted.
+# NAS mount. DATA_DIR (db + JSON state) has its own REMIXMATE_DATA_DIR
+# override — it has no config.yaml section, and the test suite points it at
+# a throwaway dir (see tests/conftest.py) so a run never writes into the
+# real data/ tree. A relative value resolves against PROJECT_ROOT; an
+# absolute value (e.g. "/Volumes/MusicDrive/remixmate-library") is used
+# as-is. This is a filesystem path only — NOT object storage (S3/GCS);
+# every script in this codebase reads/writes stems with plain
+# pathlib/soundfile calls, so the target must be locally mounted.
 # ---------------------------------------------------------------------------
 def _resolve_dir(configured: str, default_name: str) -> Path:
     if configured:
@@ -101,7 +105,7 @@ except Exception:
 # ---------------------------------------------------------------------------
 LIBRARY_DIR  = _resolve_dir(_LIBRARY_DIR_OVERRIDE, "library")    # per-song folder
 OUTPUTS_DIR  = _resolve_dir(_OUTPUTS_DIR_OVERRIDE, "outputs")    # remix sessions
-DATA_DIR     = PROJECT_ROOT / "data"        # db + embeddings
+DATA_DIR     = _resolve_dir(os.environ.get("REMIXMATE_DATA_DIR", ""), "data")  # db + embeddings
 MODELS_DIR   = PROJECT_ROOT / "models"      # ML model weights
 
 EMBEDDINGS_FILE = DATA_DIR / "song_embeddings.json"

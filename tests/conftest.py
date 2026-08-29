@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Generator
 
@@ -45,6 +46,43 @@ import pytest
 _PROJECT_ROOT = Path(__file__).parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+
+
+# ---------------------------------------------------------------------------
+# Storage isolation — MUST run before anything imports scripts.core.paths
+# ---------------------------------------------------------------------------
+# scripts/core/paths.py freezes OUTPUTS_DIR (via cfg.library.outputs_dir /
+# REMIXMATE_LIBRARY_OUTPUTS_DIR) and DATA_DIR (via REMIXMATE_DATA_DIR) into
+# module-level constants at first import, and consumers bind them one level
+# deeper still — jobs.py does ``_DB_PATH = DATA_DIR / "jobs.db"`` at import,
+# crates.py / feedback_store.py likewise. Reassigning the constant afterwards
+# is therefore useless. The only way to keep a test run from writing into the
+# real outputs/ and data/ trees is to point the env vars at a throwaway dir
+# *before* the first ``import scripts.*``. pytest imports this root conftest
+# before test collection and it pulls in no scripts modules itself, so here is
+# early enough.
+#
+# A few stores bypass paths.DATA_DIR entirely — config.py carries them as
+# relative strings ("data/metadata.db", "data/remixmate.db",
+# "data/song_embeddings.json"), consumed by track_metadata.py / database.py.
+# _apply_env_vars() maps REMIXMATE_METADATA_CACHE_PATH -> metadata.cache_path
+# and REMIXMATE_DATABASE_* -> database.*, so redirect those too. (audit.py's
+# log path derives from DATA_DIR directly, so REMIXMATE_DATA_DIR covers it.)
+#
+# LIBRARY_DIR is deliberately left pointing at the real shared catalog — tests
+# read from it and never write; see the deployment plan, Phase 0. A caller may
+# pre-set REMIXMATE_LIBRARY_OUTPUTS_DIR (e.g. CI) to opt out of the shim.
+if not os.environ.get("REMIXMATE_LIBRARY_OUTPUTS_DIR"):
+    _TEST_STORAGE_TMP = tempfile.TemporaryDirectory(prefix="remixmate-test-storage-")
+    _test_storage_root = Path(_TEST_STORAGE_TMP.name)
+    _test_data_dir = _test_storage_root / "data"
+    os.environ["REMIXMATE_LIBRARY_OUTPUTS_DIR"] = str(_test_storage_root / "outputs")
+    os.environ.setdefault("REMIXMATE_DATA_DIR", str(_test_data_dir))
+    os.environ.setdefault("REMIXMATE_METADATA_CACHE_PATH", str(_test_data_dir / "metadata.db"))
+    os.environ.setdefault("REMIXMATE_DATABASE_PATH", str(_test_data_dir / "remixmate.db"))
+    os.environ.setdefault(
+        "REMIXMATE_DATABASE_EMBEDDINGS_PATH", str(_test_data_dir / "song_embeddings.json")
+    )
 
 
 # ---------------------------------------------------------------------------
