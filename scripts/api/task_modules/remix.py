@@ -6,8 +6,10 @@ task_dj_chain          — render an N-song continuous DJ mix
 task_remix_preview     — render only the transition window for fast audition
 """
 
+import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple
 
@@ -18,6 +20,7 @@ import soundfile as sf
 from scripts.api.jobs import update_job
 from scripts.core.audio_source import load_source_audio
 from scripts.core.audit import log_audit
+from scripts.core.license import load_license
 from scripts.core.paths import OUTPUTS_DIR, song_dir
 
 log = logging.getLogger(__name__)
@@ -147,6 +150,89 @@ def _should_use_stem_blend(
         confidence = harmonic_score
 
     return confidence >= threshold, confidence
+
+
+# ---------------------------------------------------------------------------
+# Mix credits — CREDITS.txt + manifest.json next to every rendered mix
+# ---------------------------------------------------------------------------
+
+def _mix_credits(song_names: list) -> list:
+    """One credit entry per source track, read from its library `license.json`.
+
+    A track with no readable licence still gets an entry (`license "unknown"`,
+    `artist None`) — an attribution obligation is never silently dropped from a
+    rendered derivative because a file was missing. `load_license` returns None
+    on any read error (and logs it itself), so this cannot raise.
+    """
+    credits: list = []
+    for name in song_names:
+        info = load_license(song_dir(name))
+        if info is None:
+            credits.append({
+                "song": name,
+                "artist": None,
+                "license": "unknown",
+                "license_url": None,
+                "source": None,
+                "source_url": None,
+                "attribution_required": True,   # conservative when unknown
+            })
+        else:
+            credits.append({
+                "song": name,
+                "artist": info.artist_name,
+                "license": info.license_type.value,
+                "license_url": info.license_url,
+                "source": info.source,
+                "source_url": info.source_url,
+                "attribution_required": info.attribution_required,
+            })
+    return credits
+
+
+def _write_mix_credits(out_dir: Path, song_names: list) -> list:
+    """Write `CREDITS.txt` + `manifest.json` into `out_dir`; return the credits.
+
+    Never raises — a credits-write failure must not fail an otherwise-good
+    render. The returned list also goes into the task response so the client
+    can show attribution without re-reading the files.
+    """
+    credits = _mix_credits(song_names)
+    try:
+        generated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        lines = [
+            "AI RemixMate — mix credits",
+            f"Generated {generated}",
+            "",
+            "This mix is a derivative work built from the tracks below. Creative",
+            "Commons BY tracks must credit the artist wherever you share the mix.",
+            "",
+        ]
+        for i, c in enumerate(credits, 1):
+            lic = "unknown" if c["license"] == "unknown" else c["license"].upper().replace("_", "-")
+            lines.append(f"{i}. {c['song']}")
+            lines.append(f"   Artist:  {c['artist'] or 'unknown'}")
+            lines.append(f"   License: {lic}" + (f"  ({c['license_url']})" if c["license_url"] else ""))
+            lines.append(f"   Source:  {c['source'] or 'unknown'}" + (f"  {c['source_url']}" if c["source_url"] else ""))
+            lines.append("")
+
+        (out_dir / "CREDITS.txt").write_text("\n".join(lines), encoding="utf-8")
+        (out_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "session": out_dir.name,
+                    "generated_utc": generated,
+                    "songs": list(song_names),
+                    "credits": credits,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except Exception as e:   # non-critical: log, keep the render
+        log.warning("credits: could not write CREDITS/manifest into %s: %s", out_dir.name, e)
+    return credits
 
 
 def task_dj_remix(
@@ -302,6 +388,8 @@ def task_dj_remix(
 
     sf.write(str(out_path), mix_mastered, sr, subtype="PCM_24")
 
+    credits = _write_mix_credits(out_dir, [song_a, song_b])
+
     if spectral_info:
         record_render(session_id, spectral_info)
 
@@ -377,6 +465,8 @@ def task_dj_remix(
         "spectral_sync":     sync_info,
         # Transition timeline in output seconds — what happens when
         "timeline":          _transition_timeline(plan, struct_b),
+        # Source-track attribution — also written to out_dir/CREDITS.txt + manifest.json
+        "credits":           credits,
         **ts_data,
     }
 
@@ -481,6 +571,8 @@ def task_dj_chain(
 
     sf.write(str(out_path), mix_mastered, sr, subtype="PCM_24")
 
+    credits = _write_mix_credits(out_dir, list(songs))
+
     # Per-transition summary (include harmonic scores + key data)
     transitions = []
     for i, plan in enumerate(plans):
@@ -524,6 +616,8 @@ def task_dj_chain(
         "dr":              round(quality_report.dynamic_range_db, 1),
         "quality_passed":  quality_report.passed,
         "quality_notes":   quality_report.notes,
+        # Source-track attribution — also written to out_dir/CREDITS.txt + manifest.json
+        "credits":         credits,
     }
 
 
