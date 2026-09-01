@@ -241,7 +241,9 @@ engines silently changed output loudness by 6 dB.
   measured length.
 - The UI is desktop only by design. The embedded widget covers the small screen case.
 - Downloading audio through yt-dlp may breach YouTube's Terms of Service. The project is scoped to
-  personal, educational and portfolio use; see the Legal section in `README.md`.
+  personal, educational and portfolio use; see the Legal section in `README.md`. The `hosted-app`
+  branch removes every download path and serves an operator-curated Creative Commons catalog only;
+  see `app/STATUS.md`.
 
 ---
 

@@ -9,8 +9,8 @@
 
 | # | Phase | State | Commit |
 |---|---|---|---|
-| 0 | Guardrails (test isolation fixture) | ☑ verified | _see git log_ |
-| 1 | Catalog teardown + enforced CC gate | ☐ not started | |
+| 0 | Guardrails (test isolation fixture) | ☑ verified | 304da7e |
+| 1 | Catalog teardown + enforced CC gate | ◐ in progress | 3d06bf2, 2f2833f (+ uncommitted tree) |
 | 2 | Guard generative + slim the image | ☐ not started | |
 | 3 | User contextvar + per-user mixes/jobs/crates/feedback | ☐ not started | |
 | 4 | Auth + tenancy (Supabase) | ☐ not started | |
@@ -22,13 +22,23 @@
 Legend: ☐ not started · ◐ in progress · ☑ verified
 
 **Green bar carried between every phase** (all three must pass before ticking a phase):
-- `uvx ruff check` — clean (config in `pyproject.toml`, line-length 100; `ruff`/`black` are not in the venv)
+- `uvx ruff check <files changed this phase>` — clean (this is what "clean (4 files)"
+  in the Phase 0 verify meant). **Repo-wide `uvx ruff check` is not a usable gate as
+  it stands**: on a clean `HEAD` it reports ~1583 findings, dominated by pre-existing
+  `W293` blank-line whitespace (~1100), `I001` import order (~200), and `F401` unused
+  imports (~150) — debt this migration did not introduce. `E501` is correctly
+  ignored, so the `pyproject.toml` rules are being read. Scope the check to the
+  phase's own files until someone runs `ruff check --fix` repo-wide and moves the
+  config to `[tool.ruff.lint]`. That cleanup is worth doing before the Phase 7 CI
+  job — surfaced, not done here.
 - safe pytest subset — green. The command (repo `.venv`, py3.12):
   ```
   .venv/bin/python -m pytest -m "not dj_analysis and not integration" \
     --ignore=tests/e2e_test_suite.py --ignore=tests/test_audio_source.py -q
   ```
-  Baseline before Phase 0: **675 passed, 90 deselected, ~13s**. After Phase 0: **680 passed**.
+  Baseline before Phase 0: **675 passed, 90 deselected, ~13s**. After Phase 0: **680
+  passed**. After the Phase 1 licence slices + `config.yaml` alignment: **702 passed,
+  90 deselected, ~12s** (801 tests collected repo-wide).
 - `cd frontend && npx vite build` — clean
 
 ---
@@ -136,6 +146,48 @@ clean verify harness.
 **Goal:** replace all download paths with an operator-only ingest tool over
 CC-BY / CC0 / public-domain sources; every track in the catalog provably
 publishable; attribution carried into the API response and every mix.
+
+### Current state (as of 2026-08-31)
+
+**Committed** (`3d06bf2`, `2f2833f`):
+- [x] `LicenseType.PUBLIC_DOMAIN` added; `PERMITTED_LICENSES = {CC0, CC_BY,
+      PUBLIC_DOMAIN}` frozenset; `is_publishable(info)`; `license_enforce_enabled()`
+      reads `REMIXMATE_LICENSE_ENFORCE`.
+- [x] `classify_license` extended with `ccmixter` / `fma` / `internetarchive` /
+      `musopen` source branches.
+- [x] `save_license()` persists `artist_name`, `license_ccurl`, source URL.
+- [x] `SongInfo` gains `artist_name` + `license_ccurl`; `_song_info` reads both.
+
+**In the working tree, not yet committed** (green: 702 passed; `uvx ruff` on these
+files shows ~52 pre-existing `W293`/`I001` findings, no new logic errors):
+- [x] `scripts/download.py` rewritten as the operator ingest CLI. ccMixter and
+      Internet Archive fetchers **implemented**; Free Music Archive and Musopen are
+      **stubs** (`# API unverified` in the docstring) — 2 of 4 sources real.
+- [x] `scripts/api/routers/spotify.py` cut to metadata-only: `/spotify/status`,
+      `/spotify/search`, `/spotify/track/{id}`. OAuth / callback / disconnect /
+      playlists / top / import routes deleted (~6 endpoints, 252 → ~90 lines).
+- [x] `scripts/api/routes.py`: `downloads` router no longer included.
+- [x] `scripts/api/tasks.py`: `task_download` / `task_playlist_download`
+      re-exports removed.
+- [x] `scripts/core/config.py` + `config.yaml` (edited together — drift guard
+      green): dropped `download.default_source` and `spotify.redirect_uri`.
+- [x] `scripts/core/python_bridge.py`: removed the `youtube_music` online
+      auto-fetch of missing tracks.
+
+**Still open for Phase 1** (blocks the commit + tick):
+- [ ] Delete `scripts/api/routers/downloads.py` and
+      `scripts/api/task_modules/download.py` — both still on disk, just unwired.
+- [ ] `scripts/core/youtube_music.py` still present and still imports `yt_dlp` —
+      remove or quarantine.
+- [ ] `requirements.txt`: `yt-dlp==2026.3.17` and `ytmusicapi==1.10.2` still
+      listed; LEGAL NOTE block still present.
+- [ ] Real FMA + Musopen fetchers (or descope to ccMixter + Internet Archive for
+      v1 and say so in the cut list).
+- [ ] `classify_license` 8-case allow/deny matrix test — not written.
+- [ ] `scripts/api/task_modules/remix.py`: `CREDITS.txt` + `manifest.json`
+      `credits[]` — not started.
+- [ ] Frontend: `Operations.tsx` download/playlist UI removal, `catalogApi.search`,
+      Spotify import buttons, `LibraryAtlas` licence badge — not started.
 
 **Tasks**
 - [ ] `scripts/download.py` → operator CLI ingest tool. Delete the `yt_dlp` /
