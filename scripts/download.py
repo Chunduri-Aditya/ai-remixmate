@@ -7,12 +7,14 @@ library of Creative-Commons / public-domain music. This module fetches a track
 from a permitted source, verifies its licence, separates stems, analyses it, and
 registers it in library/.
 
-Permitted sources (both the licence *and* the platform's terms allow download +
+v1 sources (both the licence *and* the platform's terms allow download +
 derivatives):
-  • ccMixter          — remix-first CC community            (implemented)
-  • Internet Archive   — netlabel / live-music collections   (implemented)
-  • Free Music Archive — CC catalogue                        (stub — API unverified)
-  • Musopen            — public-domain classical             (stub — API unverified)
+  • ccMixter          — remix-first CC community
+  • Internet Archive   — netlabel / live-music collections
+
+Free Music Archive and Musopen are descoped for v1 (see app/DEPLOYMENT_PLAN.md
+cut list). classify_license still recognises `fma` / `musopen` licence
+expressions, so adding a fetcher later needs no classifier change.
 
 Every ingest runs classify_license -> is_publishable gate -> Demucs -> analysis.
 The gate rejects non-CC/PD tracks only when REMIXMATE_LICENSE_ENFORCE=1 (set it
@@ -67,7 +69,7 @@ class CatalogCandidate:
     title: str
     artist: Optional[str]
     audio_url: str
-    source: str                        # "ccmixter" | "archive" | "fma" | "musopen"
+    source: str                        # "ccmixter" | "archive"
     license_url: Optional[str] = None
     license_str: Optional[str] = None
     source_url: Optional[str] = None   # the track's page on its origin site
@@ -190,26 +192,13 @@ def fetch_internet_archive(query: str, limit: int = 10) -> List[CatalogCandidate
     return out
 
 
-def fetch_fma(query: str, limit: int = 10) -> List[CatalogCandidate]:
-    raise NotImplementedError(
-        "Free Music Archive fetcher not implemented — verify the current FMA API "
-        "contract during catalogue build, then wire it here."
-    )
-
-
-def fetch_musopen(query: str, limit: int = 10) -> List[CatalogCandidate]:
-    raise NotImplementedError(
-        "Musopen fetcher not implemented — verify the Musopen API / download "
-        "contract during catalogue build, then wire it here."
-    )
-
-
+# Free Music Archive and Musopen fetchers are descoped for v1
+# (app/DEPLOYMENT_PLAN.md cut list). When re-added, register them here — the
+# licence classifier already knows both sources.
 _FETCHERS: Dict[str, Callable[[str, int], List[CatalogCandidate]]] = {
     "ccmixter": fetch_ccmixter,
     "archive": fetch_internet_archive,
     "internetarchive": fetch_internet_archive,
-    "fma": fetch_fma,
-    "musopen": fetch_musopen,
 }
 
 

@@ -67,28 +67,6 @@ vi.mock('@/lib/api', () => ({
     }),
     cancel: async () => undefined,
   },
-  downloadApi: {
-    single: async () => ({
-      job_id: 'job-download',
-      status: 'PENDING',
-      type: 'download',
-      progress: 0,
-      message: '',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }),
-    batch: async () => [],
-    fromSpotify: async () => ({ job_id: 'job-spotify' }),
-    playlist: async () => ({
-      job_id: 'job-playlist',
-      status: 'PENDING',
-      type: 'download',
-      progress: 0,
-      message: '',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }),
-  },
   analysisApi: {
     analyze: async () => ({ job_id: 'job-analysis' }),
     compatibility: async () => ({

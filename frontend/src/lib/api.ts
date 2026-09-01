@@ -175,21 +175,9 @@ export const storageApi = {
     ),
 }
 
-// --- Downloads ---
-
-export const downloadApi = {
-  // API expects { query, name, auto_analyze } — query is a search string or URL.
-  // auto_analyze defaults true: stems + BPM/key/structure analysis both run
-  // automatically so the song is fully remix-ready the moment it lands.
-  single:     (query: string, name?: string, autoAnalyze = true) =>
-    post<RawJob>('/download', { query, name: name || undefined, auto_analyze: autoAnalyze }).then(normalizeJob),
-  batch:      (queries: string[], autoAnalyze = true) =>
-    post<RawJob[]>('/download-batch', { queries, auto_analyze: autoAnalyze }).then((js) => js.map(normalizeJob)),
-  fromSpotify: (url: string) =>
-    post<{ job_id: string }>('/spotify/import', { url }),
-  playlist:   (url: string, limit?: number, autoAnalyze = true) =>
-    post<RawJob>('/download-playlist', { url, limit: limit || undefined, auto_analyze: autoAnalyze }).then(normalizeJob),
-}
+// --- Catalogue ---
+// There is no in-app track acquisition. The catalogue is operator-curated CC
+// audio (scripts/download.py). Browse it with libraryApi.list / libraryApi.get.
 
 // --- Audio streaming URLs (no fetch — just URL builders) ---
 

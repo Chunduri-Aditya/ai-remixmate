@@ -333,7 +333,23 @@ function SongDrawer({
             <div className="la-chips" style={{ marginTop: 'var(--space-2)' }}>
               {song.has_stems    && <span className="la-chip la-chip--violet">stems</span>}
               {song.has_analysis && <span className="la-chip la-chip--green">analyzed</span>}
+              {song.license_type && (
+                <span className="la-chip la-chip--amber" title={song.license_ccurl ?? undefined}>
+                  {song.license_type.replace(/_/g, ' ').toUpperCase()}
+                </span>
+              )}
             </div>
+            {(song.artist_name || song.license_ccurl) && (
+              <p className="la-muted" style={{ marginTop: 'var(--space-2)', fontSize: '0.8em' }}>
+                {song.artist_name && <>by {song.artist_name}</>}
+                {song.artist_name && song.license_ccurl && ' · '}
+                {song.license_ccurl && (
+                  <a href={song.license_ccurl} target="_blank" rel="noopener noreferrer">
+                    licence
+                  </a>
+                )}
+              </p>
+            )}
           </div>
 
           {/* Deck quick-load */}

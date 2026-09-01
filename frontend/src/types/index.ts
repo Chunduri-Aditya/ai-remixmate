@@ -57,6 +57,10 @@ export interface SongInfo {
   energy?: number           // 0–1
   embedding?: number[]
   stems?: string[]          // e.g. ['vocals', 'drums', 'bass', 'other']
+  // Attribution — populated at catalogue ingest (scripts/core/license.py)
+  artist_name?: string
+  license_type?: string     // 'cc_by' | 'cc0' | 'public_domain' | ...
+  license_ccurl?: string    // canonical CC deed URL
 }
 
 export interface BrokenSong {
