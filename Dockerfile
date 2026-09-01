@@ -20,17 +20,16 @@ COPY . .
 
 # Create non-root user
 # Canonical runtime dirs match scripts/core/paths.py:
-#   library/ — downloaded songs
+#   library/ — operator-curated CC catalogue
 #   outputs/ — rendered mixes  (was: output/ + mixes/ — stale, removed)
 #   data/    — SQLite DB, embeddings, audit log
-#   models/  — ML model weights
 RUN useradd -m -s /bin/bash remixmate \
-    && mkdir -p /app/library /app/data /app/outputs /app/models \
+    && mkdir -p /app/library /app/data /app/outputs \
     && chown -R remixmate:remixmate /app
 USER remixmate
 
-# Expose API + Streamlit ports
-EXPOSE 8000 8501
+# API port (the Streamlit UI is not deployed; the frontend is a separate build)
+EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

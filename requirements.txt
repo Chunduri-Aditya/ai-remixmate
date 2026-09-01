@@ -12,15 +12,17 @@ soxr==0.5.0.post1
 audioread==3.0.1
 
 # --- Stem separation ---
+# Invoked as `python -m demucs` (subprocess, never imported) by scripts/core/stems.py
+# for /stems/split and the auto-analyze path. Not on the generative request path.
 demucs==4.0.1
 
 # --- ML / embeddings ---
 torch==2.7.1
 torchaudio==2.7.1
 scikit-learn==1.7.1
-transformers==4.53.3
-safetensors==0.5.3
-huggingface-hub==0.33.4
+# transformers / safetensors / huggingface-hub moved to the `generative` extra
+# in pyproject.toml — only scripts/core/{model_manager,codec_tokens}.py import
+# them, and both are behind the flag-gated /ai/* routes (Phase 2).
 
 # --- Numerical / signal processing ---
 numpy==2.2.6
@@ -43,16 +45,15 @@ python-multipart==0.0.20    # file upload support for FastAPI
 tqdm==4.67.1
 click==8.2.1
 
-# --- Streamlit demo UI ---
-streamlit==1.47.0
-altair==5.5.0
-
 # --- Loudness / mastering (AI Studio per-stem LUFS analysis) ---
 pyloudnorm>=0.1.1              # ITU-R BS.1770-4 integrated loudness + true peak
 
-# --- Setlist planner / Wordplay NLP (optional — degrades gracefully if absent) ---
-lyricsgenius>=3.0.1            # Genius API lyrics fetcher (wordplay transitions)
-nltk>=3.9                      # Tokenisation + stop-word removal for lyric matching
+# Streamlit demo UI (streamlit, altair) is not deployed — see scripts/ui/.
+# Wordplay lyric matching (lyricsgenius, nltk) is a soft dependency of
+# scripts/core/wordplay.py; /setlist/wordplay degrades to score 0.0 without it.
+# Install either set explicitly when you want them:
+#   pip install streamlit altair          # local Streamlit UI
+#   pip install "ai-remixmate[wordplay]"   # Genius lyric transitions
 
 # --- Neural audio codecs (optional — install separately if you want DAC tokenization) ---
 # descript-audio-codec conflicts with streamlit's protobuf requirement and is

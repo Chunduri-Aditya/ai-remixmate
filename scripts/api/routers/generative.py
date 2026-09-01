@@ -5,12 +5,19 @@ POST /ai/style-transfer        — MusicGen melody-conditioned style transfer
 POST /ai/inpaint               — VampNet masked acoustic token inpainting
 POST /ai/tokenize              — Tokenize stems with EnCodec or DAC
 GET  /ai/models                — AI model registry status
+
+The whole router is gated: every route returns 503 unless
+REMIXMATE_GENERATIVE_ENABLED is truthy. The generative stack (MusicGen /
+VampNet / DAC, and the transformers / safetensors deps) is out for v1 of the
+hosted product — see app/DEPLOYMENT_PLAN.md Phase 2. Job types stay defined.
 """
 
-from fastapi import APIRouter, BackgroundTasks
+import os
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from scripts.api import jobs as job_store
-from scripts.api.routers._helpers import _require_song, _check_job_cap
+from scripts.api.routers._helpers import _check_job_cap, _require_song
 from scripts.api.schemas import (
     InpaintRequest,
     JobResponse,
@@ -26,7 +33,18 @@ from scripts.api.tasks import (
     task_tokenize_stems,
 )
 
-router = APIRouter()
+
+def _generative_enabled() -> None:
+    """503 unless REMIXMATE_GENERATIVE_ENABLED is truthy. Read per request so a
+    test (or an operator) can flip it without a restart."""
+    if os.environ.get("REMIXMATE_GENERATIVE_ENABLED", "").strip().lower() not in ("1", "true", "yes"):
+        raise HTTPException(
+            status_code=503,
+            detail="Generative AI features are disabled on this deployment.",
+        )
+
+
+router = APIRouter(dependencies=[Depends(_generative_enabled)])
 
 
 # ---------------------------------------------------------------------------
@@ -173,5 +191,5 @@ def model_status():
             max_vram_gb=status["max_vram_gb"],
             models=models,
         )
-    except Exception as exc:
+    except Exception:
         return ModelStatusResponse(device="unknown", models=[])

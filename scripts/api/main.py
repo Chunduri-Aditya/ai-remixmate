@@ -14,14 +14,13 @@ Interactive docs:
 
 from __future__ import annotations
 
+import os
 import uuid
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from scripts.api.routes import router
 from scripts.core.config import cfg, configure_logging
@@ -29,9 +28,6 @@ from scripts.core.logging_utils import get_logger, set_request_id
 from scripts.core.paths import ensure_directories
 
 logger = get_logger(__name__)
-
-_UI_DIR = Path(__file__).parents[1] / "ui" / "static"
-_UI_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # Lifespan — replaces deprecated @app.on_event("startup"/"shutdown")
@@ -167,27 +163,32 @@ async def _allow_private_network(request: Request, call_next):
 app.include_router(router)
 
 # ---------------------------------------------------------------------------
-# Serve static HTML UI at root (INTERNAL/EXPERIMENTAL — not the primary UI)
-# Primary UI: Streamlit on port 8501 — see docs/GUIDE.md
+# Root — the SPA is a separate deploy (Cloudflare Pages). This API serves no UI.
 # ---------------------------------------------------------------------------
 
 
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def serve_ui():
-    """Serve the static HTML frontend (experimental). Primary UI is Streamlit on :8501."""
-    html = (_UI_DIR / "index.html").read_text()
-    return HTMLResponse(html)
+def _root_payload():
+    """302 to the frontend when REMIXMATE_FRONTEND_URL is set, else a small
+    pointer at the API's own entry points (keeps local dev sane)."""
+    frontend = os.environ.get("REMIXMATE_FRONTEND_URL", "").strip()
+    if frontend:
+        return RedirectResponse(url=frontend, status_code=302)
+    return JSONResponse({
+        "service": "ai-remixmate API",
+        "docs": "/docs",
+        "health": "/health/ready",
+        "frontend": "set REMIXMATE_FRONTEND_URL to redirect here",
+    })
 
 
-@app.get("/app", response_class=HTMLResponse, include_in_schema=False)
-async def serve_app():
-    html = (_UI_DIR / "index.html").read_text()
-    return HTMLResponse(html)
+@app.get("/", include_in_schema=False)
+async def root():
+    return _root_payload()
 
 
-# Static assets (JS/CSS files if added later)
-if (_UI_DIR / "assets").exists():
-    app.mount("/assets", StaticFiles(directory=str(_UI_DIR / "assets")), name="assets")
+@app.get("/app", include_in_schema=False)
+async def app_root():
+    return _root_payload()
 
 
 # ---------------------------------------------------------------------------

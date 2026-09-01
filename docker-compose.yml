@@ -2,19 +2,16 @@ version: "3.9"
 
 # ─── AI RemixMate — Docker Compose ──────────────────────────────────────────
 #
-# Supported run modes:
-#   docker compose up          → API + Streamlit UI (primary supported path)
-#   docker compose up api      → API only
-#   docker compose up ui       → Streamlit UI only (requires api to be running)
+#   docker compose up          → API only
+#
+# The frontend (frontend/) is a separate static deploy (Cloudflare Pages in
+# production — see app/DEPLOYMENT_PLAN.md Phase 7). The Streamlit UI in
+# scripts/ui/ is not deployed. This compose file runs the API alone.
 #
 # Volume layout matches scripts/core/paths.py canonical paths:
-#   library/  — downloaded songs
+#   library/  — operator-curated CC catalogue (read-only in production)
 #   outputs/  — rendered mixes
 #   data/     — SQLite DB, embeddings, audit log
-#   models/   — ML model weights (optional; large, mount if pre-downloaded)
-#
-# The static HTML UI (served by the API at /) is an INTERNAL/EXPERIMENTAL
-# frontend. The Streamlit UI on port 8501 is the PRIMARY supported interface.
 
 services:
   api:
@@ -35,18 +32,4 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-    restart: unless-stopped
-
-  ui:
-    build: .
-    container_name: remixmate-ui
-    command: streamlit run scripts/ui/app.py --server.port 8501 --server.address 0.0.0.0
-    ports:
-      - "8501:8501"
-    environment:
-      # Inter-service API URL — used by app.py when REMIXMATE_API_URL is set
-      - REMIXMATE_API_URL=http://api:8000
-    depends_on:
-      api:
-        condition: service_healthy
     restart: unless-stopped

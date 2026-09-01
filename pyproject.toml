@@ -47,11 +47,20 @@ dev = [
     "mypy>=1.16",
     "pre-commit>=4.2",
 ]
-# DAC tokenization + VampNet inpainting (conflicts with streamlit's protobuf
-# requirement — install in a separate environment or after the core install).
+# MusicGen / VampNet / DAC generative stack. Gated off by default in the hosted
+# product (REMIXMATE_GENERATIVE_ENABLED); the /ai/* routes 503 without it.
 # Usage: pip install -e ".[generative]"
 generative = [
     "descript-audio-codec>=1.0.0",
+    "transformers==4.53.3",
+    "safetensors==0.5.3",
+    "huggingface-hub==0.33.4",
+]
+# Genius lyric-adjacency scoring for /setlist/wordplay. Soft: scripts/core/wordplay.py
+# degrades to score 0.0 when absent.
+wordplay = [
+    "lyricsgenius>=3.0.1",
+    "nltk>=3.9",
 ]
 
 [project.scripts]
