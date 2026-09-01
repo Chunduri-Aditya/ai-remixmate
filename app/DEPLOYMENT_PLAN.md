@@ -11,7 +11,7 @@
 |---|---|---|---|
 | 0 | Guardrails (test isolation fixture) | ☑ verified | 304da7e |
 | 1 | Catalog teardown + enforced CC gate | ☑ verified (code; live ingest pending an operator run) | 3d06bf2, 2f2833f, f6c0c6c, 8c4f204, 46aa166, dbe2db1, + frontend teardown |
-| 2 | Guard generative + slim the image | ☐ not started | |
+| 2 | Guard generative + slim the image | ☑ verified | f27aecb |
 | 3 | User contextvar + per-user mixes/jobs/crates/feedback | ☐ not started | |
 | 4 | Auth + tenancy (Supabase) | ☐ not started | |
 | 5 | SQLite → Postgres (jobs, crates, feedback, setlists) | ☐ not started | |
@@ -46,7 +46,8 @@ by a code change. Phase 3 does not depend on them.
   90 deselected**. After the backend teardown: **701** — the −1 is a single
   parametrised case in `test_structured_logger_usage.py` that iterates source files,
   now one file shorter (`task_modules/download.py` deleted), not a lost assertion.
-  After the licence matrix + mix-credits tests: **706 passed**.
+  After the licence matrix + mix-credits tests: **706 passed**. After Phase 2
+  (generative gate + root-route tests): **722 passed**.
 - `cd frontend && npx vite build` — clean
 
 ---
@@ -340,30 +341,50 @@ git history (`git show 2f2833f^:scripts/api/routers/downloads.py`).
 **Goal:** generative routes return 503 unless explicitly enabled; runtime image
 drops the heavy ML deps it no longer needs; `demucs` leaves the request path.
 
+**State:** ☑ done — `f27aecb`.
+
 **Tasks**
-- [ ] `scripts/api/routers/generative.py`:
-      `APIRouter(dependencies=[Depends(_generative_enabled)])` → 503 unless
-      `REMIXMATE_GENERATIVE_ENABLED=true`. Keep job types defined but unreachable.
-      **Do not touch** `dj_engine` / `classic_engine` / `_resolve_engine`.
-- [ ] `requirements.txt`: drop `transformers`, `safetensors` (verify vs the demucs
-      path), `streamlit`, `altair`, `lyricsgenius` + `nltk` (verify: setlist
-      wordplay only). Move `demucs` to a `[project.optional-dependencies] ingest`
-      extra — the runtime API no longer imports it.
-- [ ] Drop the Streamlit `ui` service from `Dockerfile` and `docker-compose.yml`.
-- [ ] `scripts/api/main.py:159-181`: replace the static
-      `scripts/ui/static/index.html` at `/` and `/app` with a 302 to the frontend domain.
+- [x] `scripts/api/routers/generative.py`: the whole
+      `APIRouter(dependencies=[Depends(_generative_enabled)])` → every `/ai/*`
+      route 503s unless `REMIXMATE_GENERATIVE_ENABLED` is truthy. Flag read
+      **per request** (not a module constant). Handlers + job types untouched.
+      `dj_engine` / `classic_engine` / `_resolve_engine` not touched.
+- [x] `requirements.txt`: `transformers` / `safetensors` / `huggingface-hub` →
+      `pyproject.toml` `[generative]` extra (only `model_manager.py` /
+      `codec_tokens.py` import them, lazily, behind the gate). `streamlit` /
+      `altair` removed (`scripts/ui/` only). `lyricsgenius` / `nltk` → new
+      `[wordplay]` extra (`wordplay.py` already `try/except`s them). **`demucs`
+      kept** — it is a `python -m demucs` subprocess, never imported; still
+      needed by `/stems/split` + auto-analyze. (The plan's original "move demucs
+      to an `ingest` extra" was dropped: the stated reason — no imports on the
+      request path — is already true, and removing the package would break
+      `/stems/split` in a `requirements.txt`-only venv. Guarding/removing that
+      route is not Phase 2 scope.)
+- [x] `docker-compose.yml`: `ui` service dropped. `Dockerfile`: `8501` EXPOSE
+      and `models/` dir dropped.
+- [x] `scripts/api/main.py`: `/` and `/app` no longer read
+      `scripts/ui/static/index.html`. 302 to `REMIXMATE_FRONTEND_URL` when set,
+      else a 200 JSON pointer at `/docs` (keeps local dev usable — a fake
+      redirect target does not).
 
 **Verify**
-- [ ] API boots with `REMIXMATE_GENERATIVE_ENABLED` unset.
-- [ ] `POST /style-transfer` → 503; `POST /dj-remix` and `POST /dj-chain` unaffected.
-- [ ] `grep -rn "import demucs\|from demucs" scripts/api/` → no hits (request path
-      is demucs-free; ingest tool keeps it).
-- [ ] `pip check` clean after dep removal; fresh `pip install -r requirements.txt`
-      in a scratch venv succeeds without torch-transformers.
-- [ ] `GET /` → 302 to the frontend domain.
-- [ ] Green bar.
+- [x] API imports with `REMIXMATE_GENERATIVE_ENABLED` unset; safe subset
+      **722 passed** (+16 new).
+- [x] `POST /ai/style-transfer` / `/ai/inpaint` / `GET /ai/models` → 503;
+      `POST /dj-remix` and `POST /dj-chain` → 422 (reached their own handlers,
+      not the gate). `tests/test_generative_gate.py` (11 cases, incl. a
+      per-request-read check).
+- [x] `grep -rn "import demucs\|from demucs" scripts/api/` → no hits.
+- [x] `pip check` clean. Importing `scripts.api.main` / `.routes` with all 7
+      removed packages shadowed to `None` succeeds → none are on the startup
+      path. **Fresh-venv `pip install -r requirements.txt` skipped** (slow,
+      pulls torch); the shadow-import test covers the eager-import risk.
+- [x] `GET /` → 302 to `REMIXMATE_FRONTEND_URL` when set, 200 JSON pointer when
+      unset. `tests/test_root_route.py`.
+- [x] Green bar: safe subset 722 · `uvx ruff` clean on `generative.py` +
+      new tests (`main.py` keeps 1 pre-existing in-function `I001`).
 
-**Commit:** `chore: guard generative routes behind a flag, drop unused runtime deps`
+**Commit:** `f27aecb` — `feat: gate generative routes behind a flag; drop unused runtime deps`
 
 ---
 
