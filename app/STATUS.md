@@ -17,7 +17,7 @@ untouched.
 | # | Phase | State | Evidence |
 |---|---|---|---|
 | 0 | Guardrails (test isolation fixture) | done, verified | commit `304da7e`; `tests/test_storage_isolation.py` 5 tests; negative control drops 4/5 |
-| 1 | Catalog teardown + enforced CC gate | in progress (~2/3) | commits `3d06bf2`, `2f2833f` + uncommitted tree; see below |
+| 1 | Catalog teardown + enforced CC gate | in progress — teardown done, additive open | commits `3d06bf2`, `2f2833f`, `f6c0c6c`, teardown commit; see below |
 | 2 | Guard generative + slim the image | not started | |
 | 3 | User contextvar + per-user data | not started | |
 | 4 | Auth + tenancy (Supabase) | not started | |
@@ -30,19 +30,19 @@ untouched.
 
 | Check | Result | Note |
 |---|---|---|
-| safe pytest subset | 702 passed, 90 deselected, ~12s | up from 680 after Phase 0; 801 collected repo-wide |
-| `uvx ruff check` (repo-wide) | ~1583 findings on a clean `HEAD` | not a usable gate as it stands: pre-existing debt, ~1100 `W293` blank-line whitespace + ~200 `I001` + ~150 `F401`, none introduced by this migration. `E501` is correctly ignored so the config is being read. Run `ruff check --fix` repo-wide and move the config to `[tool.ruff.lint]` before Phase 7 CI. |
-| `uvx ruff check` (Phase 1 files) | 52 findings, all pre-existing style | no new logic errors introduced |
+| safe pytest subset | 701 passed, 90 deselected, ~12s | 702 after the licence + config work, then −1 from deleting `task_modules/download.py` (a parametrised lint case over source files, not a lost assertion) |
+| import smoke | `scripts.api.main` / `.routes` / `.tasks` / `scripts.download` all import | proves nothing references the three deleted modules |
+| `uvx ruff check` (repo-wide) | ~1580 findings on a clean `HEAD` | not a usable gate as it stands: pre-existing debt, ~1100 `W293` blank-line whitespace + ~200 `I001` + ~150 `F401`, none introduced by this migration. `E501` is correctly ignored so the config is being read. Run `ruff check --fix` repo-wide and move the config to `[tool.ruff.lint]` before Phase 7 CI. |
+| `uvx ruff check` (teardown files) | ~54 findings, all pre-existing style | the teardown adds none; `analysis_pipeline.py` had 2 (`F401` numpy, `I001`) in code it did not touch |
 | `cd frontend && npx vite build` | clean (last run in the Phase 0 verify) | not re-run this session |
 
-The `config.yaml` / `config.py` pair was realigned this session (dropped
-`download.default_source` and `spotify.redirect_uri` from both). That fixed 3
-`tests/test_config_drift.py` failures that the half-applied Phase 1 tree had left
-red.
+The `config.yaml` / `config.py` pair was realigned (dropped
+`download.default_source` and `spotify.redirect_uri` from both), fixing 3
+`tests/test_config_drift.py` failures the half-applied Phase 1 tree had left red.
 
 ## Phase 1 detail
 
-### Committed (`3d06bf2`, `2f2833f`)
+### Licence model + attribution — committed (`3d06bf2`, `2f2833f`)
 
 - `LicenseType.PUBLIC_DOMAIN` added. `PERMITTED_LICENSES = {CC0, CC_BY,
   PUBLIC_DOMAIN}` as a frozenset. `is_publishable(info)` and
@@ -53,38 +53,55 @@ red.
 - `SongInfo` schema gained `artist_name` + `license_ccurl`; `_song_info` reads
   both, so `GET /library/<name>` can carry attribution.
 
-### Working tree, uncommitted
+### Config alignment — committed (`f6c0c6c`)
 
+- `scripts/core/config.py` + `config.yaml` dropped `download.default_source` and
+  `spotify.redirect_uri` together (`test_config_drift.py` green).
+
+### Backend teardown — committed
+
+- `git rm` of `scripts/api/routers/downloads.py`,
+  `scripts/api/task_modules/download.py`, `scripts/core/youtube_music.py`.
+  Nothing imported them: the `routes.py` / `tasks.py` / `python_bridge.py` edits
+  had already unwired all three. Verified by import smoke on the app.
 - `scripts/download.py` rewritten as the operator ingest CLI (`python -m
-  scripts.download`). ccMixter and Internet Archive fetchers are implemented.
-  Free Music Archive and Musopen are stubs, marked `API unverified` in the
-  docstring. Two of four sources are real.
+  scripts.download`). ccMixter and Internet Archive fetchers implemented; Free
+  Music Archive and Musopen are stubs marked `API unverified`. Two of four
+  sources real.
 - `scripts/api/routers/spotify.py` cut to metadata only: `/spotify/status`,
   `/spotify/search`, `/spotify/track/{id}`. OAuth, callback, disconnect,
-  playlists, top, and import routes deleted. 252 lines to about 90.
+  playlists, top, import routes deleted. 252 lines to about 90.
 - `scripts/api/routes.py` no longer includes the `downloads` router.
 - `scripts/api/tasks.py` no longer re-exports `task_download` /
   `task_playlist_download`.
-- `scripts/core/config.py` + `config.yaml` dropped `download.default_source` and
-  `spotify.redirect_uri` together.
 - `scripts/core/python_bridge.py` removed the YouTube Music online auto-fetch of
   missing tracks. `online` stays in the signature as a no-op.
+- `requirements.txt` dropped `yt-dlp` and `ytmusicapi`; the LEGAL NOTE block
+  became a MUSIC SOURCING note. **`mutagen` kept** — used by `cue_export.py`
+  (Serato GEOB) and `library.py`.
+- `scripts/core/analysis_pipeline.py` stale `task_download` docstring reference
+  updated.
 
-### Still open before the Phase 1 commit and tick
+### Still open before the Phase 1 tick (additive — the teardown does not block on these)
 
-- Delete `scripts/api/routers/downloads.py` and
-  `scripts/api/task_modules/download.py`. Both still on disk, just unwired.
-- `scripts/core/youtube_music.py` still present, still imports `yt_dlp`.
-- `requirements.txt` still lists `yt-dlp==2026.3.17` and `ytmusicapi==1.10.2`;
-  the LEGAL NOTE block is still there.
 - Real FMA + Musopen fetchers, or an explicit descope to ccMixter + Internet
   Archive for v1.
 - `classify_license` 8-case allow/deny matrix test (one CC-BY and one CC-BY-NC
-  per source). This is the guard the plan calls mandatory.
+  per source). The mandatory guard.
 - `scripts/api/task_modules/remix.py`: write `CREDITS.txt` and a `credits[]`
   array into `manifest.json` from each source song's `license.json`.
 - Frontend: `Operations.tsx` download UI removal, `catalogApi.search`, Spotify
   import buttons in four pages, licence badge on `LibraryAtlas`.
+
+### Deferred, noted (not teardown, not blocking)
+
+- `scripts/core/spotify.py` still carries dead OAuth methods and
+  `spotify_token.json` persistence — nothing live calls them.
+- `scripts/ui/app.py` (Streamlit, not deployed) still references `/download` —
+  dies with the `ui` service in Phase 2.
+- `scripts/core/library.py:87` `_is_downloaded_track` reads `full.info.json`, a
+  `yt-dlp` artefact. Library-hygiene helper; left until it bites.
+- `JobType.DOWNLOAD` kept in `schemas.py` for historical `jobs.db` rows.
 
 ## What is shippable today
 
@@ -95,10 +112,11 @@ The migration has removed capability (all download paths) and added the licence
 model and attribution fields. It has not yet added auth, tenancy, Postgres, mix
 retention, or any deploy artifact.
 
-A realistic next milestone is "Phase 1 committed": finish the teardown, write the
-licence matrix test, wire mix credits, strip the frontend download UI. After that
-the app is a clean single-user CC-catalog remixer with no legal exposure from the
-audio source, which is the precondition for everything in Phases 3 through 8.
+The teardown is now committed. A realistic next milestone is "Phase 1 ticked":
+write the licence matrix test, wire mix credits, strip the frontend download UI,
+and either build the FMA + Musopen fetchers or descope them. After that the app
+is a clean single-user CC-catalog remixer with no legal exposure from the audio
+source, which is the precondition for everything in Phases 3 through 8.
 
 ## Honest gaps against a real hosted product
 

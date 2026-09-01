@@ -10,7 +10,7 @@
 | # | Phase | State | Commit |
 |---|---|---|---|
 | 0 | Guardrails (test isolation fixture) | ☑ verified | 304da7e |
-| 1 | Catalog teardown + enforced CC gate | ◐ in progress | 3d06bf2, 2f2833f (+ uncommitted tree) |
+| 1 | Catalog teardown + enforced CC gate | ◐ in progress — teardown done, additive open | 3d06bf2, 2f2833f, f6c0c6c, + teardown commit |
 | 2 | Guard generative + slim the image | ☐ not started | |
 | 3 | User contextvar + per-user mixes/jobs/crates/feedback | ☐ not started | |
 | 4 | Auth + tenancy (Supabase) | ☐ not started | |
@@ -38,7 +38,9 @@ Legend: ☐ not started · ◐ in progress · ☑ verified
   ```
   Baseline before Phase 0: **675 passed, 90 deselected, ~13s**. After Phase 0: **680
   passed**. After the Phase 1 licence slices + `config.yaml` alignment: **702 passed,
-  90 deselected, ~12s** (801 tests collected repo-wide).
+  90 deselected**. After the backend teardown: **701 passed** — the −1 is a single
+  parametrised case in `test_structured_logger_usage.py` that iterates source files,
+  now one file shorter (`task_modules/download.py` deleted), not a lost assertion.
 - `cd frontend && npx vite build` — clean
 
 ---
@@ -149,7 +151,7 @@ publishable; attribution carried into the API response and every mix.
 
 ### Current state (as of 2026-08-31)
 
-**Committed** (`3d06bf2`, `2f2833f`):
+**Licence model + attribution — committed** (`3d06bf2`, `2f2833f`):
 - [x] `LicenseType.PUBLIC_DOMAIN` added; `PERMITTED_LICENSES = {CC0, CC_BY,
       PUBLIC_DOMAIN}` frozenset; `is_publishable(info)`; `license_enforce_enabled()`
       reads `REMIXMATE_LICENSE_ENFORCE`.
@@ -158,8 +160,18 @@ publishable; attribution carried into the API response and every mix.
 - [x] `save_license()` persists `artist_name`, `license_ccurl`, source URL.
 - [x] `SongInfo` gains `artist_name` + `license_ccurl`; `_song_info` reads both.
 
-**In the working tree, not yet committed** (green: 702 passed; `uvx ruff` on these
-files shows ~52 pre-existing `W293`/`I001` findings, no new logic errors):
+**Config alignment — committed** (`f6c0c6c`):
+- [x] `scripts/core/config.py` + `config.yaml` (edited together — drift guard
+      green): dropped `download.default_source` and `spotify.redirect_uri`.
+
+**Backend teardown — committed** (`<this commit>`; import smoke checks on
+`scripts.api.main` / `.routes` / `.tasks` / `scripts.download` all pass; safe
+subset 701 passed — the −1 vs 702 is one parametrised lint case over the deleted
+`task_modules/download.py`, not a lost assertion):
+- [x] `git rm scripts/api/routers/downloads.py`,
+      `scripts/api/task_modules/download.py`, `scripts/core/youtube_music.py`.
+      Nothing imported them — the working-tree `routes.py` / `tasks.py` /
+      `python_bridge.py` edits had already unwired all three.
 - [x] `scripts/download.py` rewritten as the operator ingest CLI. ccMixter and
       Internet Archive fetchers **implemented**; Free Music Archive and Musopen are
       **stubs** (`# API unverified` in the docstring) — 2 of 4 sources real.
@@ -169,25 +181,36 @@ files shows ~52 pre-existing `W293`/`I001` findings, no new logic errors):
 - [x] `scripts/api/routes.py`: `downloads` router no longer included.
 - [x] `scripts/api/tasks.py`: `task_download` / `task_playlist_download`
       re-exports removed.
-- [x] `scripts/core/config.py` + `config.yaml` (edited together — drift guard
-      green): dropped `download.default_source` and `spotify.redirect_uri`.
 - [x] `scripts/core/python_bridge.py`: removed the `youtube_music` online
       auto-fetch of missing tracks.
+- [x] `requirements.txt`: dropped `yt-dlp` and `ytmusicapi`; replaced the LEGAL
+      NOTE block with a MUSIC SOURCING note. **`mutagen` kept** — still used by
+      `cue_export.py` (Serato GEOB) and `library.py`; the task list below is
+      wrong on this.
+- [x] `scripts/core/analysis_pipeline.py`: stale `task_download` docstring
+      reference updated to `scripts/download.py`.
 
-**Still open for Phase 1** (blocks the commit + tick):
-- [ ] Delete `scripts/api/routers/downloads.py` and
-      `scripts/api/task_modules/download.py` — both still on disk, just unwired.
-- [ ] `scripts/core/youtube_music.py` still present and still imports `yt_dlp` —
-      remove or quarantine.
-- [ ] `requirements.txt`: `yt-dlp==2026.3.17` and `ytmusicapi==1.10.2` still
-      listed; LEGAL NOTE block still present.
+**Still open for Phase 1** (additive — blocks the tick, not the teardown):
 - [ ] Real FMA + Musopen fetchers (or descope to ccMixter + Internet Archive for
-      v1 and say so in the cut list).
-- [ ] `classify_license` 8-case allow/deny matrix test — not written.
+      v1 and add that to the cut list).
+- [ ] `classify_license` 8-case allow/deny matrix test — not written. **Mandatory
+      guard** (see Riskiest parts #2).
 - [ ] `scripts/api/task_modules/remix.py`: `CREDITS.txt` + `manifest.json`
       `credits[]` — not started.
 - [ ] Frontend: `Operations.tsx` download/playlist UI removal, `catalogApi.search`,
       Spotify import buttons, `LibraryAtlas` licence badge — not started.
+
+**Follow-ups noted, deferred** (not teardown, not blocking):
+- `scripts/core/spotify.py` still carries dead OAuth methods (`get_auth_url`,
+  `exchange_code`, `disconnect`, `is_connected`) and `spotify_token.json`
+  persistence. Nothing live calls them. Slim in a later pass.
+- `scripts/ui/app.py` (Streamlit, not deployed) still references `/download` and
+  `/download-playlist` — dies with the `ui` service in Phase 2.
+- `scripts/core/library.py:87` `_is_downloaded_track` reads `full.info.json`
+  (a `yt-dlp` artefact). Library-hygiene helper; leave until it actually bites.
+- `JobType.DOWNLOAD` kept in `schemas.py` — historical `jobs.db` rows still
+  deserialise through it (matches the Phase 2 "keep job types, make unreachable"
+  pattern).
 
 **Tasks**
 - [ ] `scripts/download.py` → operator CLI ingest tool. Delete the `yt_dlp` /
@@ -228,11 +251,11 @@ files shows ~52 pre-existing `W293`/`I001` findings, no new logic errors):
 - [ ] `scripts/api/task_modules/remix.py`: after the `sf.write` calls (L303 /
       L482 / L597) write `outputs/<uid>/<session>/CREDITS.txt` and a `credits: []`
       array into `manifest.json` from each source song's `license.json`.
-- [ ] `requirements.txt`: remove `yt-dlp`, `ytmusicapi`, `mutagen` (verify unused);
-      remove the LEGAL NOTE block.
-- [ ] `config.yaml` + `scripts/core/config.py` **together** (or
-      `tests/test_config_drift.py` fails): drop `download.default_source` and
-      `spotify.redirect_uri`.
+- [x] `requirements.txt`: removed `yt-dlp`, `ytmusicapi` and the LEGAL NOTE block.
+      **`mutagen` stays** — `cue_export.py` (Serato GEOB) and `library.py` both
+      import it. The earlier "(verify unused)" note was wrong.
+- [x] `config.yaml` + `scripts/core/config.py` **together** (`test_config_drift.py`
+      green): dropped `download.default_source` and `spotify.redirect_uri`.
 - [ ] Frontend: `frontend/src/pages/Operations.tsx` — remove the download/playlist
       UI (`downloadApi.playlist` L473, playlist mode L623, `DownloadJobCard` L132)
       and the YouTube ToS copy (L634); page becomes a read-only catalog browser.
