@@ -289,7 +289,7 @@ def classify_license(
         lt = parse_cc_url(license_url or "") or _cc_type_from_text(license_str) or LicenseType.UNKNOWN
         notes = f"Free Music Archive track — {license_url or license_str or 'licence unstated'}"
 
-    elif src in ("internetarchive", "archive.org", "archive_org", "ia"):
+    elif src in ("internetarchive", "archive", "archive.org", "archive_org", "ia"):
         lt = parse_cc_url(license_url or "") or _cc_type_from_text(license_str) or LicenseType.UNKNOWN
         notes = f"Internet Archive item — {license_url or license_str or 'licence unstated'}"
 

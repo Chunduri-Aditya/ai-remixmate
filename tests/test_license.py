@@ -20,29 +20,60 @@ from scripts.core.license import (
     parse_cc_url,
 )
 
-_SOURCES = ["ccmixter", "fma", "internetarchive", "musopen"]
-_BY_URL = "https://creativecommons.org/licenses/by/4.0/"
-_BY_NC_URL = "https://creativecommons.org/licenses/by-nc/4.0/"
+# --- The 8-case source matrix (deployment plan P1 "classify_license matrix") ---------
+#
+# One CC-BY (allow) and one CC-BY-NC (deny) per source, each fed the licence in
+# the *shape that source actually hands to* classify_license (see the fetchers in
+# scripts/download.py):
+#   • ccmixter  — license_url (CC deed) + license_str ("license_name": "Attribution")
+#   • archive   — license_url ("licenseurl" from item metadata); the deny cell is
+#                 text-only, which also guards the "archive" source alias in
+#                 classify_license (without it the branch falls through to the
+#                 generic else, which has no _cc_type_from_text fallback)
+#   • fma       — license_url (embedded CC deed), stubbed fetcher
+#   • musopen   — usually no field -> PUBLIC_DOMAIN; here we pass a contradicting
+#                 CC signal to prove the PD default does not mask it
+#
+# Asserted per cell, not once globally: the resolved LicenseType AND the publish
+# gate (is_publishable). "deny + allow per source" so a gate mutated to accept or
+# reject everything fails this test.
+_MATRIX = [
+    # id,                     source,      kwargs,                                                        expected_type,           publishable
+    ("ccmixter-by",           "ccmixter",  dict(license_url="http://creativecommons.org/licenses/by/3.0/",
+                                                license_str="Attribution"),                               LicenseType.CC_BY,       True),
+    ("ccmixter-by-nc",        "ccmixter",  dict(license_str="Attribution-NonCommercial"),                 LicenseType.CC_BY_NC,    False),
+    ("archive-by",            "archive",   dict(license_url="https://creativecommons.org/licenses/by/4.0/"), LicenseType.CC_BY,     True),
+    ("archive-by-nc",         "archive",   dict(license_str="Attribution-NonCommercial"),                 LicenseType.CC_BY_NC,    False),
+    ("fma-by",                "fma",       dict(license_url="https://creativecommons.org/licenses/by/4.0/"), LicenseType.CC_BY,     True),
+    ("fma-by-nc",             "fma",       dict(license_url="https://creativecommons.org/licenses/by-nc/4.0/"), LicenseType.CC_BY_NC, False),
+    ("musopen-by",            "musopen",   dict(license_url="https://creativecommons.org/licenses/by/4.0/"), LicenseType.CC_BY,     True),
+    ("musopen-by-nc",         "musopen",   dict(license_str="Attribution-NonCommercial"),                 LicenseType.CC_BY_NC,    False),
+]
 
 
-@pytest.mark.parametrize("source", _SOURCES)
-def test_classify_matrix_by_url(source: str) -> None:
-    # allow: CC-BY resolves and is publishable
-    allow = classify_license(source, license_url=_BY_URL)
-    assert allow.license_type is LicenseType.CC_BY
-    assert is_publishable(allow)
-    # deny: CC-BY-NC resolves and is NOT publishable
-    deny = classify_license(source, license_url=_BY_NC_URL)
-    assert deny.license_type is LicenseType.CC_BY_NC
-    assert not is_publishable(deny)
+@pytest.mark.parametrize(
+    "source,kwargs,expected_type,publishable",
+    [(m[1], m[2], m[3], m[4]) for m in _MATRIX],
+    ids=[m[0] for m in _MATRIX],
+)
+def test_source_licence_matrix(source, kwargs, expected_type, publishable) -> None:
+    info = classify_license(source, **kwargs)
+    assert info.license_type is expected_type, (
+        f"{source} {kwargs} -> {info.license_type}, expected {expected_type}"
+    )
+    assert is_publishable(info) is publishable, (
+        f"{source} {kwargs}: gate says {is_publishable(info)}, expected {publishable}"
+    )
 
 
-@pytest.mark.parametrize("source", _SOURCES)
-def test_classify_matrix_by_text(source: str) -> None:
-    allow = classify_license(source, license_str="Attribution 3.0")
-    assert allow.license_type is LicenseType.CC_BY
-    deny = classify_license(source, license_str="Attribution-NonCommercial")
-    assert deny.license_type is LicenseType.CC_BY_NC
+def test_matrix_covers_allow_and_deny_for_every_source() -> None:
+    """Guards the guard: 4 sources x {allow, deny} = 8 cells, no source all-one-way."""
+    seen: dict[str, set[bool]] = {}
+    for _id, source, _kwargs, _lt, publishable in _MATRIX:
+        seen.setdefault(source, set()).add(publishable)
+    assert len(_MATRIX) == 8
+    assert set(seen) == {"ccmixter", "archive", "fma", "musopen"}
+    assert all(outcomes == {True, False} for outcomes in seen.values()), seen
 
 
 def test_musopen_without_any_licence_field_is_public_domain() -> None:
