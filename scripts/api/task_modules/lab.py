@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 from scripts.api.jobs import update_job
 from scripts.core.audit import log_audit
-from scripts.core.paths import OUTPUTS_DIR
+from scripts.core.paths import user_outputs_dir
 
 
 def task_instrument_lab(
@@ -42,7 +42,7 @@ def task_instrument_lab(
 
     # ── Create output directory ───────────────────────────────────────────
     session_id = str(uuid.uuid4())[:8]
-    out_dir = OUTPUTS_DIR / f"lab_{session_id}"
+    out_dir = user_outputs_dir() / f"lab_{session_id}"
 
     # ── Render all combos with progress reporting ─────────────────────────
     def _progress(idx: int, total: int, label: str, result):

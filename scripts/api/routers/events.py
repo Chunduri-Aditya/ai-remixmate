@@ -116,7 +116,7 @@ async def _heartbeat_loop() -> None:
             from scripts.api.jobs import list_jobs  # type: ignore[import]
             from scripts.system.detect_machine import detect, to_dict  # type: ignore[import]
 
-            jobs = list_jobs()
+            jobs = list_jobs(user_id="*")  # box-wide heartbeat, not a user view
             active = sum(
                 1 for j in jobs
                 if str(j["status"]).split(".")[-1].upper() in ("PENDING", "RUNNING")

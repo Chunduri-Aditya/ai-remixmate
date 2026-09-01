@@ -21,7 +21,7 @@ from scripts.api.jobs import update_job
 from scripts.core.audio_source import load_source_audio
 from scripts.core.audit import log_audit
 from scripts.core.license import load_license
-from scripts.core.paths import OUTPUTS_DIR, song_dir
+from scripts.core.paths import song_dir, user_outputs_dir
 
 log = logging.getLogger(__name__)
 
@@ -382,7 +382,7 @@ def task_dj_remix(
     update_job(job_id, progress=0.90, message="Saving output…")
 
     session_id = str(uuid.uuid4())[:8]
-    out_dir = OUTPUTS_DIR / f"dj_{session_id}"
+    out_dir = user_outputs_dir() / f"dj_{session_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"dj_{song_a[:20]}_{song_b[:20]}.wav"
 
@@ -564,7 +564,7 @@ def task_dj_chain(
     update_job(job_id, progress=0.92, message="Saving output…")
 
     session_id = str(uuid.uuid4())[:8]
-    out_dir    = OUTPUTS_DIR / f"chain_{session_id}"
+    out_dir    = user_outputs_dir() / f"chain_{session_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
     chain_label = "_".join(s[:12] for s in songs)[:60]
     out_path   = out_dir / f"chain_{chain_label}.wav"
@@ -685,7 +685,7 @@ def task_remix_preview(
 
     update_job(job_id, progress=0.85, message="Saving preview…")
     session_id = str(uuid.uuid4())[:8]
-    out_dir = OUTPUTS_DIR / session_id
+    out_dir = user_outputs_dir() / session_id
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "preview.wav"
     sf.write(str(out_path), preview_audio, sr, subtype="PCM_16")

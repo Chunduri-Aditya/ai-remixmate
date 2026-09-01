@@ -47,6 +47,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from scripts.api.auth import DEFAULT_USER, current_user, get_user_id
 from scripts.api.schemas import JobResponse, JobStatus, JobType
 from scripts.core.logging_utils import get_logger, set_job_id
 from scripts.core.paths import DATA_DIR
@@ -257,6 +258,10 @@ _load_from_db()
 def create_job(job_type: JobType, meta: Optional[Dict] = None) -> str:
     """Register a new job, persist it, and return its ID."""
     job_id = str(uuid.uuid4())
+    # Stamp the acting user so the worker thread can re-establish context
+    # (ThreadPoolExecutor does not copy contextvars) and list_jobs can scope.
+    meta = dict(meta or {})
+    meta.setdefault("user_id", get_user_id())
     job: Dict[str, Any] = {
         "job_id":      job_id,
         "status":      JobStatus.PENDING,
@@ -269,7 +274,7 @@ def create_job(job_type: JobType, meta: Optional[Dict] = None) -> str:
         "result":      None,
         "error":       None,
         "eta_sec":     None,
-        "meta":        meta or {},
+        "meta":        meta,
     }
     with _lock:
         _jobs[job_id] = job
@@ -342,10 +347,16 @@ def _query_db(job_type: Optional[str], status: Optional[str]) -> list[Dict]:
     return jobs
 
 
+def _job_user(job: Dict) -> str:
+    """Owner of a job row. Legacy rows (no stamped meta.user_id) are 'local'."""
+    return (job.get("meta") or {}).get("user_id") or DEFAULT_USER
+
+
 def list_jobs(
     limit: int = 50,
     job_type: Optional[str] = None,
     status: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> list[Dict]:
     """
     Return the most recent jobs, newest first.
@@ -358,10 +369,24 @@ def list_jobs(
     store holds two serializations of the same enums — legacy rows persisted the
     repr ('JobType.DJ_REMIX', 'JobStatus.DONE') alongside newer rows holding the
     value ('dj_remix', 'done'). Comparing raw strings silently drops the legacy set.
+
+    ``user_id`` scopes the result to one owner. ``None`` (the default) means the
+    acting user from the ``current_user`` contextvar; pass ``"*"`` for the
+    unscoped view (operator health/telemetry only). The scope is applied as the
+    last step on both the in-memory and the SQLite path so the no-argument call
+    used by the job cap is covered too.
     """
+    scope = get_user_id() if user_id is None else user_id
+
+    def _scoped(rows: list[Dict]) -> list[Dict]:
+        if scope == "*":
+            return rows
+        return [j for j in rows if _job_user(j) == scope]
+
     if job_type is None and status is None:
         with _lock:
             jobs = list(_jobs.values())
+        jobs = _scoped(jobs)
         return sorted(jobs, key=lambda j: j["created_at"], reverse=True)[:limit]
 
     jobs = _query_db(job_type=job_type, status=status)
@@ -378,6 +403,8 @@ def list_jobs(
     if status is not None:
         wanted_status = _status_value(status)
         jobs = [j for j in jobs if _status_value(j.get("status")) == wanted_status]
+
+    jobs = _scoped(jobs)
 
     return sorted(jobs, key=lambda j: j["created_at"], reverse=True)[:limit]
 
@@ -510,6 +537,10 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
 
         # Set job ID in context for structured logging within the worker thread
         set_job_id(job_id)
+        # Re-establish the acting user: this runs in an executor thread, which
+        # does NOT inherit the submitting thread's contextvars. Without this
+        # every per-user output path and store write falls back to "local".
+        current_user.set(job.get("meta", {}).get("user_id", DEFAULT_USER))
 
         with _lock:
             job["status"]     = JobStatus.RUNNING

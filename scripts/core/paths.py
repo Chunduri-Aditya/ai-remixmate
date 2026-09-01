@@ -164,9 +164,21 @@ def lyrics_path(song_name: str) -> Path:
 # Output / session helpers
 # ---------------------------------------------------------------------------
 
+def user_outputs_dir() -> Path:
+    """Output root for the acting user — ``outputs/<user_id>/``.
+
+    The user id comes from ``scripts.api.auth.current_user`` (a contextvar,
+    default ``"local"``). Imported lazily so this core module never pulls in
+    the API package at import time.
+    """
+    from scripts.api.auth import get_user_id
+
+    return OUTPUTS_DIR / get_user_id()
+
+
 def session_dir(session_id: str) -> Path:
-    """Return the output directory for a remix session."""
-    return OUTPUTS_DIR / session_id
+    """Return the output directory for a remix session (scoped to the user)."""
+    return user_outputs_dir() / session_id
 
 
 def embeddings_path() -> Path:

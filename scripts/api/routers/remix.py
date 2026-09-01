@@ -33,7 +33,7 @@ from scripts.api.tasks import (
     task_instrument_lab,
     task_remix_preview,
 )
-from scripts.core.paths import LIBRARY_DIR, OUTPUTS_DIR
+from scripts.core.paths import LIBRARY_DIR, user_outputs_dir
 
 router = APIRouter()
 
@@ -186,7 +186,7 @@ def synthesize_beat(
     sr     = 22050
 
     beat_id  = str(uuid.uuid4())[:8]
-    out_dir  = OUTPUTS_DIR / f"beat_{beat_id}"
+    out_dir  = user_outputs_dir() / f"beat_{beat_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
     filename = f"bridge_{genre}_{int(bpm)}bpm_{bars}bars.wav"
     out_path = out_dir / filename
@@ -212,7 +212,7 @@ async def upload_beat(file: UploadFile = File(...)):
     so it can be referenced as a bridge beat in a DJ remix job.
     """
     beat_id  = str(uuid.uuid4())[:8]
-    out_dir  = OUTPUTS_DIR / f"beat_{beat_id}"
+    out_dir  = user_outputs_dir() / f"beat_{beat_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
     # Validate file size (max 100 MB)
     content = await file.read()

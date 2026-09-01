@@ -21,7 +21,9 @@ router = APIRouter()
 @router.get("/health", tags=["system"])
 def health():
     """Basic health check — library size + running jobs."""
-    active_jobs = sum(1 for j in job_store.list_jobs() if j["status"] == "running")
+    active_jobs = sum(
+        1 for j in job_store.list_jobs(user_id="*") if j["status"] == "running"
+    )
     return {
         "status": "ok",
         "library_songs": sum(1 for d in LIBRARY_DIR.iterdir() if d.is_dir()),

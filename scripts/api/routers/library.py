@@ -36,7 +36,7 @@ from scripts.api.schemas import (
 )
 from scripts.api.tasks import task_analyze_missing, task_initialize_library, task_scan_broken
 from scripts.core.logging_utils import get_logger
-from scripts.core.paths import LIBRARY_DIR, OUTPUTS_DIR
+from scripts.core.paths import LIBRARY_DIR, OUTPUTS_DIR, user_outputs_dir
 
 _log = get_logger(__name__)
 
@@ -411,8 +411,11 @@ def stream_output(session_id: str, filename: str):
     safe_filename = Path(filename).name
     if not safe_session or not safe_filename or safe_session != session_id or safe_filename != filename:
         raise HTTPException(status_code=400, detail="Invalid path component.")
-    path = (OUTPUTS_DIR / safe_session / safe_filename).resolve()
-    if not str(path).startswith(str(OUTPUTS_DIR.resolve())):
+    # Anchor on the caller's own output root, not the shared OUTPUTS_DIR — a
+    # traversal that cleared the .name guard must still not reach another user.
+    root = user_outputs_dir()
+    path = (root / safe_session / safe_filename).resolve()
+    if not str(path).startswith(str(root.resolve())):
         raise HTTPException(status_code=400, detail="Invalid path component.")
     if not path.exists():
         raise HTTPException(status_code=404, detail="Output not found")
