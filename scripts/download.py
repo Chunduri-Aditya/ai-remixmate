@@ -1,100 +1,59 @@
 #!/usr/bin/env python3
 """
-scripts/download.py — Unified download entry point for AI RemixMate.
+scripts/download.py — Operator catalogue-ingest tool for AI RemixMate.
 
-Supports:
-  • Single tracks — YouTube Music, YouTube, SoundCloud, or any URL yt-dlp handles
-  • Full playlists — any yt-dlp-compatible playlist URL
-  • Search queries — plain text, resolved via YouTube Music (ytmusicapi) or yt-dlp search
-  • Optional stem separation via Demucs after download
-  • Real-time progress bars (tqdm)
-  • Skip-if-exists deduplication
+NOT a user-facing endpoint. The hosted product serves one shared, operator-curated
+library of Creative-Commons / public-domain music. This module fetches a track
+from a permitted source, verifies its licence, separates stems, analyses it, and
+registers it in library/.
+
+Permitted sources (both the licence *and* the platform's terms allow download +
+derivatives):
+  • ccMixter          — remix-first CC community            (implemented)
+  • Internet Archive   — netlabel / live-music collections   (implemented)
+  • Free Music Archive — CC catalogue                        (stub — API unverified)
+  • Musopen            — public-domain classical             (stub — API unverified)
+
+Every ingest runs classify_license -> is_publishable gate -> Demucs -> analysis.
+The gate rejects non-CC/PD tracks only when REMIXMATE_LICENSE_ENFORCE=1 (set it
+for real ingest; off by default so a local dev library still loads).
 
 Usage:
-  # Single track by search query
-  python -m scripts.download "Eric Prydz Opus" --split
-
-  # Single track from URL
-  python -m scripts.download "https://music.youtube.com/watch?v=XXX" --name "Opus" --split
-
-  # Full playlist
-  python -m scripts.download "https://www.youtube.com/playlist?list=PL..." --playlist
-
-  # From a CSV file (title, optional_url)
-  python -m scripts.download --csv songs.csv --split
-
-Run `python -m scripts.download --help` for all options.
+  python -m scripts.download --source ccmixter "glitch hop" --search-only
+  REMIXMATE_LICENSE_ENFORCE=1 python -m scripts.download --source ccmixter "glitch hop" --pick 2
+  python -m scripts.download --source archive --url <download_url> --name "Artist - Title"
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 import logging
 import re
-import shlex
 import shutil
 import subprocess
 import sys
-
-log = logging.getLogger(__name__)
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional, Dict
+from typing import Callable, Dict, List, Optional
+
+from scripts.core.library import get_library_manager
+from scripts.core.license import (
+    LicenseInfo,
+    classify_license,
+    is_publishable,
+    license_enforce_enabled,
+    license_warning,
+    load_license,
+    save_license,
+)
+from scripts.core.paths import ensure_directories, sanitize_song_name, song_dir
+
+log = logging.getLogger(__name__)
 
 # Progress callback signature: (fraction_0_to_1, human_readable_message)
 ProgressCb = Callable[[float, str], None]
 
-from scripts.core.paths import (
-    LIBRARY_DIR,
-    ensure_directories,
-    song_dir,
-    full_wav_path,
-    vocals_path,
-    other_path,
-)
-from scripts.core.license import (
-    classify_license,
-    license_from_ytdlp_info,
-    license_warning,
-    save_license,
-    LicenseInfo,
-    LicenseType,
-)
-from scripts.core.library import get_library_manager
-
-# ---------------------------------------------------------------------------
-# Dependency checks
-# ---------------------------------------------------------------------------
-
-def _have_bin(name: str) -> bool:
-    return shutil.which(name) is not None
-
-
-def _have_mod(name: str) -> bool:
-    try:
-        __import__(name)
-        return True
-    except Exception:
-        return False
-
-
-def _check_deps() -> bool:
-    ok = True
-    if not (_have_mod("yt_dlp") or _have_bin("yt-dlp")):
-        print("❌  yt-dlp is required. Install: pip install -U yt-dlp")
-        ok = False
-    if not _have_bin("ffmpeg"):
-        print("❌  ffmpeg is required. Install: brew install ffmpeg  (macOS)")
-        ok = False
-    if not _have_mod("demucs"):
-        print("⚠️   demucs not found — stem splitting will be skipped.")
-        print("     Install: pip install demucs")
-    if not _have_mod("ytmusicapi"):
-        print("ℹ️   ytmusicapi not found — using yt-dlp text search instead.")
-        print("     Install for better results: pip install ytmusicapi")
-    return ok
+_HTTP_TIMEOUT = 30  # seconds — catalogue API calls and audio downloads
 
 
 # ---------------------------------------------------------------------------
@@ -102,581 +61,212 @@ def _check_deps() -> bool:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class TrackSpec:
-    """Describes one track to download."""
-    query: str                        # search query or URL
-    name: Optional[str] = None        # desired output name (no extension)
-    separate: bool = False            # run Demucs after download?
-    auto_analyze: bool = True         # run BPM/key/structure analysis after stems?
+class CatalogCandidate:
+    """One track offered by a source fetcher."""
+
+    title: str
+    artist: Optional[str]
+    audio_url: str
+    source: str                        # "ccmixter" | "archive" | "fma" | "musopen"
+    license_url: Optional[str] = None
+    license_str: Optional[str] = None
+    source_url: Optional[str] = None   # the track's page on its origin site
+    duration: Optional[float] = None
+
+    def suggested_name(self) -> str:
+        base = f"{self.artist} - {self.title}" if self.artist else self.title
+        return sanitize_song_name(base)
 
 
 @dataclass
-class DownloadResult:
+class IngestResult:
     name: str
     success: bool
     wav: Optional[Path] = None
     stems: Dict[str, Path] = field(default_factory=dict)
+    license: Optional[LicenseInfo] = None
     error: Optional[str] = None
-    license: Optional[LicenseInfo] = None       # licence metadata for the track
-    license_warning: Optional[str] = None       # pre-formatted human-readable warning
-    analyzed: bool = False                      # BPM/key/structure analysis completed?
-    evicted: List[str] = field(default_factory=list)  # other songs auto-evicted (over cap)
+    analyzed: bool = False
+    rejected_license: Optional[str] = None   # licence_type string when the gate blocked it
 
 
 # ---------------------------------------------------------------------------
-# Legal free-music sources
+# Source fetchers  ->  list[CatalogCandidate]
 # ---------------------------------------------------------------------------
 
-JAMENDO_API = "https://api.jamendo.com/v3.0"
-
-# Jamendo client ID — pulled from config; override via:
-#   config.local.yaml: download.jamendo_client_id: your_key
-#   env var:           REMIXMATE_DOWNLOAD_JAMENDO_CLIENT_ID=your_key
-# Register free at https://devportal.jamendo.com
-try:
-    from scripts.core.config import cfg as _cfg
-    JAMENDO_CLIENT_ID: str = _cfg.download.jamendo_client_id
-except Exception:
-    import os as _os
-    JAMENDO_CLIENT_ID = _os.environ.get("JAMENDO_CLIENT_ID", "")  # set via env var
+def _requests():
+    import requests  # already used across the repo; kept a lazy import here
+    return requests
 
 
-def search_jamendo(query: str, limit: int = 5) -> List[Dict]:
+def fetch_ccmixter(query: str, limit: int = 10) -> List[CatalogCandidate]:
     """
-    Search Jamendo — fully legal, Creative Commons licensed music.
-    Requires an internet connection but NO API key for basic search
-    (uses the public demo client ID above).
-
-    Returns tracks with a direct MP3 stream URL suitable for yt-dlp or requests.
+    ccMixter query API (https://ccmixter.org/query-api). Returns uploads matching
+    `query`, highest rank first. Verify field names against the live API when
+    building the catalogue — ccMixter's JSON has drifted historically.
     """
-    try:
-        import requests as req
-        params = {
-            "client_id": JAMENDO_CLIENT_ID,
-            "format": "json",
-            "limit": limit,
-            "search": query,
-            "audioformat": "mp32",   # 320 kbps MP3
-            "include": "musicinfo",
-        }
-        r = req.get(f"{JAMENDO_API}/tracks/", params=params, timeout=10)
+    req = _requests()
+    r = req.get(
+        "https://ccmixter.org/api/query",
+        params={"f": "json", "search": query, "search_type": "all", "limit": limit, "sort": "rank"},
+        timeout=_HTTP_TIMEOUT,
+    )
+    r.raise_for_status()
+    out: List[CatalogCandidate] = []
+    for up in r.json() or []:
+        files = up.get("files") or []
+        audio = next(
+            (
+                f for f in files
+                if str(f.get("file_format_info", {}).get("mime", "")).startswith("audio")
+                or str(f.get("download_url", "")).lower().endswith((".mp3", ".flac", ".ogg", ".wav"))
+            ),
+            None,
+        )
+        if not audio:
+            continue
+        out.append(CatalogCandidate(
+            title=up.get("upload_name") or query,
+            artist=up.get("user_real_name") or up.get("user_name"),
+            audio_url=audio["download_url"],
+            source="ccmixter",
+            license_url=up.get("license_url"),
+            license_str=up.get("license_name"),
+            source_url=up.get("file_page"),
+        ))
+    return out
+
+
+_IA_AUDIO_FORMATS = {"VBR MP3", "MP3", "128Kbps MP3", "FLAC", "Ogg Vorbis", "AIFF"}
+
+
+def fetch_internet_archive(query: str, limit: int = 10) -> List[CatalogCandidate]:
+    """
+    Internet Archive: advancedsearch for audio items, then per-item metadata to
+    resolve a concrete audio file. `query` may be a plain search or a bare
+    item identifier.
+    """
+    req = _requests()
+
+    if " " not in query and re.fullmatch(r"[A-Za-z0-9._-]{3,120}", query):
+        docs: List[dict] = [{"identifier": query}]
+    else:
+        r = req.get(
+            "https://archive.org/advancedsearch.php",
+            params={
+                "q": f"({query}) AND mediatype:audio",
+                "fl[]": ["identifier", "title", "creator", "licenseurl"],
+                "rows": limit,
+                "output": "json",
+            },
+            timeout=_HTTP_TIMEOUT,
+        )
         r.raise_for_status()
-        data = r.json()
-        results = []
-        for t in data.get("results", []):
-            results.append({
-                "title": t.get("name", query),
-                "artist": t.get("artist_name"),
-                "url": t.get("audio"),       # direct MP3 URL
-                "duration": t.get("duration"),
-                "license": t.get("license_ccurl"),
-                "source": "jamendo",
-            })
-        return results
-    except Exception:
-        return []
+        docs = r.json().get("response", {}).get("docs", [])
 
-
-def download_jamendo_track(url: str, name: str) -> Optional[Path]:
-    """
-    Download a Jamendo MP3 stream and convert to WAV.
-    Jamendo allows downloading for non-commercial use under CC licences.
-    """
-    from scripts.core.paths import song_dir, ensure_directories
-    ensure_directories()
-    dest_dir = song_dir(name)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    wav_dest = dest_dir / "full.wav"
-
-    if wav_dest.exists():
-        return wav_dest
-
-    # Use yt-dlp (handles direct MP3 URLs cleanly) or fall back to requests
-    try:
-        import yt_dlp  # type: ignore
-        opts = {
-            "format": "bestaudio/best",
-            "outtmpl": str(dest_dir / "full.%(ext)s"),
-            "postprocessors": [{"key": "FFmpegExtractAudio",
-                                 "preferredcodec": "wav", "preferredquality": "0"}],
-            "quiet": False,
-        }
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([url])
-        if wav_dest.exists():
-            return wav_dest
-    except Exception:
-        pass
-
-    # Fallback: requests streaming download → ffmpeg convert
-    try:
-        import requests as req
-        mp3_path = dest_dir / "full.mp3"
-        with req.get(url, stream=True, timeout=30) as r:
-            r.raise_for_status()
-            with open(mp3_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=65536):
-                    f.write(chunk)
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", str(mp3_path),
-             "-ac", "1", "-ar", "44100", str(wav_dest)],
-            check=True, capture_output=True,
+    out: List[CatalogCandidate] = []
+    for doc in docs[:limit]:
+        ident = doc["identifier"]
+        m = req.get(f"https://archive.org/metadata/{ident}", timeout=_HTTP_TIMEOUT)
+        m.raise_for_status()
+        meta = m.json()
+        md = meta.get("metadata", {})
+        file_obj = next(
+            (f for f in meta.get("files", []) if f.get("format") in _IA_AUDIO_FORMATS), None
         )
-        mp3_path.unlink(missing_ok=True)
-        return wav_dest
-    except Exception:
-        return None
+        if not file_obj:
+            continue
+        creator = md.get("creator") or doc.get("creator")
+        if isinstance(creator, list):
+            creator = creator[0] if creator else None
+        out.append(CatalogCandidate(
+            title=md.get("title") or doc.get("title") or ident,
+            artist=creator,
+            audio_url=f"https://archive.org/download/{ident}/{file_obj['name']}",
+            source="archive",
+            license_url=md.get("licenseurl") or doc.get("licenseurl"),
+            source_url=f"https://archive.org/details/{ident}",
+        ))
+    return out
 
 
-# ---------------------------------------------------------------------------
-# Search
-# ---------------------------------------------------------------------------
-
-def search_track(query: str, limit: int = 5, source: str = "auto") -> List[Dict]:
-    """
-    Return a ranked list of candidate tracks for a free-text query.
-
-    source options:
-      "auto"     — ytmusicapi → yt-dlp search (YouTube; personal use)
-      "youtube"  — yt-dlp text search only
-      "jamendo"  — Jamendo only (CC licensed, fully legal for commercial use)
-      "all"      — Jamendo first, then YouTube results appended
-
-    Tries ytmusicapi first (richer metadata), falls back to yt-dlp search.
-    """
-    results: List[Dict] = []
-
-    # --- Jamendo (legal CC music) ---
-    if source in ("jamendo", "all"):
-        results.extend(search_jamendo(query, limit=limit))
-        if source == "jamendo":
-            return results[:limit]
-
-    # --- YouTube / YouTube Music (personal use) ---
-    if source in ("auto", "youtube", "all"):
-        if _have_mod("ytmusicapi") and source != "youtube":
-            try:
-                from ytmusicapi import YTMusic  # type: ignore
-                ytm = YTMusic()
-                hits = ytm.search(query, filter="songs", limit=limit)
-                for h in hits:
-                    vid = h.get("videoId")
-                    artists = h.get("artists") or []
-                    results.append({
-                        "title": h.get("title", query),
-                        "artist": artists[0]["name"] if artists else None,
-                        "url": f"https://music.youtube.com/watch?v={vid}" if vid else "",
-                        "duration": None,
-                        "source": "ytmusicapi",
-                    })
-                if results:
-                    return results[:limit]
-            except Exception:
-                pass  # fall through to yt-dlp
-
-    # yt-dlp text search fallback
-    if source in ("auto", "youtube", "all"):
-        try:
-            import yt_dlp  # type: ignore
-            opts = {
-                "quiet": True,
-                "no_warnings": True,
-                "extract_flat": True,
-            }
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
-                for entry in (info.get("entries") or []):
-                    results.append({
-                        "title": entry.get("title", query),
-                        "artist": entry.get("uploader"),
-                    "url": entry.get("webpage_url") or entry.get("url", ""),
-                    "duration": entry.get("duration"),
-                    "source": "yt-dlp",
-                })
-        except Exception:
-            pass
-
-    return results[:limit]
-
-
-# ---------------------------------------------------------------------------
-# Core download
-# ---------------------------------------------------------------------------
-
-def _sanitize(name: str) -> str:
-    """
-    Return a filesystem-safe version of a track name.
-
-    Delegates to scripts.core.paths.sanitize_song_name() — the single
-    source of truth shared with _SAFE_SONG_NAME_RE (routers/_helpers.py).
-    This used to be its own independent blocklist (only stripping
-    Windows-reserved chars), which let punctuation through that the API's
-    stricter allowlist then permanently rejected on every subsequent
-    request for that song. Keeping one shared definition means a name
-    written to disk here can never become unreadable later.
-    """
-    from scripts.core.paths import sanitize_song_name
-    return sanitize_song_name(name)
-
-
-def _resolve_url(spec: TrackSpec) -> tuple[str, str]:
-    """
-    Return (url, resolved_name) for a TrackSpec.
-    If spec.query is a URL/ID it is used directly; otherwise a search is performed.
-    """
-    query = spec.query
-    is_url = query.startswith("http://") or query.startswith("https://")
-    is_id  = bool(re.match(r"^[\w-]{11}$", query))
-
-    if is_url or is_id:
-        url  = query if is_url else f"https://www.youtube.com/watch?v={query}"
-        name = spec.name or _sanitize(query)
-        return url, name
-
-    # Text search
-    hits = search_track(query, limit=1)
-    if hits:
-        url  = hits[0]["url"]
-        name = spec.name or _sanitize(hits[0]["title"])
-        return url, name
-
-    # Last resort: pass query directly to yt-dlp as a search
-    return f"ytsearch1:{query}", spec.name or _sanitize(query)
-
-
-def download_track(spec: TrackSpec, progress_cb: Optional[ProgressCb] = None) -> DownloadResult:
-    """
-    Download a single track and (optionally) split into stems.
-    Output lives in library/<name>/ .
-
-    progress_cb, if given, receives (fraction 0.0–1.0, message) covering the
-    whole pipeline: resolve → yt-dlp download → WAV convert → stems → register.
-    """
-    ensure_directories()
-
-    def _emit(frac: float, msg: str) -> None:
-        if progress_cb is None:
-            return
-        try:
-            progress_cb(min(max(frac, 0.0), 1.0), msg)
-        except Exception:
-            pass
-
-    _emit(0.01, "Resolving track…")
-    url, name = _resolve_url(spec)
-    dest_dir  = song_dir(name)
-    wav_dest  = dest_dir / "full.wav"
-
-    # --- Skip if already downloaded ---
-    if wav_dest.exists():
-        print(f"⏩  Skipping (already in library): {name}")
-        _emit(1.0, f"Already in library: {name}")
-        result = DownloadResult(name=name, success=True, wav=wav_dest)
-        if spec.separate:
-            result.stems = _collect_stems(name)
-        # Attach existing licence info if present
-        try:
-            from scripts.core.license import load_license as _ll
-            existing_lic = _ll(dest_dir)
-            if existing_lic:
-                result.license = existing_lic
-                warn = license_warning(existing_lic, name)
-                if warn:
-                    result.license_warning = warn
-                    print(warn)
-        except Exception:
-            pass
-        return result
-
-    # --- Duplicate detection (same audio under a different name) ---
-    # We skip this pre-download since we don't have the WAV yet;
-    # it's done post-download in the fingerprint step below.
-
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    # --- Download via yt-dlp ---
-    print(f"⬇️   Downloading: {name}")
-    _emit(0.03, f"Downloading: {name}")
-
-    def _ydl_hook(d: Dict) -> None:
-        status = d.get("status")
-        if status == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate")
-            done = d.get("downloaded_bytes") or 0
-            if total:
-                frac = done / total
-                # yt-dlp download occupies the 3%–40% window of the pipeline
-                _emit(0.03 + 0.37 * frac, f"Downloading audio… {int(frac * 100)}%")
-        elif status == "finished":
-            _emit(0.40, "Converting to WAV…")
-
-    try:
-        import yt_dlp  # type: ignore
-        tmp_tmpl = str(dest_dir / "full.%(ext)s")
-        ydl_opts = {
-            "progress_hooks": [_ydl_hook],
-            "format": "bestaudio[acodec=opus]/bestaudio[acodec=aac][abr>128]/bestaudio/best",
-            "outtmpl": tmp_tmpl,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "wav",
-                "preferredquality": "0",
-            }],
-            "quiet": False,
-            "no_warnings": False,
-            "no_playlist": True,       # single track only in this function
-            "prefer_free_formats": True,
-            "writethumbnail": False,
-            "writeinfojson": True,     # save metadata alongside WAV
-            "outtmpl_na_placeholder": "",
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception as e:
-        return DownloadResult(name=name, success=False, error=str(e))
-
-    if not wav_dest.exists():
-        return DownloadResult(name=name, success=False,
-                              error="WAV not produced after download.")
-
-    print(f"✅  Saved: {wav_dest}")
-    _emit(0.45, "Saving licence metadata…")
-
-    # --- Classify and save licence ---
-    lic_info = _extract_and_save_license(name, dest_dir, url)
-
-    # --- Duplicate detection (fingerprint) ---
-    try:
-        mgr = get_library_manager()
-        dup = mgr.find_duplicate(wav_dest)
-        if dup and dup != name:
-            print(
-                f"⚠️  Possible duplicate detected! '{name}' looks identical to "
-                f"'{dup}' already in the library."
-            )
-    except Exception:
-        pass
-
-    # --- Optional stem separation ---
-    stems: Dict[str, Path] = {}
-    if spec.separate:
-        # Demucs occupies the 50%–95% window of the pipeline
-        stems = _separate_stems(
-            name, wav_dest,
-            progress_cb=(lambda p, m: _emit(0.50 + 0.45 * p, m)) if progress_cb else None,
-        )
-
-    # --- Auto-analyze (BPM/key/structure) — MUST run before the prune step
-    # below. prune_on_download defaults to True and deletes full.wav right
-    # after stems are produced; analysis needs full.wav, so it has to run
-    # first or it would fail for every single download.
-    analyzed = False
-    if stems and spec.auto_analyze:
-        _emit(0.95, "Analyzing…")
-        try:
-            from scripts.core.analysis_pipeline import run_song_analysis
-            run_song_analysis(name)
-            analyzed = True
-        except Exception as exc:
-            print(f"⚠️  Auto-analyze failed for '{name}' (non-critical): {exc}")
-
-    # --- Smart storage: prune raw WAV / redundant enhanced WAV if stems
-    # were produced. _separate_stems() above runs with enhance=False, so
-    # full_enhanced.wav normally doesn't exist for a fresh download — but a
-    # re-download of a song name that already had a stray full_enhanced.wav
-    # left over from an earlier interrupted attempt (the exact backlog shape
-    # this session started from) would otherwise leave that duplicate
-    # unpruned forever, since nothing else in this script ever cleans it up.
-    if stems and _PRUNE_ON_DL:
-        try:
-            mgr = get_library_manager()
-            mgr.prune_raw(name)
-            mgr.prune_enhanced(name)
-        except Exception:
-            pass
-
-    # --- Register in library index + store fingerprint ---
-    _emit(0.96, "Registering in library…")
-    evicted: List[str] = []
-    try:
-        mgr = get_library_manager()
-        mgr.register(name, source=_source_from_url(url))
-        mgr.store_fingerprint(name, wav_dest if wav_dest.exists() else dest_dir / "vocals.wav")
-        # Evict LRU songs if library is over cap — this can delete OTHER,
-        # older songs' full.wav (or whole song dirs) without the caller
-        # asking for it. Surfaced via DownloadResult.evicted so the API/UI
-        # can tell the user what happened instead of it being invisible.
-        if _AUTO_EVICT:
-            evicted = mgr.evict_lru() or []
-    except Exception:
-        pass
-
-    # --- Licence warning for user ---
-    warn_str: Optional[str] = None
-    if lic_info:
-        warn_str = license_warning(lic_info, name)
-        if warn_str:
-            print(warn_str)
-
-    _emit(1.0, f"Done: {name}")
-    return DownloadResult(
-        name=name,
-        success=True,
-        wav=wav_dest if wav_dest.exists() else None,
-        stems=stems,
-        license=lic_info,
-        license_warning=warn_str,
-        analyzed=analyzed,
-        evicted=evicted,
+def fetch_fma(query: str, limit: int = 10) -> List[CatalogCandidate]:
+    raise NotImplementedError(
+        "Free Music Archive fetcher not implemented — verify the current FMA API "
+        "contract during catalogue build, then wire it here."
     )
 
 
-# ---------------------------------------------------------------------------
-# Playlist download
-# ---------------------------------------------------------------------------
+def fetch_musopen(query: str, limit: int = 10) -> List[CatalogCandidate]:
+    raise NotImplementedError(
+        "Musopen fetcher not implemented — verify the Musopen API / download "
+        "contract during catalogue build, then wire it here."
+    )
 
-def download_playlist(url: str, separate: bool = False) -> List[DownloadResult]:
-    """
-    Download all tracks from a yt-dlp-compatible playlist URL.
-    Each track lands in library/<track_name>/ .
-    """
-    ensure_directories()
 
-    print(f"📋  Fetching playlist info: {url}")
+_FETCHERS: Dict[str, Callable[[str, int], List[CatalogCandidate]]] = {
+    "ccmixter": fetch_ccmixter,
+    "archive": fetch_internet_archive,
+    "internetarchive": fetch_internet_archive,
+    "fma": fetch_fma,
+    "musopen": fetch_musopen,
+}
+
+
+def search_catalog(source: str, query: str, limit: int = 10) -> List[CatalogCandidate]:
     try:
-        import yt_dlp  # type: ignore
-        info_opts = {"quiet": True, "extract_flat": True, "no_warnings": True}
-        with yt_dlp.YoutubeDL(info_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception as e:
-        print(f"❌  Could not fetch playlist: {e}")
-        return []
-
-    entries = info.get("entries") or []
-    if not entries:
-        print("⚠️  Playlist appears to be empty.")
-        return []
-
-    total = len(entries)
-    print(f"🎵  Found {total} tracks in playlist: {info.get('title', url)}")
-
-    results: List[DownloadResult] = []
-    for i, entry in enumerate(entries, 1):
-        vid  = entry.get("id") or entry.get("url", "")
-        title = _sanitize(entry.get("title") or f"track_{i:03d}")
-        track_url = entry.get("webpage_url") or entry.get("url") or f"https://www.youtube.com/watch?v={vid}"
-        print(f"\n[{i}/{total}] {title}")
-        spec = TrackSpec(query=track_url, name=title, separate=separate)
-        results.append(download_track(spec))
-
-    _print_summary(results)
-    return results
+        fetcher = _FETCHERS[source.lower()]
+    except KeyError:
+        raise ValueError(
+            f"Unknown source {source!r}. Options: {', '.join(sorted(_FETCHERS))}"
+        )
+    return fetcher(query, limit)
 
 
 # ---------------------------------------------------------------------------
-# CSV batch download
+# Audio download  (requests stream -> ffmpeg -> full.wav)
 # ---------------------------------------------------------------------------
 
-def download_from_csv(csv_path: Path, separate: bool = False) -> List[DownloadResult]:
-    """
-    Read a CSV with columns  title[, url]  and download each row.
-    The URL column is optional; if absent a search query is used.
-    """
-    with csv_path.open(newline="", encoding="utf-8") as f:
-        rows = list(csv.reader(f))
-
-    if not rows:
-        print("⚠️  CSV is empty.")
-        return []
-
-    # Strip optional header
-    if rows[0] and rows[0][0].strip().lower() in {"title", "song", "name", "track"}:
-        rows = rows[1:]
-
-    specs: List[TrackSpec] = []
-    for row in rows:
-        if not row:
-            continue
-        title = row[0].strip()
-        url   = row[1].strip() if len(row) > 1 else ""
-        query = url if url.startswith("http") else title
-        specs.append(TrackSpec(query=query, name=_sanitize(title), separate=separate))
-
-    print(f"📋  Processing {len(specs)} tracks from {csv_path.name}...")
-    results = [download_track(s) for s in specs]
-    _print_summary(results)
-    return results
+def _download_audio(url: str, dest_dir: Path, progress_cb: Optional[ProgressCb] = None) -> Path:
+    """Stream `url` to a temp file and transcode to dest_dir/full.wav (mono 44.1k)."""
+    req = _requests()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    wav_path = dest_dir / "full.wav"
+    suffix = Path(url.split("?", 1)[0]).suffix.lower() or ".audio"
+    tmp = dest_dir / f"_download{suffix}"
+    with req.get(url, stream=True, timeout=_HTTP_TIMEOUT) as r:
+        r.raise_for_status()
+        total = int(r.headers.get("content-length") or 0)
+        done = 0
+        with open(tmp, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1 << 16):
+                f.write(chunk)
+                done += len(chunk)
+                if progress_cb and total:
+                    progress_cb(0.05 + 0.25 * done / total, f"Downloading… {done * 100 // total}%")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", str(tmp), "-ac", "1", "-ar", "44100", str(wav_path)],
+        check=True, capture_output=True,
+    )
+    tmp.unlink(missing_ok=True)
+    return wav_path
 
 
 # ---------------------------------------------------------------------------
-# Licence helpers
+# Stem separation  (delegates to scripts.core.stems for venv / logic parity)
 # ---------------------------------------------------------------------------
 
-# Read pruning preference from config (same default as library.py)
 try:
     from scripts.core.config import cfg as _cfg_dl
-    _PRUNE_ON_DL: bool   = getattr(getattr(_cfg_dl, "library", None), "prune_on_download", True)
-    _AUTO_EVICT: bool    = getattr(getattr(_cfg_dl, "library", None), "auto_evict_on_download", True)
+    _PRUNE_ON_DL: bool = getattr(getattr(_cfg_dl, "library", None), "prune_on_download", True)
 except Exception:
     _PRUNE_ON_DL = True
-    _AUTO_EVICT  = True
 
-
-def _source_from_url(url: str) -> str:
-    """Guess source name from a URL string."""
-    url_lower = url.lower()
-    if "jamendo" in url_lower:
-        return "jamendo"
-    if "soundcloud" in url_lower:
-        return "soundcloud"
-    if "youtube" in url_lower or "youtu.be" in url_lower:
-        return "youtube"
-    return "yt-dlp"
-
-
-def _extract_and_save_license(
-    name: str, dest_dir: Path, url: str
-) -> Optional[LicenseInfo]:
-    """
-    Try to extract licence info from yt-dlp's info.json, classify it,
-    save it to  library/<name>/license.json , and return the LicenseInfo.
-    """
-    try:
-        source = _source_from_url(url)
-
-        # yt-dlp writes <song>/full.info.json
-        info_json = dest_dir / "full.info.json"
-        if info_json.exists():
-            lic = license_from_ytdlp_info(info_json, source=source)
-        else:
-            lic = classify_license(source)
-
-        save_license(dest_dir, lic)
-        return lic
-    except Exception as e:
-        log.debug("Could not extract/save licence for '%s': %s", name, e)
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Stem separation
-# ---------------------------------------------------------------------------
 
 def _separate_stems(
-    song_name: str,
-    wav_path: Path,
-    progress_cb: Optional[ProgressCb] = None,
+    song_name: str, wav_path: Path, progress_cb: Optional[ProgressCb] = None
 ) -> Dict[str, Path]:
-    """
-    Run Demucs on wav_path; place stems directly in library/<song_name>/.
-
-    Delegates to scripts.core.stems.separate_song_stems() so the correct
-    venv Python is always used and logic is never duplicated.
-    """
-    print(f"🎛️   Separating stems for: {song_name}")
-
     def _report(p: float, m: str) -> None:
-        print(f"   [{int(p*100):3d}%] {m}")
         if progress_cb:
             try:
                 progress_cb(p, m)
@@ -685,48 +275,132 @@ def _separate_stems(
 
     try:
         from scripts.core.stems import separate_song_stems
-        result = separate_song_stems(
-            song_name,
-            enhance=False,       # download pipeline: skip enhance, just split
-            progress_cb=_report,
-        )
+        result = separate_song_stems(song_name, enhance=False, progress_cb=_report)
         if result.success:
-            for stem in result.stems:
-                print(f"   ✅ {stem}.wav")
             return result.stems
-        else:
-            print(f"❌  Stem separation failed: {result.error}")
-            return {}
-    except Exception as e:
-        print(f"❌  Stem separation error: {e}")
+        log.warning("Stem separation failed for %r: %s", song_name, result.error)
+        return {}
+    except Exception as exc:
+        log.warning("Stem separation error for %r: %s", song_name, exc)
         return {}
 
 
 def _collect_stems(song_name: str) -> Dict[str, Path]:
-    """Return any stems already present in library/<song_name>/."""
     d = song_dir(song_name)
-    stems = {}
-    for stem in ("vocals", "drums", "bass", "other"):
-        p = d / f"{stem}.wav"
-        if p.exists():
-            stems[stem] = p
-    return stems
+    return {s: d / f"{s}.wav" for s in ("vocals", "drums", "bass", "other") if (d / f"{s}.wav").exists()}
+
+
+def _has_stems(song_dir_path: Path) -> bool:
+    return any(
+        (song_dir_path / f"{s}.{ext}").exists()
+        for s in ("vocals", "drums", "bass", "other")
+        for ext in ("flac", "wav")
+    )
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Ingest pipeline
 # ---------------------------------------------------------------------------
 
-def _print_summary(results: List[DownloadResult]) -> None:
-    passed = [r for r in results if r.success]
-    failed = [r for r in results if not r.success]
-    print(f"\n{'='*55}")
-    print(f"✅  {len(passed)}/{len(results)} tracks downloaded successfully")
-    if failed:
-        print(f"❌  {len(failed)} failed:")
-        for r in failed:
-            print(f"     • {r.name}: {r.error}")
-    print(f"{'='*55}\n")
+def ingest_track(
+    candidate: CatalogCandidate,
+    name: Optional[str] = None,
+    separate: bool = True,
+    auto_analyze: bool = True,
+    progress_cb: Optional[ProgressCb] = None,
+) -> IngestResult:
+    """
+    Fetch -> licence-classify -> publish gate -> stems -> analyse -> register.
+
+    The gate (reject anything is_publishable() == False) is enforced only when
+    license_enforce_enabled(). On rejection nothing is downloaded and
+    IngestResult.success is False with rejected_license set.
+    """
+    ensure_directories()
+    name = name or candidate.suggested_name()
+    dest_dir = song_dir(name)
+
+    def _emit(frac: float, msg: str) -> None:
+        if progress_cb:
+            try:
+                progress_cb(min(max(frac, 0.0), 1.0), msg)
+            except Exception:
+                pass
+
+    if (dest_dir / "full.wav").exists() or _has_stems(dest_dir):
+        _emit(1.0, f"Already in library: {name}")
+        return IngestResult(
+            name=name, success=True, wav=dest_dir / "full.wav",
+            stems=_collect_stems(name), license=load_license(dest_dir),
+        )
+
+    # 1. classify the licence first so a rejection costs no download
+    info = classify_license(
+        candidate.source, license_url=candidate.license_url, license_str=candidate.license_str
+    )
+    info.artist_name = candidate.artist
+    info.source_url = candidate.source_url
+
+    if license_enforce_enabled() and not is_publishable(info):
+        log.warning("Rejected %r — licence %s is not publishable", name, info.license_type.value)
+        return IngestResult(
+            name=name, success=False, rejected_license=info.license_type.value,
+            error=f"licence {info.license_type.value} not permitted in the catalogue",
+        )
+
+    # 2. download audio
+    _emit(0.05, f"Fetching {name}…")
+    try:
+        wav = _download_audio(candidate.audio_url, dest_dir, progress_cb=_emit)
+    except Exception as exc:
+        shutil.rmtree(dest_dir, ignore_errors=True)
+        return IngestResult(name=name, success=False, error=f"download failed: {exc}")
+
+    # 3. persist licence
+    save_license(dest_dir, info)
+
+    # 4. stems
+    stems: Dict[str, Path] = {}
+    if separate:
+        _emit(0.35, "Separating stems…")
+        stems = _separate_stems(name, wav, progress_cb=lambda p, m: _emit(0.35 + 0.5 * p, m))
+
+    # 5. analysis — needs full.wav, so before any prune
+    analyzed = False
+    if stems and auto_analyze:
+        _emit(0.88, "Analysing…")
+        try:
+            from scripts.core.analysis_pipeline import run_song_analysis
+            run_song_analysis(name)
+            analyzed = True
+        except Exception as exc:
+            log.warning("Analysis failed for %r (non-fatal): %s", name, exc)
+
+    # 6. prune raw/enhanced WAV once stems exist, then register
+    if stems and _PRUNE_ON_DL:
+        try:
+            mgr = get_library_manager()
+            mgr.prune_raw(name)
+            mgr.prune_enhanced(name)
+        except Exception:
+            pass
+
+    _emit(0.96, "Registering…")
+    try:
+        mgr = get_library_manager()
+        mgr.register(name, source=candidate.source)
+        mgr.store_fingerprint(name, wav if wav.exists() else dest_dir / "vocals.wav")
+    except Exception:
+        pass
+
+    warn = license_warning(info, name)
+    if warn:
+        log.info("%s", warn)
+    _emit(1.0, f"Done: {name}")
+    return IngestResult(
+        name=name, success=True, wav=wav if wav.exists() else None,
+        stems=stems, license=info, analyzed=analyzed,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -736,113 +410,65 @@ def _print_summary(results: List[DownloadResult]) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m scripts.download",
-        description="AI RemixMate — download songs from YouTube Music, YouTube, or any URL",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Search and download a single track
-  python -m scripts.download "Eric Prydz Opus" --split
-
-  # Download from a URL with a custom name
-  python -m scripts.download "https://music.youtube.com/watch?v=XXX" --name "Opus"
-
-  # Download an entire playlist
-  python -m scripts.download "https://www.youtube.com/playlist?list=PL..." --playlist
-
-  # Batch download from a CSV file
-  python -m scripts.download --csv songs.csv --split
-
-  # Search and show top results (no download)
-  python -m scripts.download "Deadmau5 Strobe" --search-only
-""",
+        description="Operator catalogue-ingest tool (CC / public-domain sources only)",
     )
-    p.add_argument("query", nargs="?", help="Search query, URL, or YouTube video ID")
-    p.add_argument("--name", help="Custom output name (no extension)")
-    p.add_argument("--split", action="store_true", help="Separate into stems with Demucs")
-    p.add_argument("--playlist", action="store_true",
-                   help="Treat query as a playlist URL and download all tracks")
-    p.add_argument("--csv", metavar="FILE",
-                   help="CSV file with columns: title[, url]")
-    p.add_argument("--search-only", action="store_true",
-                   help="Show top search results without downloading")
-    p.add_argument("--limit", type=int, default=5,
-                   help="Number of search results to show with --search-only (default: 5)")
-    p.add_argument(
-        "--source",
-        choices=["auto", "youtube", "jamendo", "all"],
-        default="auto",
-        help=(
-            "Music source:  auto (YouTube Music → YouTube, default) | "
-            "youtube (YouTube only) | "
-            "jamendo (CC-licensed music, fully legal) | "
-            "all (Jamendo + YouTube combined)"
-        ),
-    )
+    p.add_argument("query", nargs="?", help="search query, or a bare source id (Internet Archive)")
+    p.add_argument("--source", required=True, choices=sorted(_FETCHERS), help="catalogue source")
+    p.add_argument("--url", help="direct audio download URL (skip search; requires --name)")
+    p.add_argument("--name", help="library name (default: 'Artist - Title')")
+    p.add_argument("--no-split", action="store_true", help="skip Demucs stem separation")
+    p.add_argument("--limit", type=int, default=10, help="max search results (default 10)")
+    p.add_argument("--search-only", action="store_true", help="list candidates, do not ingest")
+    p.add_argument("--pick", type=int, default=1, metavar="N",
+                   help="ingest the Nth search result (default 1)")
     return p
 
 
 def main() -> int:
-    parser = _build_parser()
-    args   = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    args = _build_parser().parse_args()
 
-    if not _check_deps():
+    if not shutil.which("ffmpeg"):
+        print("ffmpeg is required.", file=sys.stderr)
         return 1
+    if not license_enforce_enabled():
+        log.info("note: REMIXMATE_LICENSE_ENFORCE is not set — the publish gate is advisory only")
 
-    # ── Search-only mode ──────────────────────────────────────────────────
-    if args.search_only:
-        if not args.query:
-            print("❌  Provide a query with --search-only.")
+    if args.url:
+        if not args.name:
+            print("--url requires --name", file=sys.stderr)
             return 1
-        hits = search_track(args.query, limit=args.limit, source=args.source)
-        if not hits:
-            print("No results found.")
-            return 0
-        print(f"\n🔍  Top {len(hits)} results for: {args.query}  [source: {args.source}]\n")
-        for i, h in enumerate(hits, 1):
-            dur_raw = h.get("duration")
-            if dur_raw and isinstance(dur_raw, (int, float)):
-                dur = f"{int(dur_raw)//60}:{int(dur_raw)%60:02d}"
-            else:
-                dur = "?:??"
-            artist  = h.get("artist") or "Unknown"
-            src_tag = f"[{h.get('source', '?')}]"
-            license_ = f"  📜 {h['license']}" if h.get("license") else ""
-            print(f"  {i}. {h['title']} — {artist}  [{dur}]  {src_tag}{license_}")
-            print(f"     {h['url']}")
-        return 0
+        cand = CatalogCandidate(title=args.name, artist=None, audio_url=args.url, source=args.source)
+        res = ingest_track(cand, name=args.name, separate=not args.no_split)
+        print(f"ingested: library/{res.name}/" if res.success else f"failed: {res.error}")
+        return 0 if res.success else 1
 
-    # ── CSV batch mode ────────────────────────────────────────────────────
-    if args.csv:
-        csv_path = Path(args.csv)
-        if not csv_path.exists():
-            print(f"❌  CSV not found: {csv_path}")
-            return 1
-        download_from_csv(csv_path, separate=args.split)
-        return 0
-
-    # ── Require a query for everything else ───────────────────────────────
     if not args.query:
-        parser.print_help()
+        print("provide a search query or --url", file=sys.stderr)
         return 1
 
-    # ── Playlist mode ─────────────────────────────────────────────────────
-    if args.playlist:
-        download_playlist(args.query, separate=args.split)
+    cands = search_catalog(args.source, args.query, limit=args.limit)
+    if not cands:
+        print("no results")
         return 0
 
-    # ── Single track ──────────────────────────────────────────────────────
-    spec   = TrackSpec(query=args.query, name=args.name, separate=args.split)
-    result = download_track(spec)
+    if args.search_only:
+        for i, c in enumerate(cands, 1):
+            lic = c.license_url or c.license_str or "licence?"
+            print(f"{i:2d}. {c.artist or '?'} — {c.title}  [{lic}]")
+            print(f"    {c.audio_url}")
+        return 0
 
-    if result.success:
-        print(f"\n🎉  Done!  Library: library/{result.name}/")
-        if result.stems:
-            print("   Stems:", ", ".join(result.stems.keys()))
-    else:
-        print(f"\n❌  Download failed: {result.error}")
+    idx = max(1, args.pick) - 1
+    if idx >= len(cands):
+        print(f"--pick {args.pick} out of range (got {len(cands)} results)", file=sys.stderr)
         return 1
-
-    return 0
+    res = ingest_track(cands[idx], name=args.name, separate=not args.no_split)
+    if res.success:
+        print(f"ingested: library/{res.name}/")
+        return 0
+    print(f"failed: {res.error}", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

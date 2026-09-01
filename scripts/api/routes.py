@@ -10,7 +10,6 @@ from fastapi import APIRouter
 from scripts.api.routers import (
     analysis,
     crates,
-    downloads,
     events,
     feedback,
     generative,
@@ -30,7 +29,6 @@ router.include_router(system.router)
 # (FastAPI matches in registration order).
 router.include_router(analysis.router)
 router.include_router(library.router)
-router.include_router(downloads.router)
 router.include_router(stems.router)
 router.include_router(remix.router)
 router.include_router(generative.router)

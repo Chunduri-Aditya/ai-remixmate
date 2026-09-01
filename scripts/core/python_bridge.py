@@ -20,7 +20,6 @@ from scripts.core.real_optimizer import RealOptimizer
 from scripts.core.metrics import AudioMetrics
 from scripts.core.features import extract_features_from_wav
 from scripts.core.paths import vocals_path, other_path, OUTPUT_DIR, AUDIO_IN, ensure_directories
-from scripts.core.youtube_music import fetch_song_to_library, sanitize_name
 from scripts.core.genre import auto_preset, detect_genre, get_preset, GenrePreset, GenreResult
 from scripts.core.license import load_license, license_warning, LicenseInfo
 from scripts.core.library import get_library_manager
@@ -90,33 +89,16 @@ class PythonBridge:
                 if alt_inst.exists():
                     instrumentals_file = alt_inst
             
-            # If still missing, try fetching via YouTube Music
-            missing = []
-            if not vocals_file.exists():
-                missing.append(("vocals", base_song))
-            if not instrumentals_file.exists():
-                missing.append(("instrumentals", match_song))
-            
-            if missing and online:
-                print("🌐 Missing local files; attempting YouTube Music fetch...")
-                for kind, name in missing:
-                    res = fetch_song_to_library(name, out_name=name, separate=True)
-                    if kind == "vocals":
-                        # prefer stems if available else wav
-                        if "vocals" in res:
-                            vocals_file = res["vocals"]
-                        elif "other" in res:
-                            vocals_file = res["other"]
-                        elif "wav" in res:
-                            vocals_file = res["wav"]
-                    else:
-                        if "other" in res:
-                            instrumentals_file = res["other"]
-                        elif "wav" in res:
-                            instrumentals_file = res["wav"]
-            
+            # Online auto-fetch of missing tracks was removed with the catalogue
+            # teardown (deployment plan, Phase 1). `online` is kept in the
+            # signature for callers but no longer downloads anything; tracks must
+            # already be in the library (ingested via `python -m scripts.download`).
+            _ = online
             if not vocals_file.exists() or not instrumentals_file.exists():
-                raise FileNotFoundError("Required audio files not found (local or fetched)")
+                raise FileNotFoundError(
+                    "Required audio files not found in the library — ingest the "
+                    "tracks first via `python -m scripts.download`."
+                )
             
             # Load and analyze audio
             print("📊 Loading and analyzing audio...")

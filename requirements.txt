@@ -31,10 +31,8 @@ numba==0.61.2
 pandas==2.3.1
 PyYAML==6.0.2
 
-# --- Download (see LEGAL NOTE below) ---
-yt-dlp==2026.3.17
-ytmusicapi==1.10.2          # official YouTube Music search API (anonymous, no key needed)
-mutagen==1.47.0             # read/write audio metadata (ID3, MP4, etc.)
+# --- Audio metadata ---
+mutagen==1.47.0             # read/write audio metadata (ID3, MP4, etc.) — Serato GEOB cue export
 
 # --- Web / API (Phase 1 — backend) ---
 fastapi==0.115.14
@@ -76,22 +74,12 @@ packaging==25.0
 typing_extensions==4.14.1
 
 # =============================================================================
-# LEGAL NOTE — Downloading music
+# MUSIC SOURCING
 # =============================================================================
-# yt-dlp is open-source (Unlicense).  However, downloading from YouTube or
-# YouTube Music may violate those platforms' Terms of Service, especially for
-# commercial use.
-#
-# For a production app serving users, prefer these fully-legal sources:
-#
-#   • Jamendo (https://www.jamendo.com)          — official API, CC licensed
-#   • Free Music Archive (https://freemusicarchive.org) — CC licensed
-#   • Musopen (https://musopen.org)              — public-domain classical
-#   • Audionautix / Incompetech                  — CC BY
-#
-# ytmusicapi is used ONLY for search/metadata.  It does not download audio.
-# yt-dlp downloading is appropriate for:
-#   ✅  Personal use / local remix workflow
-#   ✅  Portfolio / educational demos
-#   ⚠️  Production SaaS — consult a lawyer; consider Jamendo/FMA instead
+# The hosted product does not download audio on the request path. Its catalogue
+# is built by the operator ingest tool (python -m scripts.download) from
+# Creative-Commons / public-domain sources whose licence AND platform terms
+# permit download + derivatives: ccMixter, Internet Archive netlabels, and
+# (pending) Free Music Archive, Musopen. See scripts/core/license.py for the
+# publish gate and app/DEPLOYMENT_PLAN.md Phase 1 for the teardown.
 # =============================================================================

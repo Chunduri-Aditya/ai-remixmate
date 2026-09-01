@@ -3,15 +3,12 @@ scripts/api/tasks.py — Task function re-export shim.
 
 All task functions have been split into domain modules under scripts/api/task_modules/.
 This module re-exports them all so that existing imports like:
-    from scripts.api.tasks import task_download
+    from scripts.api.tasks import task_analyze
 continue to work without modification.
-"""
 
-# Download tasks
-from scripts.api.task_modules.download import (
-    task_download,
-    task_playlist_download,
-)
+(Track download was removed with the catalogue teardown — the hosted product
+serves one operator-curated CC library, ingested via `python -m scripts.download`.)
+"""
 
 # Stem tasks
 from scripts.api.task_modules.stems import (
@@ -50,9 +47,6 @@ from scripts.api.task_modules.lab import (
 )
 
 __all__ = [
-    # Download
-    "task_download",
-    "task_playlist_download",
     # Stems
     "task_stem_split",
     "task_batch_stem_split",

@@ -4,10 +4,10 @@ scripts/core/analysis_pipeline.py — Shared "analyze one song" pipeline.
 Extracted from scripts/api/task_modules/analysis.py:task_analyze so the same
 logic can run two ways:
   1. On demand, via POST /analyze (task_analyze wraps this with job progress).
-  2. Automatically right after a download finishes (task_download /
-     task_playlist_download call this directly when auto_analyze=True), so
-     a song is fully remix-ready — stems split AND analyzed — the moment
-     it lands in the library, with no separate manual "Analyze" step.
+  2. Automatically at the end of operator catalogue ingest (scripts/download.py
+     calls this directly when auto_analyze=True), so a song is fully
+     remix-ready — stems split AND analyzed — the moment it lands in the
+     library, with no separate manual "Analyze" step.
 
 Writes BOTH cache files so every consumer in the codebase is satisfied:
   - meta.json     — bpm/genre/key cache read by recommend.py / music_index.py
