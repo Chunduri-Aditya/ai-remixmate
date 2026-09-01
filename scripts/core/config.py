@@ -67,7 +67,9 @@ class SeparationConfig:
 
 @dataclass
 class DownloadConfig:
-    default_source: str       = "auto"
+    # Catalogue ingest is operator-only (scripts/download.py). jamendo_client_id
+    # is retained for a possible future Jamendo *metadata* lookup; it is not used
+    # for audio download (Jamendo's API terms forbid caching).
     jamendo_client_id: str    = "b6747d04"
     audio_format: str         = "wav"
     audio_quality: int        = 0
@@ -186,10 +188,10 @@ class GenerativeConfig:
 class SpotifyConfig:
     # scripts/core/spotify.py reads the raw YAML itself (plus SPOTIFY_* env
     # vars); declared here so the section survives _dict_to_config() and the
-    # drift guard in tests/test_config_drift.py covers it.
+    # drift guard in tests/test_config_drift.py covers it. Metadata-only now —
+    # user OAuth (and redirect_uri) went with the catalogue teardown.
     client_id: str     = ""
     client_secret: str = ""
-    redirect_uri: str  = "http://127.0.0.1:8000/spotify/callback"
 
 
 @dataclass

@@ -37,8 +37,9 @@ separation:
 
 # ---------------------------------------------------------------------------
 download:
-  default_source: auto        # auto | youtube | jamendo | all
-  jamendo_client_id: b6747d04  # replace with your own for production
+  # Catalogue ingest is operator-only (python -m scripts.download). No user
+  # download source selection in the hosted product.
+  jamendo_client_id: b6747d04  # metadata lookup only; not used for audio
                                # register free at https://devportal.jamendo.com
   audio_format: wav            # output format after conversion
   audio_quality: 0             # yt-dlp quality: 0 = best
@@ -152,7 +153,7 @@ logging:
 spotify:                        # Spotify Web API integration (free tier)
   client_id: ""                 # Get free at https://developer.spotify.com/dashboard
   client_secret: ""             # Same dashboard — copy Client Secret
-  redirect_uri: "http://127.0.0.1:8000/spotify/callback"
+  # Metadata-only: app client-credentials, no user OAuth (no redirect_uri).
   #
   # What the free Spotify API gives you:
   #   • Search the entire Spotify catalogue
