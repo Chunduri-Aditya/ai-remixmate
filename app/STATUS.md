@@ -86,12 +86,19 @@ The `config.yaml` / `config.py` pair was realigned (dropped
 
 - Real FMA + Musopen fetchers, or an explicit descope to ccMixter + Internet
   Archive for v1.
-- `classify_license` 8-case allow/deny matrix test (one CC-BY and one CC-BY-NC
-  per source). The mandatory guard.
 - `scripts/api/task_modules/remix.py`: write `CREDITS.txt` and a `credits[]`
   array into `manifest.json` from each source song's `license.json`.
 - Frontend: `Operations.tsx` download UI removal, `catalogApi.search`, Spotify
   import buttons in four pages, licence badge on `LibraryAtlas`.
+
+### Done since the teardown
+
+- `classify_license` 8-case source matrix — `tests/test_license.py::
+  test_source_licence_matrix` (`46aa166`). CC-BY allow + CC-BY-NC deny per source
+  (ccmixter / archive / fma / musopen), source-shaped inputs, asserts the enum
+  and the `is_publishable` gate per cell. Proven to fail under 3 mutations. Same
+  commit adds `"archive"` to the Internet Archive source aliases in `license.py`
+  (the `download.py` fetcher emits `source="archive"`, previously unhandled).
 
 ### Deferred, noted (not teardown, not blocking)
 

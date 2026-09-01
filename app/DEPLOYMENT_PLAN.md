@@ -193,8 +193,11 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
 **Still open for Phase 1** (additive — blocks the tick, not the teardown):
 - [ ] Real FMA + Musopen fetchers (or descope to ccMixter + Internet Archive for
       v1 and add that to the cut list).
-- [ ] `classify_license` 8-case allow/deny matrix test — not written. **Mandatory
-      guard** (see Riskiest parts #2).
+- [x] `classify_license` 8-case allow/deny matrix test — `tests/test_license.py::
+      test_source_licence_matrix` (`46aa166`). One CC-BY + one CC-BY-NC per source,
+      source-shaped inputs, asserts type **and** the `is_publishable` gate per
+      cell. Proven to fail under 3 mutations (accept-NC, reject-BY, drop the
+      `archive` alias — the latter fix shipped in the same commit).
 - [ ] `scripts/api/task_modules/remix.py`: `CREDITS.txt` + `manifest.json`
       `credits[]` — not started.
 - [ ] Frontend: `Operations.tsx` download/playlist UI removal, `catalogApi.search`,
@@ -266,11 +269,12 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
       backed by the extended `SongInfo`).
 
 **Verify**
-- [ ] **`classify_license` matrix** — for each of the four sources, run it over
-      one known CC-BY track and one known CC-BY-NC track; assert the right enum
-      for all eight (deny + allow per source, not once globally).
-- [ ] One known Musopen track → `classify_license` returns `PUBLIC_DOMAIN` and
-      `is_publishable` is true.
+- [x] **`classify_license` matrix** — `tests/test_license.py::test_source_licence_matrix`,
+      8 cells (CC-BY allow + CC-BY-NC deny per source), source-shaped inputs,
+      asserts enum **and** gate per cell. Mutation-tested (accept-NC / reject-BY /
+      drop `archive` alias all go red).
+- [x] One known Musopen track → `classify_license` returns `PUBLIC_DOMAIN` and
+      `is_publishable` is true — `test_musopen_without_any_licence_field_is_public_domain`.
 - [ ] Ingest a real ccMixter CC-BY track → `license.json` written, `is_publishable` true.
 - [ ] Feed the ingest tool a CC-BY-NC track → aborts, song dir removed.
 - [ ] `GET /library/<name>` response carries `artist_name` and `license_ccurl`.
