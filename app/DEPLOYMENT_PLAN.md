@@ -10,7 +10,7 @@
 | # | Phase | State | Commit |
 |---|---|---|---|
 | 0 | Guardrails (test isolation fixture) | ☑ verified | 304da7e |
-| 1 | Catalog teardown + enforced CC gate | ◐ in progress — teardown done, additive open | 3d06bf2, 2f2833f, f6c0c6c, + teardown commit |
+| 1 | Catalog teardown + enforced CC gate | ☑ verified (code; live ingest pending an operator run) | 3d06bf2, 2f2833f, f6c0c6c, 8c4f204, 46aa166, dbe2db1, + frontend teardown |
 | 2 | Guard generative + slim the image | ☐ not started | |
 | 3 | User contextvar + per-user mixes/jobs/crates/feedback | ☐ not started | |
 | 4 | Auth + tenancy (Supabase) | ☐ not started | |
@@ -20,6 +20,11 @@
 | 8 | Legal / product surface | ☐ not started | |
 
 Legend: ☐ not started · ◐ in progress · ☑ verified
+
+**Phase 1 note:** all code is committed and the frontend/backend green bar passes.
+Two Verify lines need a live network ingest run and are marked
+`operator-pending` below — they get ticked on the first real catalogue fill, not
+by a code change. Phase 3 does not depend on them.
 
 **Green bar carried between every phase** (all three must pass before ticking a phase):
 - `uvx ruff check <files changed this phase>` — clean (this is what "clean (4 files)"
@@ -191,9 +196,11 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
 - [x] `scripts/core/analysis_pipeline.py`: stale `task_download` docstring
       reference updated to `scripts/download.py`.
 
-**Still open for Phase 1** (additive — blocks the tick, not the teardown):
-- [ ] Real FMA + Musopen fetchers (or descope to ccMixter + Internet Archive for
-      v1 and add that to the cut list).
+**Phase 1 — additive work (all done):**
+- [x] FMA + Musopen **descoped for v1** — fetchers removed from
+      `scripts/download.py` (`_FETCHERS` now `ccmixter` / `archive`), docstring +
+      cut list updated. `classify_license` keeps both source branches (tested), so
+      re-adding a fetcher later needs no classifier change.
 - [x] `classify_license` 8-case allow/deny matrix test — `tests/test_license.py::
       test_source_licence_matrix` (`46aa166`). One CC-BY + one CC-BY-NC per source,
       source-shaped inputs, asserts type **and** the `is_publishable` gate per
@@ -206,8 +213,24 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
       a `credits` key. A track with no readable licence still gets an
       `unknown`/`None` entry (never dropped). `task_remix_preview` excluded
       (throwaway audition). Guard: `tests/test_mix_credits.py`, mutation-tested.
-- [ ] Frontend: `Operations.tsx` download/playlist UI removal, `catalogApi.search`,
-      Spotify import buttons, `LibraryAtlas` licence badge — not started.
+- [x] Frontend teardown (frontend green bar: `tsc --noEmit` clean, `vitest run`
+      35 passed, `vite build` clean):
+      - `lib/api.ts`: `downloadApi` (single / batch / playlist / fromSpotify)
+        removed. **No `catalogApi.search`** — no backend catalogue-search
+        endpoint exists; `libraryApi.list` / `.get` already browse the catalogue.
+      - `pages/Operations.tsx`: the single/batch/playlist download form, live
+        download queue, `DownloadJobCard` / `DownloadTimer`, and the YouTube ToS
+        copy are gone (672 → 329 lines). Keeps ProcessingQueue / Storage /
+        Maintenance panels; a note points at `python -m scripts.download`.
+      - `__tests__/smoke.test.ts`: `downloadApi` mock dropped; `/operations`
+        route still renders.
+      - `types/index.ts`: `SongInfo` gains `artist_name` / `license_type` /
+        `license_ccurl` (backend already sends them).
+      - `pages/LibraryAtlas.tsx`: licence badge + `by <artist> · licence` line
+        in the song detail drawer.
+      - Spotify *import* buttons in `MissionControl` / `MixVault` / `SetBuilder`:
+        none existed — the plan's task list was stale (those `Download` icons are
+        mix / setlist export, kept).
 
 **Follow-ups noted, deferred** (not teardown, not blocking):
 - `scripts/core/spotify.py` still carries dead OAuth methods (`get_auth_url`,
@@ -266,14 +289,16 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
       import it. The earlier "(verify unused)" note was wrong.
 - [x] `config.yaml` + `scripts/core/config.py` **together** (`test_config_drift.py`
       green): dropped `download.default_source` and `spotify.redirect_uri`.
-- [ ] Frontend: `frontend/src/pages/Operations.tsx` — remove the download/playlist
-      UI (`downloadApi.playlist` L473, playlist mode L623, `DownloadJobCard` L132)
-      and the YouTube ToS copy (L634); page becomes a read-only catalog browser.
-- [ ] `frontend/src/lib/api.ts`: drop `downloadApi.*`, add `catalogApi.search(query)`.
-- [ ] Remove Spotify *import* buttons in `MissionControl` / `LibraryAtlas` /
-      `MixVault` / `SetBuilder`; keep Spotify *search*.
-- [ ] Add a license badge + artist attribution line to `LibraryAtlas.tsx` (now
-      backed by the extended `SongInfo`).
+- [x] `frontend/src/pages/Operations.tsx` — download/playlist form + queue +
+      `DownloadJobCard`/`DownloadTimer` + YouTube ToS copy removed; keeps the
+      processing / storage / maintenance panels (672 → 329 lines).
+- [x] `frontend/src/lib/api.ts`: `downloadApi.*` removed. `catalogApi.search` was
+      **not** added — no backend endpoint; `libraryApi.list`/`.get` browse the
+      catalogue.
+- [x] Spotify *import* buttons: none present in `MissionControl` / `MixVault` /
+      `SetBuilder` (task list was stale). Spotify *search* untouched.
+- [x] License badge + `by <artist> · licence` line in `LibraryAtlas.tsx` song
+      detail drawer; `SongInfo` TS type extended.
 
 **Verify**
 - [x] **`classify_license` matrix** — `tests/test_license.py::test_source_licence_matrix`,
@@ -282,20 +307,31 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
       drop `archive` alias all go red).
 - [x] One known Musopen track → `classify_license` returns `PUBLIC_DOMAIN` and
       `is_publishable` is true — `test_musopen_without_any_licence_field_is_public_domain`.
-- [ ] Ingest a real ccMixter CC-BY track → `license.json` written, `is_publishable` true.
-- [ ] Feed the ingest tool a CC-BY-NC track → aborts, song dir removed.
-- [ ] `GET /library/<name>` response carries `artist_name` and `license_ccurl`.
+- [ ] **operator-pending** — ingest a real ccMixter CC-BY track → `license.json`
+      written, `is_publishable` true. Ticks on the first real catalogue fill.
+- [ ] **operator-pending** — feed the ingest tool a CC-BY-NC track → aborts, song
+      dir removed. (Gate logic itself is covered by the `classify_license` matrix +
+      `is_publishable`; this line is the live end-to-end.)
+- [x] `GET /library/<name>` response carries `artist_name` and `license_ccurl` —
+      `tests/test_song_info_attribution.py` (3 passed).
 - [x] Render a mix from two ingested tracks → `<out_dir>/CREDITS.txt` exists and
       `manifest.json` has a non-empty `credits[]` with artist + ccurl —
       `tests/test_mix_credits.py` (helper-level; a full render is outside the safe
       subset). Mutation-tested: dropping a missing-licence track, nulling the
       artist, and un-wiring `task_dj_chain` each turn it red.
-- [ ] `POST /download` → 404 (router gone); `GET /library/...` still serves.
-- [ ] `tests/test_config_drift.py` green; `grep -r "yt_dlp\|ytmusicapi" scripts/` → no runtime hits.
-- [ ] Green bar.
+- [x] `POST /download` / `/download-batch` / `/download-playlist` → 404 (router
+      gone); `GET /library` → 200 (checked against a `TestClient`).
+- [x] `tests/test_config_drift.py` green (26 passed); no runtime `yt_dlp` /
+      `ytmusicapi` imports in `scripts/` (only legacy source-name string literals
+      in `license.py`).
+- [x] Green bar: safe subset 706 passed · `uvx ruff` clean on touched files ·
+      frontend `tsc --noEmit` clean, `vitest run` 35 passed, `vite build` clean.
 
-**Commit:** `feat: replace downloads with operator CC-catalog ingest + enforced license gate`
-**Rollback note:** large surface. Keep the old `downloads` router in git history for reference.
+**Commits:** `f6c0c6c` (config) · `8c4f204` (backend teardown) · `46aa166`
+(licence matrix + `archive` alias) · `dbe2db1` (mix credits) · frontend teardown +
+FMA/Musopen descope (this batch). Original licence slices: `3d06bf2`, `2f2833f`.
+**Rollback note:** large surface. The old `downloads` router / download UI live in
+git history (`git show 2f2833f^:scripts/api/routers/downloads.py`).
 
 ---
 
@@ -542,7 +578,10 @@ tests/local — both paths exercised.
 ## Cut list (explicitly deferred past v1)
 
 MusicGen / VampNet / DAC (routers guarded, code kept) · all Spotify OAuth + import
-· all yt-dlp / YouTube / SoundCloud · per-user libraries and uploads · per-user
+· all yt-dlp / YouTube / SoundCloud · **Free Music Archive + Musopen ingest
+sources** (fetchers dropped from `scripts/download.py`; `classify_license` still
+recognises both, so re-adding a fetcher needs no classifier change — v1 fills
+from ccMixter + Internet Archive only) · per-user libraries and uploads · per-user
 personalization of learned weights (spectral matching, LUFS targets) · Modal / any
 runtime GPU · Redis / arq / multi-worker API / horizontal scaling · DJ-engine
 `analyze()` reading cached `analysis.json` instead of recomputing per job (perf,
