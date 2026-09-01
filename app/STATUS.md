@@ -30,7 +30,7 @@ untouched.
 
 | Check | Result | Note |
 |---|---|---|
-| safe pytest subset | 701 passed, 90 deselected, ~12s | 702 after the licence + config work, then −1 from deleting `task_modules/download.py` (a parametrised lint case over source files, not a lost assertion) |
+| safe pytest subset | 706 passed, 90 deselected, ~12s | 702 after licence + config work; −1 from deleting `task_modules/download.py` (a parametrised lint case, not a lost assertion); +1 licence-matrix net; +4 `test_mix_credits.py` |
 | import smoke | `scripts.api.main` / `.routes` / `.tasks` / `scripts.download` all import | proves nothing references the three deleted modules |
 | `uvx ruff check` (repo-wide) | ~1580 findings on a clean `HEAD` | not a usable gate as it stands: pre-existing debt, ~1100 `W293` blank-line whitespace + ~200 `I001` + ~150 `F401`, none introduced by this migration. `E501` is correctly ignored so the config is being read. Run `ruff check --fix` repo-wide and move the config to `[tool.ruff.lint]` before Phase 7 CI. |
 | `uvx ruff check` (teardown files) | ~54 findings, all pre-existing style | the teardown adds none; `analysis_pipeline.py` had 2 (`F401` numpy, `I001`) in code it did not touch |
@@ -86,8 +86,6 @@ The `config.yaml` / `config.py` pair was realigned (dropped
 
 - Real FMA + Musopen fetchers, or an explicit descope to ccMixter + Internet
   Archive for v1.
-- `scripts/api/task_modules/remix.py`: write `CREDITS.txt` and a `credits[]`
-  array into `manifest.json` from each source song's `license.json`.
 - Frontend: `Operations.tsx` download UI removal, `catalogApi.search`, Spotify
   import buttons in four pages, licence badge on `LibraryAtlas`.
 
@@ -99,6 +97,13 @@ The `config.yaml` / `config.py` pair was realigned (dropped
   and the `is_publishable` gate per cell. Proven to fail under 3 mutations. Same
   commit adds `"archive"` to the Internet Archive source aliases in `license.py`
   (the `download.py` fetcher emits `source="archive"`, previously unhandled).
+- Mix credits — `dbe2db1`. `task_dj_remix` / `task_dj_chain` write
+  `<out_dir>/CREDITS.txt` + a `credits[]` array in `manifest.json` from each
+  source track's `license.json`, and return it under a `credits` key. A track
+  with no readable licence still gets an entry (`unknown` / `None`) so an
+  attribution line is never silently dropped. Preview render excluded (throwaway
+  audition). Guard: `tests/test_mix_credits.py`, mutation-tested 3 ways. Safe
+  subset: 706 passed.
 
 ### Deferred, noted (not teardown, not blocking)
 

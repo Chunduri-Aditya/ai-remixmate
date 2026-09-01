@@ -38,9 +38,10 @@ Legend: ☐ not started · ◐ in progress · ☑ verified
   ```
   Baseline before Phase 0: **675 passed, 90 deselected, ~13s**. After Phase 0: **680
   passed**. After the Phase 1 licence slices + `config.yaml` alignment: **702 passed,
-  90 deselected**. After the backend teardown: **701 passed** — the −1 is a single
+  90 deselected**. After the backend teardown: **701** — the −1 is a single
   parametrised case in `test_structured_logger_usage.py` that iterates source files,
   now one file shorter (`task_modules/download.py` deleted), not a lost assertion.
+  After the licence matrix + mix-credits tests: **706 passed**.
 - `cd frontend && npx vite build` — clean
 
 ---
@@ -198,8 +199,13 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
       source-shaped inputs, asserts type **and** the `is_publishable` gate per
       cell. Proven to fail under 3 mutations (accept-NC, reject-BY, drop the
       `archive` alias — the latter fix shipped in the same commit).
-- [ ] `scripts/api/task_modules/remix.py`: `CREDITS.txt` + `manifest.json`
-      `credits[]` — not started.
+- [x] `scripts/api/task_modules/remix.py`: `CREDITS.txt` + `manifest.json`
+      `credits[]` — `dbe2db1`. `_write_mix_credits(out_dir, songs)` after the
+      `sf.write` in `task_dj_remix` and `task_dj_chain`; per-track entry from
+      `license.json` (artist / licence / deed URL / source), also returned under
+      a `credits` key. A track with no readable licence still gets an
+      `unknown`/`None` entry (never dropped). `task_remix_preview` excluded
+      (throwaway audition). Guard: `tests/test_mix_credits.py`, mutation-tested.
 - [ ] Frontend: `Operations.tsx` download/playlist UI removal, `catalogApi.search`,
       Spotify import buttons, `LibraryAtlas` licence badge — not started.
 
@@ -251,9 +257,10 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
       `license_ccurl`; read both in `_song_info` (`scripts/api/routers/_helpers.py:47-60`,
       which today extracts only `license_type` / `source`). The P1 frontend
       attribution line and the P8 mix credits both need these in the response.
-- [ ] `scripts/api/task_modules/remix.py`: after the `sf.write` calls (L303 /
-      L482 / L597) write `outputs/<uid>/<session>/CREDITS.txt` and a `credits: []`
-      array into `manifest.json` from each source song's `license.json`.
+- [x] `scripts/api/task_modules/remix.py`: after the `sf.write` in `task_dj_remix`
+      and `task_dj_chain`, `_write_mix_credits()` writes `<out_dir>/CREDITS.txt`
+      and a `credits[]` array in `<out_dir>/manifest.json` from each source song's
+      `license.json` (`dbe2db1`). Preview render excluded.
 - [x] `requirements.txt`: removed `yt-dlp`, `ytmusicapi` and the LEGAL NOTE block.
       **`mutagen` stays** — `cue_export.py` (Serato GEOB) and `library.py` both
       import it. The earlier "(verify unused)" note was wrong.
@@ -278,8 +285,11 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
 - [ ] Ingest a real ccMixter CC-BY track → `license.json` written, `is_publishable` true.
 - [ ] Feed the ingest tool a CC-BY-NC track → aborts, song dir removed.
 - [ ] `GET /library/<name>` response carries `artist_name` and `license_ccurl`.
-- [ ] Render a mix from two ingested tracks → `outputs/<uid>/<session>/CREDITS.txt`
-      exists and `manifest.json` has a non-empty `credits[]` with artist + ccurl.
+- [x] Render a mix from two ingested tracks → `<out_dir>/CREDITS.txt` exists and
+      `manifest.json` has a non-empty `credits[]` with artist + ccurl —
+      `tests/test_mix_credits.py` (helper-level; a full render is outside the safe
+      subset). Mutation-tested: dropping a missing-licence track, nulling the
+      artist, and un-wiring `task_dj_chain` each turn it red.
 - [ ] `POST /download` → 404 (router gone); `GET /library/...` still serves.
 - [ ] `tests/test_config_drift.py` green; `grep -r "yt_dlp\|ytmusicapi" scripts/` → no runtime hits.
 - [ ] Green bar.
