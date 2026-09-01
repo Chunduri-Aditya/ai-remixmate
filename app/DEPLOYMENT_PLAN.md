@@ -354,12 +354,20 @@ drops the heavy ML deps it no longer needs; `demucs` leaves the request path.
       `codec_tokens.py` import them, lazily, behind the gate). `streamlit` /
       `altair` removed (`scripts/ui/` only). `lyricsgenius` / `nltk` → new
       `[wordplay]` extra (`wordplay.py` already `try/except`s them). **`demucs`
-      kept** — it is a `python -m demucs` subprocess, never imported; still
-      needed by `/stems/split` + auto-analyze. (The plan's original "move demucs
-      to an `ingest` extra" was dropped: the stated reason — no imports on the
-      request path — is already true, and removing the package would break
-      `/stems/split` in a `requirements.txt`-only venv. Guarding/removing that
-      route is not Phase 2 scope.)
+      kept in `requirements.txt`** — it is a `python -m demucs` subprocess,
+      never imported; the "no imports on the request path" goal is already met.
+      Original "move to an `ingest` extra" dropped: it would break `/stems/split`
+      in a `requirements.txt`-only venv and changes nothing about the import
+      surface.
+
+**Exposure this leaves open** (guard scheduled in Phase 3, see below):
+`POST /stems/split`, `/stems/split-batch`, and the `auto_analyze=True` path let
+**any caller trigger a CPU-Demucs separation at 2-5x realtime on the
+single-worker box** (`api.workers: 1`). This is true whether or not `demucs` is
+installed — it is a request-path job trigger. Not a Phase 2 regression; the route
+was always like this. Phase 3 adds `REMIXMATE_STEM_SPLIT_ENABLED` (default off in
+prod) alongside the per-user work; Phase 4's `require_user` then also gates it,
+but a flag is still wanted so an authenticated beta user cannot amplify CPU load.
 - [x] `docker-compose.yml`: `ui` service dropped. `Dockerfile`: `8501` EXPOSE
       and `models/` dir dropped.
 - [x] `scripts/api/main.py`: `/` and `/app` no longer read
@@ -375,10 +383,13 @@ drops the heavy ML deps it no longer needs; `demucs` leaves the request path.
       not the gate). `tests/test_generative_gate.py` (11 cases, incl. a
       per-request-read check).
 - [x] `grep -rn "import demucs\|from demucs" scripts/api/` → no hits.
-- [x] `pip check` clean. Importing `scripts.api.main` / `.routes` with all 7
-      removed packages shadowed to `None` succeeds → none are on the startup
-      path. **Fresh-venv `pip install -r requirements.txt` skipped** (slow,
-      pulls torch); the shadow-import test covers the eager-import risk.
+- [x] `pip check` clean **against the pre-slim venv** (removing lines from
+      `requirements.txt` does not uninstall — this does not validate the slimmed
+      set). The slimmed set is covered by: importing `scripts.api.main` /
+      `.routes` with all 7 removed packages shadowed to `None` succeeds → none
+      are on the startup path. **Fresh-venv `pip install -r requirements.txt`
+      not run** (slow, pulls torch) — the shadow-import test is the evidence.
+      A fresh-install + `pip check` belongs in the Phase 7 CI job.
 - [x] `GET /` → 302 to `REMIXMATE_FRONTEND_URL` when set, 200 JSON pointer when
       unset. `tests/test_root_route.py`.
 - [x] Green bar: safe subset 722 · `uvx ruff` clean on `generative.py` +
@@ -404,6 +415,13 @@ behaviour byte-identical. No auth, no Postgres yet.
       (`ThreadPoolExecutor` does not copy context). `list_jobs` / `_query_db`
       filter by user.
 - [ ] `_check_job_cap` (`_helpers.py:150`) counts per-user.
+- [ ] **`scripts/api/routers/stems.py`**: `REMIXMATE_STEM_SPLIT_ENABLED` gate
+      (default off in prod, on locally) on `POST /stems/split` /
+      `/stems/split-batch`, same `Depends` pattern as the generative router. Also
+      force `auto_analyze` requests to skip the Demucs step when the flag is off
+      (analysis still runs). Closes the unauthenticated CPU-Demucs trigger noted
+      in Phase 2. Verify: `POST /stems/split` → 503 with the flag unset;
+      `POST /dj-remix` unaffected; a pre-separated catalogue song still renders.
 - [ ] `scripts/core/crates.py` + `scripts/core/feedback_store.py` + setlist store:
       `user_id` column on every table in `_SCHEMA`; every function derives
       `user_id` from `get_user_id()` and adds `WHERE user_id = ?`.
@@ -529,12 +547,19 @@ tests/local — both paths exercised.
       Stop committing `frontend/dist/`.
 - [ ] Hetzner CX22: bare `uvicorn` (1 worker) under `systemd`, `Caddy` for
       auto-TLS + reverse proxy. `apt install ffmpeg libsndfile1`; project venv;
-      `pip install -r requirements.txt && pip install -e .` (no `demucs`).
+      `pip install -r requirements.txt && pip install -e .` (`demucs` is in
+      `requirements.txt` — it is only reached via the `REMIXMATE_STEM_SPLIT_ENABLED`
+      route, off in prod; keeping it installed is cheap and avoids a broken
+      `/stems/split` if the flag is ever flipped on for a debug session).
+- [ ] `pip install -e .` **without** `[generative]` / `[wordplay]` — no
+      transformers, no MusicGen weights on the box.
 - [ ] Mount the catalog volume **read-only** at `LIBRARY_DIR`.
 - [ ] `/etc/remixmate.env` (chmod 600, from `app/deploy/remixmate.env.example`):
       `REMIXMATE_*` overrides, Supabase keys, Spotify app creds, `DATABASE_URL`,
       `REMIXMATE_AUTH_ENABLED=true`, `REMIXMATE_LICENSE_ENFORCE=true`,
-      `REMIXMATE_SPECTRAL_LEARNING=false`. **Do not deploy `config.local.yaml`.**
+      `REMIXMATE_SPECTRAL_LEARNING=false`, `REMIXMATE_FRONTEND_URL=https://<domain>`,
+      `REMIXMATE_STEM_SPLIT_ENABLED` unset, `REMIXMATE_GENERATIVE_ENABLED` unset.
+      **Do not deploy `config.local.yaml`.**
 - [ ] CORS (`scripts/api/main.py:119-152`): `_default_origins` → frontend domain
       only; **delete** the `_allow_private_network` middleware and the
       `chunduri-aditya.github.io` / `localhost:8501` entries. Keep `allow_credentials=True`.

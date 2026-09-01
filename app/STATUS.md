@@ -140,9 +140,12 @@ The `config.yaml` / `config.py` pair was realigned (dropped
 - `scripts/core/library.py:87` `_is_downloaded_track` reads `full.info.json`, a
   `yt-dlp` artefact. Library-hygiene helper; left until it bites.
 - `JobType.DOWNLOAD` kept in `schemas.py` for historical `jobs.db` rows.
-- `/stems/split` + auto-analyze still shell out to `demucs`. In a
-  `requirements.txt`-only deploy that works; if a later phase removes `demucs`,
-  guard or remove that route first.
+- **`POST /stems/split` / `/stems/split-batch` / `auto_analyze=True` let any
+  caller trigger a CPU-Demucs separation at 2-5x realtime on the single-worker
+  box.** Request-path job trigger, true whether or not `demucs` is installed. Not
+  a Phase 2 regression — the route was always open. Phase 3 adds
+  `REMIXMATE_STEM_SPLIT_ENABLED` (off in prod); Phase 4's `require_user` then also
+  gates it.
 
 ## What is shippable today
 
