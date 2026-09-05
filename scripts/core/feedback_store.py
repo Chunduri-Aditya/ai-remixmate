@@ -50,6 +50,20 @@ from scripts.core.paths import DATA_DIR
 
 logger = get_logger(__name__)
 
+_DEFAULT_USER = "local"
+
+
+def _acting_user() -> str:
+    """Acting user id (contextvar, "local" until Phase 4). Lazy import so this
+    core module never pulls in the API package at load time."""
+    try:
+        from scripts.api.auth import get_user_id
+
+        return get_user_id()
+    except Exception:
+        return _DEFAULT_USER
+
+
 # ---------------------------------------------------------------------------
 # SQLite backend
 # ---------------------------------------------------------------------------
@@ -64,7 +78,8 @@ CREATE TABLE IF NOT EXISTS feedback_events (
     job_id        TEXT,
     position_sec  REAL,
     context_json  TEXT NOT NULL DEFAULT '{}',
-    created_at    REAL NOT NULL
+    created_at    REAL NOT NULL,
+    user_id       TEXT NOT NULL DEFAULT 'local'
 );
 """
 
@@ -89,6 +104,14 @@ def _get_conn() -> sqlite3.Connection:
 def _init_db() -> None:
     with _get_conn() as conn:
         conn.execute(_DB_SCHEMA)
+        # Migration: a feedback.db written before Phase 3 has no user_id column.
+        # ADD COLUMN with a DEFAULT backfills every existing row to "local", so
+        # single-user history stays attributed to the local user.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(feedback_events)")}
+        if "user_id" not in cols:
+            conn.execute(
+                "ALTER TABLE feedback_events ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'"
+            )
         conn.commit()
 
 
@@ -102,9 +125,11 @@ def _insert_row(conn: sqlite3.Connection, event: Dict[str, Any]) -> None:
     conn.execute(
         """
         INSERT INTO feedback_events
-            (id, event_type, song_a, song_b, job_id, position_sec, context_json, created_at)
+            (id, event_type, song_a, song_b, job_id, position_sec, context_json,
+             created_at, user_id)
         VALUES
-            (:id, :event_type, :song_a, :song_b, :job_id, :position_sec, :context_json, :created_at)
+            (:id, :event_type, :song_a, :song_b, :job_id, :position_sec, :context_json,
+             :created_at, :user_id)
         """,
         {
             "id":           event["id"],
@@ -115,6 +140,7 @@ def _insert_row(conn: sqlite3.Connection, event: Dict[str, Any]) -> None:
             "position_sec": event.get("position_sec"),
             "context_json": json.dumps(event.get("context") or {}),
             "created_at":   event["created_at"],
+            "user_id":      event.get("user_id") or _DEFAULT_USER,
         },
     )
     conn.commit()
@@ -193,6 +219,7 @@ def log_event(
         "position_sec": position_sec,
         "context":      context or {},
         "created_at":   time.time(),
+        "user_id":      _acting_user(),
     }
 
     with _lock:
@@ -212,10 +239,25 @@ def log_event(
     return event["id"]
 
 
-def list_events(limit: int = 500) -> List[Dict[str, Any]]:
-    """Return the most recent events, newest first."""
+def _scoped(events: List[Dict[str, Any]], user_id: Optional[str]) -> List[Dict[str, Any]]:
+    """Filter to one owner. ``None`` → the acting user (contextvar); ``"*"`` →
+    unscoped (operator/analysis only). Applied to the in-memory list, mirroring
+    jobs.py — the SQLite mirror only feeds this list at import, so scoping the
+    list is what the API actually sees. Rows with no ``user_id`` (legacy, and
+    the SQLite DEFAULT backfill) count as ``"local"``."""
+    scope = _acting_user() if user_id is None else user_id
+    if scope == "*":
+        return events
+    return [e for e in events if (e.get("user_id") or _DEFAULT_USER) == scope]
+
+
+def list_events(limit: int = 500, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Return the most recent events for the acting user, newest first.
+
+    ``user_id`` overrides the scope: an explicit id, or ``"*"`` for every user.
+    """
     with _lock:
-        events = list(_events)
+        events = _scoped(list(_events), user_id)
     return sorted(events, key=lambda e: e["created_at"], reverse=True)[:limit]
 
 
@@ -235,11 +277,14 @@ def _pair_key(song_a: str, song_b: Optional[str]) -> Optional[str]:
     return " :: ".join(sorted((song_a, song_b)))
 
 
-def summarize() -> Dict[str, Any]:
+def summarize(user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Aggregate counts per event type / per song / per song-pair, for
     GET /feedback/summary (feeds Stage B's offline analysis —
     SELF_IMPROVING_DJ_RESEARCH.md §5).
+
+    Scoped to the acting user by default; ``user_id`` overrides (``"*"`` for
+    every user, for offline analysis).
 
     Deliberately does no scoring or correlation here. Stage A's job is only
     to collect and expose sane aggregates; skip-rate-vs-compatibility-score
@@ -248,7 +293,7 @@ def summarize() -> Dict[str, Any]:
     bake an opinion into.
     """
     with _lock:
-        events = list(_events)
+        events = _scoped(list(_events), user_id)
 
     by_type: Dict[str, int] = defaultdict(int)
     by_song: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))

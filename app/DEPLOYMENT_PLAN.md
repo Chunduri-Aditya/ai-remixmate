@@ -12,7 +12,7 @@
 | 0 | Guardrails (test isolation fixture) | ☑ verified | 304da7e |
 | 1 | Catalog teardown + enforced CC gate | ☑ verified (code; live ingest pending an operator run) | 3d06bf2, 2f2833f, f6c0c6c, 8c4f204, 46aa166, dbe2db1, + frontend teardown |
 | 2 | Guard generative + slim the image | ☑ verified | f27aecb |
-| 3 | User contextvar + per-user mixes/jobs/crates/feedback | ☐ not started | |
+| 3 | User contextvar + per-user mixes/jobs/crates/feedback | ☑ verified | 653633a (3a) + stem gate/audit/spectral/feedback/crates (3b) |
 | 4 | Auth + tenancy (Supabase) | ☐ not started | |
 | 5 | SQLite → Postgres (jobs, crates, feedback, setlists) | ☐ not started | |
 | 6 | Per-user mix retention | ☐ not started | |
@@ -47,7 +47,9 @@ by a code change. Phase 3 does not depend on them.
   parametrised case in `test_structured_logger_usage.py` that iterates source files,
   now one file shorter (`task_modules/download.py` deleted), not a lost assertion.
   After the licence matrix + mix-credits tests: **706 passed**. After Phase 2
-  (generative gate + root-route tests): **722 passed**.
+  (generative gate + root-route tests): **722 passed**. After Phase 3a
+  (`test_user_scope.py`, 6 cases): **728 passed**. After Phase 3b (stem-split
+  gate, audit, spectral freeze, feedback, crates — 15 more cases): **743 passed**.
 - `cd frontend && npx vite build` — clean
 
 ---
@@ -360,14 +362,16 @@ drops the heavy ML deps it no longer needs; `demucs` leaves the request path.
       in a `requirements.txt`-only venv and changes nothing about the import
       surface.
 
-**Exposure this leaves open** (guard scheduled in Phase 3, see below):
-`POST /stems/split`, `/stems/split-batch`, and the `auto_analyze=True` path let
-**any caller trigger a CPU-Demucs separation at 2-5x realtime on the
-single-worker box** (`api.workers: 1`). This is true whether or not `demucs` is
-installed — it is a request-path job trigger. Not a Phase 2 regression; the route
-was always like this. Phase 3 adds `REMIXMATE_STEM_SPLIT_ENABLED` (default off in
-prod) alongside the per-user work; Phase 4's `require_user` then also gates it,
-but a flag is still wanted so an authenticated beta user cannot amplify CPU load.
+**Exposure this left open — CLOSED in Phase 3b.** `POST /stems/split` and
+`/stems/split-batch` let any caller trigger a CPU-Demucs separation at 2-5x
+realtime on the single-worker box (`api.workers: 1`). Phase 3b put
+`Depends(_stem_split_enabled)` on both — 503 unless `REMIXMATE_STEM_SPLIT_ENABLED`
+is truthy (default off in prod). The `auto_analyze=True` path was moot: its only
+callers were the download routers deleted in Phase 1, and `run_song_analysis`
+reads existing stems without shelling Demucs. Phase 4's `require_user` layers on
+top so an authenticated beta user still cannot amplify CPU load with the flag on.
+Still open, out of scope here: `POST /library/initialize` batch-splits the whole
+library — a maintenance route, left for Phase 4.
 - [x] `docker-compose.yml`: `ui` service dropped. `Dockerfile`: `8501` EXPOSE
       and `models/` dir dropped.
 - [x] `scripts/api/main.py`: `/` and `/app` no longer read
@@ -404,53 +408,109 @@ but a flag is still wanted so an authenticated beta user cannot amplify CPU load
 **Goal:** every write path is user-scoped, default `"local"`, single-user
 behaviour byte-identical. No auth, no Postgres yet.
 
-**Tasks**
-- [ ] New `scripts/api/auth.py`: `current_user: ContextVar[str]` (default
-      `"local"`), `get_user_id()`.
-- [ ] `scripts/core/paths.py`: `user_outputs_dir() -> OUTPUTS_DIR / get_user_id()`;
-      `session_dir()` routes through it. **`LIBRARY_DIR` untouched.**
-- [ ] `scripts/api/jobs.py` — **the risky one**: `create_job()` stamps
-      `meta["user_id"] = get_user_id()`; `_wrapper()` calls
-      `current_user.set(job["meta"]["user_id"])` next to `set_job_id()`
-      (`ThreadPoolExecutor` does not copy context). `list_jobs` / `_query_db`
-      filter by user.
-- [ ] `_check_job_cap` (`_helpers.py:150`) counts per-user.
-- [ ] **`scripts/api/routers/stems.py`**: `REMIXMATE_STEM_SPLIT_ENABLED` gate
-      (default off in prod, on locally) on `POST /stems/split` /
-      `/stems/split-batch`, same `Depends` pattern as the generative router. Also
-      force `auto_analyze` requests to skip the Demucs step when the flag is off
-      (analysis still runs). Closes the unauthenticated CPU-Demucs trigger noted
-      in Phase 2. Verify: `POST /stems/split` → 503 with the flag unset;
-      `POST /dj-remix` unaffected; a pre-separated catalogue song still renders.
-- [ ] `scripts/core/crates.py` + `scripts/core/feedback_store.py` + setlist store:
-      `user_id` column on every table in `_SCHEMA`; every function derives
-      `user_id` from `get_user_id()` and adds `WHERE user_id = ?`.
-- [ ] `audit.jsonl` (`scripts/core/audit.py`): one file, add a `user_id` field per record.
-- [ ] **Genuinely global, no change** (read-only *search* over the shared catalog):
+**State:** ☑ done — slice **3a** `653633a` (outputs + job store), slice **3b**
+this batch (stem-split gate, audit, spectral freeze, feedback, crates).
+
+**Tasks — slice 3a (`653633a`)**
+- [x] New `scripts/api/auth.py`: `current_user: ContextVar[str]` (default
+      `"local"`), `get_user_id()` / `set_user_id()`.
+- [x] `scripts/core/paths.py`: `user_outputs_dir() -> OUTPUTS_DIR / get_user_id()`;
+      `session_dir()` routes through it (lazy import of `scripts.api.auth`).
+      **`LIBRARY_DIR` untouched.** 7 reachable output sites re-anchored
+      (`task_modules/remix.py` ×3, `lab.py`, `routers/remix.py` ×2,
+      `routers/library.py` serving route).
+- [x] `scripts/api/jobs.py` — the risky one: `create_job()` stamps
+      `meta["user_id"] = get_user_id()`; `_wrapper()` calls `current_user.set(...)`
+      from the stamped meta next to `set_job_id()` (`ThreadPoolExecutor` does not
+      copy context). `list_jobs` gains `user_id` (`None` → acting user, `"*"` →
+      unscoped) applied on both the in-memory and SQLite paths.
+- [x] `_check_job_cap` counts per-user — it calls `list_jobs()` with no arg, now
+      scoped to the acting user. Covered by `test_active_job_cap_counts_per_user`.
+- [x] `system.py` `/health` + `events.py` heartbeat pass `user_id="*"` (box telemetry).
+
+**Tasks — slice 3b (this batch)**
+- [x] **`scripts/api/routers/stems.py`**: `REMIXMATE_STEM_SPLIT_ENABLED` gate —
+      **per-route** `dependencies=[Depends(_stem_split_enabled)]` on `/stems/split`
+      and `/stems/split-batch` only (503 unless truthy, read per request). The two
+      `/stems/compress*` routes are FLAC encode, never Demucs — left open. The
+      `auto_analyze` Demucs half is **moot**: the only requests carrying it were on
+      the download routers, deleted in Phase 1; `run_song_analysis` reads existing
+      stems, never shells Demucs. `/library/initialize` (`task_initialize_library`)
+      is still an unauthenticated batch-Demucs trigger — out of this slice's scope,
+      Phase 4 `require_user` covers it.
+- [x] `scripts/core/crates.py` + `scripts/core/feedback_store.py`:
+      `user_id TEXT NOT NULL DEFAULT 'local'` column on every table; an idempotent
+      `PRAGMA table_info` + `ALTER TABLE … ADD COLUMN` migration in `_init()` /
+      `_init_db()` (verified against copies of the live DBs — the one real
+      `song_favorites` row backfilled to `"local"`); every function derives the
+      acting user via a lazy-import `_acting_user()` and adds `WHERE user_id = ?`;
+      feedback's in-memory `_events` list is scoped too (jobs.py `_scoped` pattern),
+      `list_events` / `summarize` gain a `user_id` arg with a `"*"` escape.
+      **No persistent setlist store exists** — `setlist_planner.save(path)` writes
+      to a caller-supplied path and the router is stateless, so the plan's
+      "setlist store" line was vacuous.
+      **Known gap (Phase 4):** `crates.name UNIQUE`, `song_tags` PK, and
+      `song_favorites` PK are still user-blind (SQLite can't `ALTER` a
+      constraint). Harmless while `get_user_id()` is always `"local"`; Phase 4
+      must rebuild those three keys. Pinned by
+      `test_crates_uniqueness_is_still_user_blind_phase4`. Severity differs:
+      `create_crate` / `add_tag` hit `IntegrityError` and fail closed, but
+      `set_favorite`'s `INSERT OR REPLACE` against the `(song_name)` PK would
+      *silently rewrite the other user's row* — data loss, no error. Also:
+      `feedback_store._MAX_IN_MEMORY = 5000` is a global cap filled newest-first
+      across all users, and `summarize()` now reads per-user — after a restart a
+      heavy user can evict a quiet user's whole summary until the next event.
+- [x] `audit.jsonl` (`scripts/core/audit.py`): the existing `user` field now
+      defaults to `_acting_user()` instead of the hard-coded `"local"`; an
+      explicit `user=` still wins. (One file, one field — no schema.)
+- [x] **Genuinely global, no change** (read-only *search* over the shared catalog):
       `music_index.py` semantic index, `song_embeddings.json`, `crate_digger.py`
       CLAP index.
-- [ ] **Freeze in prod, do not leave learning global** — `spectral_matching.py`
-      learned weights train on 👍/👎 mix feedback, so a global model = user B's
-      feedback reshapes user A's EQ (cross-tenant mutation via a feedback channel).
-      Add `REMIXMATE_SPECTRAL_LEARNING` (default `true` locally, `false` in prod):
-      when off, load the committed seed and ignore writes. Check whether
-      `mastering.py` `stem_lufs_targets.json` is also feedback-written; if so, gate
-      it the same way. Per-user personalisation stays deferred (cut list).
+- [x] **Freeze in prod** — `spectral_matching.py`: `REMIXMATE_SPECTRAL_LEARNING`
+      (default on locally, off in prod). When off, `record_render` and
+      `apply_feedback` no-op (`{"updated": False, "reason": …}`). Inference still
+      runs — it uses `data/spectral_match_model.json` if present, else uniform
+      band weights (`np.ones(24)`). `data/` is gitignored, so a fresh prod box
+      scores every band equally; it never trains. **`mastering.py` `stem_lufs_targets.json`
+      needs no gate** — it is corpus-derived from the shared read-only catalog
+      via the operator endpoint at `library.py:446` (`analyze_library_stem_targets`
+      measures LUFS across library stems), not feedback-written. Per-user
+      personalisation stays deferred (cut list).
 
 **Verify**
-- [ ] Full suite with the P0 fixture — `"local"` behaviour byte-identical.
-- [ ] **Allow test**: a test sets `current_user.set("u2")`, creates a crate + runs
-      a render, then reads *its own* crate and mix back successfully.
-- [ ] **Deny test**: with data owned by `u1`, `current_user.set("u2")` sees an
-      empty `/crates`, `/jobs`, and no `u1` files under `outputs/`.
-- [ ] **Contextvar tripwire**: submit a job as `u1`; assert the mix lands under
-      `outputs/u1/`; the test **fails** if it lands under `outputs/local/` or `outputs/u2/`.
-- [ ] With `REMIXMATE_SPECTRAL_LEARNING=false`, logging a 👎 does not change
-      `spectral_match_model.json` on disk.
-- [ ] Green bar.
+- [x] Safe subset with the P0 fixture — **743 passed**, 90 deselected (728 after
+      3a, +15 in 3b). Single-user `"local"` behaviour unchanged.
+- [x] **Allow / deny (jobs, 3a)** — `test_job_is_stamped_with_and_scoped_to_its_creator`,
+      `test_filtered_query_is_also_user_scoped`, `test_legacy_rows_without_user_id_belong_to_local`.
+- [x] **Deny (crates / feedback, 3b)** — `test_crates_tags_favorites_are_user_scoped`
+      (u2 sees empty `list_crates` / `list_favorites` / `song_tags` / `crate_songs`,
+      cannot delete or rename u1's crate), `test_feedback_events_are_user_scoped`
+      (controlled 3-event set: u2 sees exactly its own 1, `user_id="*"` sees 3).
+      Both mutation-tested (drop the `WHERE user_id` / `_scoped` filter → red).
+- [x] **Contextvar tripwire (3a)** — `test_tripwire_job_artifact_lands_under_the_submitters_user_dir`:
+      job submitted as `u1` lands under `outputs/u1/`; goes red if `_wrapper`
+      stops re-`set`-ting `current_user`.
+- [x] **Stem-split gate** — `test_stem_split_is_503_unless_enabled` (split +
+      split-batch 503, compress routes reach their handler),
+      `test_stem_split_enabled_reaches_handler`, `…falsy_values_stay_disabled`.
+      Mutation-tested: drop the `dependencies=` → 503 case goes red (404).
+- [x] **Spectral freeze** — `test_spectral_learning_frozen_is_a_noop`:
+      non-vacuous (the render is recorded *while learning is on*, so the history
+      entry exists; the frozen `apply_feedback` declines it because of the flag,
+      not missing history). `record_render` no-op verified too. Mutation-tested.
+- [x] **Migrations** — `test_feedback_migration_adds_user_id_and_backfills`,
+      `test_crates_migration_adds_user_id_and_backfills`: build the pre-Phase-3
+      table by hand (the P0 fixture always hands a fresh schema, so the migration
+      branch needs an explicit test), run `_init*`, assert the column exists and
+      rows backfilled to `"local"`.
+- [x] Green bar: safe subset 743 · `uvx ruff` clean on the 6 touched files.
 
-**Commit:** `feat: user-scope outputs, jobs, crates, feedback via contextvar`
-**Rollback note:** snapshot `data/` before running any local data through the new paths.
+**Commits:** `653633a` (3a) · this commit (3b — stem gate / audit / spectral
+freeze / feedback / crates).
+**Rollback note:** `data/` was snapshotted to the scratchpad before the crates /
+feedback migrations ran. The migrations are `ADD COLUMN … DEFAULT 'local'` only —
+forward-safe, and a pre-Phase-3 binary still reads the table (it ignores the new
+column).
 
 ---
 

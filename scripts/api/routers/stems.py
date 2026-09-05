@@ -5,9 +5,16 @@ POST /stems/split              — stem-split a single song (queued job)
 POST /stems/split-batch        — stem-split multiple songs (queued job)
 POST /stems/compress           — compress stems for a single song (queued job)
 POST /stems/compress-batch     — compress stems for all library songs (queued job)
+
+The two split routes run Demucs (CPU, 2–5x realtime, one worker) and are the
+only request-path trigger for it — see app/DEPLOYMENT_PLAN.md Phase 3. They are
+gated per-route behind REMIXMATE_STEM_SPLIT_ENABLED (on locally, off in prod);
+the two compress routes are FLAC encode only and stay open.
 """
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+import os
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from scripts.api import jobs as job_store
 from scripts.api.routers._helpers import _check_job_cap, _require_song
@@ -28,7 +35,25 @@ from scripts.core.paths import LIBRARY_DIR
 router = APIRouter()
 
 
-@router.post("/stems/split", response_model=JobResponse, status_code=202, tags=["stems"])
+def _stem_split_enabled() -> None:
+    """503 unless REMIXMATE_STEM_SPLIT_ENABLED is truthy. Read per request so a
+    test (or an operator) can flip it without a restart. Guards only the Demucs
+    split routes — an unauthenticated caller must not be able to pin the
+    single-worker box on CPU stem separation (app/DEPLOYMENT_PLAN.md Phase 3)."""
+    if os.environ.get("REMIXMATE_STEM_SPLIT_ENABLED", "").strip().lower() not in ("1", "true", "yes"):
+        raise HTTPException(
+            status_code=503,
+            detail="Stem separation is disabled on this deployment.",
+        )
+
+
+@router.post(
+    "/stems/split",
+    response_model=JobResponse,
+    status_code=202,
+    tags=["stems"],
+    dependencies=[Depends(_stem_split_enabled)],
+)
 def stem_split(req: StemSplitRequest, background_tasks: BackgroundTasks = None):
     """
     Enhance a single library song then run Demucs to produce
@@ -46,7 +71,13 @@ def stem_split(req: StemSplitRequest, background_tasks: BackgroundTasks = None):
     return job_store.job_to_response(job_store.get_job(job_id))
 
 
-@router.post("/stems/split-batch", response_model=JobResponse, status_code=202, tags=["stems"])
+@router.post(
+    "/stems/split-batch",
+    response_model=JobResponse,
+    status_code=202,
+    tags=["stems"],
+    dependencies=[Depends(_stem_split_enabled)],
+)
 def stem_split_batch(req: BatchStemSplitRequest, background_tasks: BackgroundTasks = None):
     """
     Run Demucs on a list of songs (or ALL library songs if songs=null).

@@ -27,6 +27,17 @@ log = logging.getLogger(__name__)
 _AUDIT_PATH = DATA_DIR / "audit.jsonl"
 
 
+def _acting_user() -> str:
+    """Acting user id, defaulting to "local". Imported lazily so this core
+    module never pulls in the API package at import time."""
+    try:
+        from scripts.api.auth import get_user_id
+
+        return get_user_id()
+    except Exception:
+        return "local"
+
+
 def log_audit(
     action: str,
     *,
@@ -42,7 +53,9 @@ def log_audit(
     ----------
     action    : Short verb — "download_start", "remix_complete", "library_delete", etc.
     resource  : What was acted on — song name, file path, etc.
-    user      : Who initiated it (for future multi-user support).
+    user      : Who initiated it. Defaults to the acting user from
+                scripts.api.auth.current_user (a contextvar, "local" until Phase 4
+                wires real auth), so every record is attributable per-tenant.
     job_id    : Associated job ID (for correlation with job queue).
     metadata  : Arbitrary extra context (sizes, durations, params).
     """
@@ -51,7 +64,7 @@ def log_audit(
         "epoch": time.time(),
         "action": action,
         "resource": resource,
-        "user": user or "local",
+        "user": user or _acting_user(),
         "job_id": job_id,
         "meta": metadata or {},
     }

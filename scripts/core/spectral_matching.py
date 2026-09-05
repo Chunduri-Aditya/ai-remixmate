@@ -19,12 +19,20 @@ or current) — it mutates plan.entry_bar_b / plan.entry_time_b before rendering
 and never touches the engines themselves (the classic package stays frozen).
 Gated by config `dj.spectral_matching`; failures degrade to the planner's
 original entry point, never break a render.
+
+The learned model is one global JSON file, so in a multi-user deployment
+feedback is a cross-tenant channel. `REMIXMATE_SPECTRAL_LEARNING` (default on
+locally, off in prod) freezes it: `record_render` / `apply_feedback` no-op.
+Inference still runs — it uses whatever `spectral_match_model.json` is on disk,
+or uniform band weights (`np.ones(N_BANDS)`) if none. `data/` is gitignored, so
+a fresh prod box has no file and scores every band equally. See `_learning_enabled`.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -34,6 +42,23 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 log = logging.getLogger(__name__)
+
+
+def _learning_enabled() -> bool:
+    """Whether feedback may reshape the band weights on disk.
+
+    The learned model is a single global JSON file. In a multi-user deployment
+    that makes 👍/👎 a cross-tenant channel: user B's verdict would reshape the
+    EQ user A's next mix gets. `REMIXMATE_SPECTRAL_LEARNING` freezes it in prod
+    (default on locally, so dev keeps its feedback loop; set to 0/false/no in
+    production — see app/DEPLOYMENT_PLAN.md Phase 3). When frozen, `record_render`
+    and `apply_feedback` are no-ops; inference uses the on-disk model if one
+    exists, else uniform weights.
+    """
+    return os.environ.get("REMIXMATE_SPECTRAL_LEARNING", "true").strip().lower() not in (
+        "0", "false", "no", "off", "",
+    )
+
 
 N_BANDS = 24                 # mel bands in a transition profile
 _PHRASE_BARS = 8             # candidate entry points sit on 8-bar phrase boundaries
@@ -366,6 +391,8 @@ def record_render(session_id: str, info: Dict) -> None:
     """Stash a render's band similarities so later feedback can train on them."""
     if not info or "sims" not in info:
         return
+    if not _learning_enabled():
+        return  # frozen in prod — no history, so apply_feedback can't train either
     with _lock:
         p = history_path()
         try:
@@ -389,6 +416,8 @@ def record_render(session_id: str, info: Dict) -> None:
 
 def apply_feedback(session_id: str, liked: bool, lr: Optional[float] = None) -> Dict:
     """Train the band weights from one mix verdict. Returns a summary dict."""
+    if not _learning_enabled():
+        return {"updated": False, "reason": "spectral learning frozen on this deployment"}
     if lr is None:
         try:
             from scripts.core.config import cfg

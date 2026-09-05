@@ -201,3 +201,283 @@ def test_tripwire_job_artifact_lands_under_the_submitters_user_dir():
     assert captured["worker_user"] == "u1"
     assert captured["artifact"].parent.name == "u1"
     assert captured["artifact"].parent.name not in ("local", "u2")
+
+
+# ===========================================================================
+# Phase 3 slice 3b — stem-split gate · audit · spectral freeze · feedback · crates
+# ===========================================================================
+
+
+def _row_conn(db) -> sqlite3.Connection:
+    c = sqlite3.connect(str(db))
+    c.row_factory = sqlite3.Row
+    return c
+
+
+# --- the /stems/split Demucs gate ------------------------------------------
+
+@pytest.fixture
+def stems_client():
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    # the *aggregated* router — proves the gate is live in the real assembly,
+    # not just on stems.router in isolation (routes.py must include it).
+    from scripts.api.routes import router
+
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_stem_split_is_503_unless_enabled(stems_client, monkeypatch):
+    """The two Demucs routes 503 by default; the FLAC-only compress routes
+    stay open. Deletes the dependency → this goes green with the box exposed."""
+    monkeypatch.delenv("REMIXMATE_STEM_SPLIT_ENABLED", raising=False)
+
+    assert stems_client.post("/stems/split", json={"song": "x"}).status_code == 503
+    assert stems_client.post("/stems/split-batch", json={}).status_code == 503
+
+    # compress = FLAC encode, never gated — reaches its own handler (422 on the
+    # missing ?song query param, not 503)
+    assert stems_client.post("/stems/compress").status_code == 422
+    assert stems_client.post("/stems/compress-batch").status_code != 503
+
+
+@pytest.mark.parametrize("truthy", ["1", "true", "yes"])
+def test_stem_split_enabled_reaches_handler(stems_client, monkeypatch, truthy):
+    monkeypatch.setenv("REMIXMATE_STEM_SPLIT_ENABLED", truthy)
+    # past the gate: now it fails on the unknown song / job cap, never 503
+    r = stems_client.post("/stems/split", json={"song": "no-such-song"})
+    assert r.status_code != 503
+
+
+@pytest.mark.parametrize("falsy", ["", "0", "false", "off"])
+def test_stem_split_flag_falsy_values_stay_disabled(stems_client, monkeypatch, falsy):
+    monkeypatch.setenv("REMIXMATE_STEM_SPLIT_ENABLED", falsy)
+    assert stems_client.post("/stems/split", json={"song": "x"}).status_code == 503
+
+
+# --- audit.py stamps the acting user -------------------------------------------
+
+def test_audit_stamps_the_acting_user(tmp_path, monkeypatch):
+    from scripts.core import audit
+
+    monkeypatch.setattr(audit, "_AUDIT_PATH", tmp_path / "audit.jsonl")
+
+    current_user.set("u7")
+    audit.log_audit("remix_complete", resource="song-x")
+    current_user.set(DEFAULT_USER)
+    audit.log_audit("remix_complete", resource="song-y")
+    audit.log_audit("op", resource="song-z", user="operator")  # explicit still wins
+
+    users = {r["resource"]: r["user"] for r in audit.read_audit()}
+    assert users == {"song-x": "u7", "song-y": "local", "song-z": "operator"}
+
+
+# --- spectral_matching freeze in prod ----------------------------------------
+
+@pytest.fixture
+def spectral(tmp_path, monkeypatch):
+    from scripts.core import spectral_matching as sm
+
+    monkeypatch.setattr(sm, "_data_dir", lambda: tmp_path)
+    return sm
+
+
+def test_spectral_learning_frozen_is_a_noop(spectral, monkeypatch):
+    """Non-vacuous: the render is recorded WHILE learning is on, so the history
+    entry exists; the frozen apply_feedback must decline it *because of the
+    flag*, not because there is nothing to train on. Drop the _learning_enabled
+    guard in apply_feedback → it trains on sess-frozen and the model bytes move."""
+    sm = spectral
+    sims = [0.40 + 0.02 * i for i in range(sm.N_BANDS)]
+    render = {"sims": sims, "entry_bar": 8, "score": 0.9}
+
+    # learning ON — the allow side genuinely writes the model
+    monkeypatch.setenv("REMIXMATE_SPECTRAL_LEARNING", "true")
+    sm.record_render("sess-on", render)
+    assert "sess-on" in json.loads(sm.history_path().read_text())
+    before = sm.model_path().read_bytes() if sm.model_path().exists() else b""
+    out = sm.apply_feedback("sess-on", liked=False)
+    assert out["updated"] is True
+    assert sm.model_path().read_bytes() != before
+
+    # a render captured while ON, then the deployment freezes learning
+    sm.record_render("sess-frozen", render)
+    monkeypatch.setenv("REMIXMATE_SPECTRAL_LEARNING", "false")
+    frozen_model = sm.model_path().read_bytes()
+    frozen_history = sm.history_path().read_text()
+
+    res = sm.apply_feedback("sess-frozen", liked=False)  # history for it EXISTS
+    assert res["updated"] is False
+    assert res["reason"] == "spectral learning frozen on this deployment"
+    assert sm.model_path().read_bytes() == frozen_model
+
+    # record_render is a no-op too — sess-3 never reaches the history file
+    sm.record_render("sess-3", render)
+    assert sm.history_path().read_text() == frozen_history
+
+
+# --- feedback_store per-user events ------------------------------------------
+
+@pytest.fixture
+def fstore(tmp_path, monkeypatch):
+    from scripts.core import feedback_store as fs
+
+    db = tmp_path / "feedback.db"
+    conn = _row_conn(db)
+    conn.executescript(fs._DB_SCHEMA)
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(fs, "_DB_PATH", db)
+    monkeypatch.setattr(fs, "_get_conn", lambda: _row_conn(db))
+    monkeypatch.setattr(fs, "_events", [])
+    return fs
+
+
+def test_feedback_events_are_user_scoped(fstore):
+    fs = fstore
+
+    current_user.set("u1")
+    fs.log_event("thumbs_up", "A", "B")
+    fs.log_event("skip", "A", "C")
+    current_user.set("u2")
+    fs.log_event("thumbs_down", "X", "Y")
+
+    current_user.set("u1")
+    assert len(fs.list_events()) == 2
+    assert fs.summarize()["total_events"] == 2
+
+    current_user.set("u2")
+    assert {e["song_a"] for e in fs.list_events()} == {"X"}  # exactly its own, not empty
+    assert fs.summarize()["total_events"] == 1
+
+    assert len(fs.list_events(user_id="*")) == 3  # operator / offline analysis
+
+    # persisted with the owner, not just filtered in memory
+    rows = fs._get_conn().execute(
+        "SELECT song_a, user_id FROM feedback_events ORDER BY created_at"
+    ).fetchall()
+    assert [(r["song_a"], r["user_id"]) for r in rows] == [
+        ("A", "u1"), ("A", "u1"), ("X", "u2"),
+    ]
+
+
+def test_feedback_migration_adds_user_id_and_backfills(tmp_path, monkeypatch):
+    """The P0 fixture always hands a fresh schema, so the migration branch never
+    runs in the normal suite. Build the pre-Phase-3 table by hand and prove
+    _init_db() adds the column and backfills existing rows to 'local'."""
+    from scripts.core import feedback_store as fs
+
+    db = tmp_path / "legacy_feedback.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE feedback_events ("
+        " id TEXT PRIMARY KEY, event_type TEXT NOT NULL, song_a TEXT NOT NULL,"
+        " song_b TEXT, job_id TEXT, position_sec REAL,"
+        " context_json TEXT NOT NULL DEFAULT '{}', created_at REAL NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO feedback_events (id, event_type, song_a, created_at)"
+        " VALUES ('e1', 'skip', 'A', 1.0)"
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(fs, "_DB_PATH", db)
+    monkeypatch.setattr(fs, "_get_conn", lambda: _row_conn(db))
+    fs._init_db()
+
+    c = _row_conn(db)
+    cols = {r[1] for r in c.execute("PRAGMA table_info(feedback_events)")}
+    assert "user_id" in cols
+    assert c.execute("SELECT user_id FROM feedback_events WHERE id='e1'").fetchone()[0] == "local"
+
+
+# --- crates / tags / favorites per-user -------------------------------------
+
+@pytest.fixture
+def crate_store(tmp_path, monkeypatch):
+    from scripts.core import crates
+
+    monkeypatch.setattr(crates, "_DB_PATH", tmp_path / "remixmate.db")
+    crates._init()
+    return crates
+
+
+def test_crates_tags_favorites_are_user_scoped(crate_store):
+    c = crate_store
+
+    current_user.set("u1")
+    cid = c.create_crate("Bangers-u1")
+    c.add_to_crate(cid, "song-1")
+    c.add_tag("song-1", "peak")
+    c.set_favorite("song-1", True)
+
+    current_user.set("u2")
+    assert c.list_crates() == []
+    assert c.list_favorites() == []
+    assert c.is_favorite("song-1") is False       # u1's favorite is invisible
+    assert c.song_tags("song-1") == []
+    assert c.songs_by_tag("peak") == []           # reverse lookup is scoped too
+    assert c.all_tags() == []
+    assert c.crate_songs(cid) == []               # cannot read into u1's crate
+    assert c.delete_crate(cid) is False           # cannot delete it
+    assert c.rename_crate(cid, "hijack") is False  # cannot rename it
+    c.create_crate("Bangers-u2")
+    assert {x["name"] for x in c.list_crates()} == {"Bangers-u2"}
+
+    current_user.set("u1")
+    assert {x["name"] for x in c.list_crates()} == {"Bangers-u1"}
+    assert c.list_favorites() == ["song-1"]
+    assert c.song_tags("song-1") == ["peak"]
+    assert c.crate_songs(cid) == ["song-1"]
+
+
+def test_crates_migration_adds_user_id_and_backfills(tmp_path, monkeypatch):
+    from scripts.core import crates
+
+    db = tmp_path / "legacy_remixmate.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        "CREATE TABLE crates (crate_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,"
+        " created_at REAL NOT NULL);"
+        "CREATE TABLE crate_songs (crate_id TEXT NOT NULL, song_name TEXT NOT NULL,"
+        " added_at REAL NOT NULL, PRIMARY KEY (crate_id, song_name));"
+        "CREATE TABLE song_tags (song_name TEXT NOT NULL, tag TEXT NOT NULL,"
+        " created_at REAL NOT NULL, PRIMARY KEY (song_name, tag));"
+        "CREATE TABLE song_favorites (song_name TEXT PRIMARY KEY, favorited_at REAL NOT NULL);"
+    )
+    conn.execute("INSERT INTO crates VALUES ('c1', 'old-crate', 1.0)")
+    conn.execute("INSERT INTO song_favorites VALUES ('fav-song', 1.0)")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(crates, "_DB_PATH", db)
+    crates._init()
+
+    current_user.set("local")
+    assert {x["name"] for x in crates.list_crates()} == {"old-crate"}
+    assert crates.list_favorites() == ["fav-song"]
+    assert _row_conn(db).execute(
+        "SELECT user_id FROM crates WHERE crate_id='c1'"
+    ).fetchone()[0] == "local"
+
+
+def test_crates_uniqueness_is_still_user_blind_phase4(crate_store):
+    """Phase 3 adds the user_id column but NOT per-user uniqueness. These
+    asserts pin that limitation: crates.name is globally UNIQUE and
+    song_favorites' PK is (song_name) alone. Phase 4 must rebuild both keys to
+    include user_id — when it does, flip these and tick DEPLOYMENT_PLAN P4."""
+    c = crate_store
+
+    for row in c._conn().execute("PRAGMA index_list(crates)").fetchall():
+        idx_cols = [r[2] for r in c._conn().execute(f"PRAGMA index_info({row[1]})")]
+        assert idx_cols not in (["user_id", "name"], ["name", "user_id"])
+
+    fav_pk = [r[1] for r in c._conn().execute("PRAGMA table_info(song_favorites)") if r[5]]
+    assert fav_pk == ["song_name"]
