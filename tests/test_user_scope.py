@@ -357,15 +357,9 @@ def test_spectral_learning_frozen_is_a_noop(spectral, monkeypatch):
 def fstore(tmp_path, monkeypatch):
     from scripts.core import feedback_store as fs
 
-    db = tmp_path / "feedback.db"
-    conn = _row_conn(db)
-    conn.executescript(fs._DB_SCHEMA)
-    conn.commit()
-    conn.close()
-
-    monkeypatch.setattr(fs, "_DB_PATH", db)
-    monkeypatch.setattr(fs, "_get_conn", lambda: _row_conn(db))
+    monkeypatch.setattr(fs, "_DB_PATH", tmp_path / "feedback.db")
     monkeypatch.setattr(fs, "_events", [])
+    fs._init_db()
     return fs
 
 
@@ -389,10 +383,15 @@ def test_feedback_events_are_user_scoped(fstore):
     assert len(fs.list_events(user_id="*")) == 3  # operator / offline analysis
 
     # persisted with the owner, not just filtered in memory
-    rows = fs._get_conn().execute(
-        "SELECT song_a, user_id FROM feedback_events ORDER BY created_at"
-    ).fetchall()
-    assert [(r["song_a"], r["user_id"]) for r in rows] == [
+    from contextlib import closing
+
+    from sqlalchemy import text
+
+    with closing(fs._get_conn()) as conn:
+        rows = conn.execute(
+            text("SELECT song_a, user_id FROM feedback_events ORDER BY created_at")
+        ).fetchall()
+    assert [(r.song_a, r.user_id) for r in rows] == [
         ("A", "u1"), ("A", "u1"), ("X", "u2"),
     ]
 
@@ -419,7 +418,6 @@ def test_feedback_migration_adds_user_id_and_backfills(tmp_path, monkeypatch):
     conn.close()
 
     monkeypatch.setattr(fs, "_DB_PATH", db)
-    monkeypatch.setattr(fs, "_get_conn", lambda: _row_conn(db))
     fs._init_db()
 
     c = _row_conn(db)
@@ -468,6 +466,32 @@ def test_crates_tags_favorites_are_user_scoped(crate_store):
     assert c.crate_songs(cid) == ["song-1"]
 
 
+def test_crates_conflict_paths_return_false_not_raise(crate_store):
+    """The IntegrityError catches in add_to_crate / add_tag and the ON CONFLICT
+    in set_favorite are the dialect-sensitive spots of the SQLAlchemy swap
+    (sqlite3.IntegrityError -> sqlalchemy.exc.IntegrityError; INSERT OR REPLACE
+    -> ON CONFLICT DO UPDATE). A duplicate add must come back False; a repeat
+    favorite must update in place, never raise.
+    """
+    c = crate_store
+    current_user.set("u1")
+    cid = c.create_crate("dupes")
+
+    assert c.add_to_crate(cid, "s1") is True
+    assert c.add_to_crate(cid, "s1") is False        # IntegrityError -> False
+    assert c.crate_songs(cid) == ["s1"]
+
+    assert c.add_tag("s1", "peak") is True
+    assert c.add_tag("s1", "peak") is False
+    assert c.song_tags("s1") == ["peak"]
+
+    c.set_favorite("s1", True)
+    c.set_favorite("s1", True)                        # ON CONFLICT DO UPDATE, no raise
+    assert c.list_favorites() == ["s1"]
+    c.set_favorite("s1", False)
+    assert c.is_favorite("s1") is False
+
+
 def test_crates_migration_adds_user_id_and_backfills(tmp_path, monkeypatch):
     from scripts.core import crates
 
@@ -505,9 +529,17 @@ def test_crates_uniqueness_is_still_user_blind_phase4(crate_store):
     include user_id — when it does, flip these and tick DEPLOYMENT_PLAN P4."""
     c = crate_store
 
-    for row in c._conn().execute("PRAGMA index_list(crates)").fetchall():
-        idx_cols = [r[2] for r in c._conn().execute(f"PRAGMA index_info({row[1]})")]
-        assert idx_cols not in (["user_id", "name"], ["name", "user_id"])
+    with c._conn() as conn:
+        indexes = conn.exec_driver_sql("PRAGMA index_list(crates)").fetchall()
+        for row in indexes:
+            idx_cols = [
+                r[2] for r in conn.exec_driver_sql(f"PRAGMA index_info({row[1]})").fetchall()
+            ]
+            assert idx_cols not in (["user_id", "name"], ["name", "user_id"])
 
-    fav_pk = [r[1] for r in c._conn().execute("PRAGMA table_info(song_favorites)") if r[5]]
+        fav_pk = [
+            r[1]
+            for r in conn.exec_driver_sql("PRAGMA table_info(song_favorites)").fetchall()
+            if r[5]
+        ]
     assert fav_pk == ["song_name"]

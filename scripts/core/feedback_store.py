@@ -11,9 +11,10 @@ scope until an offline analysis (Stage B) greenlights it.
 
 Architecture
 ------------
-Structurally mirrors scripts/api/jobs.py's write-through SQLite + in-memory
-cache pattern (data/feedback.db, DATA_DIR-relative, same connect-per-call
-style). The key structural difference: feedback_events is APPEND-ONLY — an
+Structurally mirrors scripts/api/jobs.py's write-through + in-memory cache
+pattern over the same SQLAlchemy Core layer (scripts.core.db): SQLite at
+data/feedback.db by default, Postgres when DATABASE_URL is set. The key
+structural difference: feedback_events is APPEND-ONLY — an
 event is never mutated in place after being logged, unlike a job's status
 field, so there's no update_job()-equivalent here, no executor, and no SSE
 hook (SELF_IMPROVING_DJ_RESEARCH.md §3 is explicit that playback events are
@@ -37,7 +38,6 @@ Public API
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 import time
 import uuid
@@ -45,6 +45,9 @@ from collections import defaultdict
 from contextlib import closing
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import Connection, inspect, text
+
+from scripts.core import db
 from scripts.core.logging_utils import get_logger
 from scripts.core.paths import DATA_DIR
 
@@ -65,23 +68,36 @@ def _acting_user() -> str:
 
 
 # ---------------------------------------------------------------------------
-# SQLite backend
+# Database backend (SQLAlchemy Core — SQLite by default, Postgres via DATABASE_URL)
 # ---------------------------------------------------------------------------
 
 _DB_PATH = DATA_DIR / "feedback.db"
-_DB_SCHEMA = """
+
+
+def _schema_ddl(dialect_name: str) -> str:
+    """The ``feedback_events`` DDL for one dialect. ``created_at`` is a
+    ``time.time()`` epoch value, so it needs a full 8-byte float: SQLite ``REAL``
+    already is one; Postgres ``REAL`` is float4 and would collide adjacent
+    timestamps, so it gets DOUBLE PRECISION (``position_sec`` is a small offset,
+    float4 is fine, but keep it uniform)."""
+    ts = "DOUBLE PRECISION" if dialect_name == "postgresql" else "REAL"
+    return f"""
 CREATE TABLE IF NOT EXISTS feedback_events (
     id            TEXT PRIMARY KEY,
     event_type    TEXT NOT NULL,
     song_a        TEXT NOT NULL,
     song_b        TEXT,
     job_id        TEXT,
-    position_sec  REAL,
-    context_json  TEXT NOT NULL DEFAULT '{}',
-    created_at    REAL NOT NULL,
+    position_sec  {ts},
+    context_json  TEXT NOT NULL DEFAULT '{{}}',
+    created_at    {ts} NOT NULL,
     user_id       TEXT NOT NULL DEFAULT 'local'
-);
+)
 """
+
+
+# Back-compat: a couple of tests read this attribute for a local SQLite build.
+_DB_SCHEMA = _schema_ddl("sqlite")
 
 # SELF_IMPROVING_DJ_RESEARCH.md §3's event_type column comment, as a
 # validated set rather than a SQLite CHECK constraint (those don't survive
@@ -92,45 +108,51 @@ VALID_EVENT_TYPES = frozenset({
 })
 
 
-def _get_conn() -> sqlite3.Connection:
-    """Open a thread-local SQLite connection (check_same_thread=False is safe
-    because writes are serialized with _lock, same as jobs.py)."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(_DB_PATH), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _get_conn() -> Connection:
+    """A SQLAlchemy Connection to the feedback store — SQLite file when
+    ``DATABASE_URL`` is unset, the shared Postgres engine when it is set.
+    Callers wrap this in ``closing()`` and call ``conn.commit()`` after a write,
+    the same lifecycle the raw sqlite3 handle had. Kept as the mockable seam."""
+    return db.get_engine(str(_DB_PATH)).connect()
 
 
 def _init_db() -> None:
-    with _get_conn() as conn:
-        conn.execute(_DB_SCHEMA)
+    engine = db.get_engine(str(_DB_PATH))
+    with engine.begin() as conn:
+        conn.execute(text(_schema_ddl(engine.dialect.name)))
         # Migration: a feedback.db written before Phase 3 has no user_id column.
         # ADD COLUMN with a DEFAULT backfills every existing row to "local", so
-        # single-user history stays attributed to the local user.
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(feedback_events)")}
+        # single-user history stays attributed to the local user. inspect() on
+        # this connection (not the engine) so it sees the CREATE above, which is
+        # not yet committed on a transactional-DDL dialect like Postgres.
+        cols = {c["name"] for c in inspect(conn).get_columns("feedback_events")}
         if "user_id" not in cols:
             conn.execute(
-                "ALTER TABLE feedback_events ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'"
+                text(
+                    "ALTER TABLE feedback_events "
+                    "ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'"
+                )
             )
-        conn.commit()
 
 
-def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
-    d = dict(row)
+def _row_to_dict(row: Any) -> Dict[str, Any]:
+    d = dict(row._mapping)
     d["context"] = json.loads(d.pop("context_json") or "{}")
     return d
 
 
-def _insert_row(conn: sqlite3.Connection, event: Dict[str, Any]) -> None:
+def _insert_row(conn: Connection, event: Dict[str, Any]) -> None:
     conn.execute(
-        """
+        text(
+            """
         INSERT INTO feedback_events
             (id, event_type, song_a, song_b, job_id, position_sec, context_json,
              created_at, user_id)
         VALUES
             (:id, :event_type, :song_a, :song_b, :job_id, :position_sec, :context_json,
              :created_at, :user_id)
-        """,
+        """
+        ),
         {
             "id":           event["id"],
             "event_type":   event["event_type"],
@@ -167,8 +189,8 @@ def _load_from_db() -> None:
         _init_db()
         with closing(_get_conn()) as conn:
             rows = conn.execute(
-                "SELECT * FROM feedback_events ORDER BY created_at DESC LIMIT ?",
-                (_MAX_IN_MEMORY,),
+                text("SELECT * FROM feedback_events ORDER BY created_at DESC LIMIT :n"),
+                {"n": _MAX_IN_MEMORY},
             ).fetchall()
         _events.extend(_row_to_dict(row) for row in rows)
         logger.info("Feedback store loaded from SQLite", extra={"count": len(_events)})
