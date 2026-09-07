@@ -14,7 +14,10 @@ transformers/streamlit/nltk moved to pyproject extras, Streamlit `ui` service
 dropped, root route → frontend redirect. Phase 3: per-user scoping via a
 `current_user` contextvar (default `"local"`) — outputs, job store (3a),
 stem-split gate, audit user, spectral-learning freeze, and the crates / feedback
-SQLite stores (3b). Phases 4 through 8 untouched.
+SQLite stores (3b). Phase 4: **backend** Supabase auth — RS256/JWKS
+`require_user` gate (`REMIXMATE_AUTH_ENABLED`, off → `"local"`), cookie-auth SSE,
+`system.router` mounted open, `scripts/migrate_uids.py` one-time re-stamp.
+Frontend auth shell + live-Supabase verification pending. Phases 5 through 8 untouched.
 
 ## Phase ledger
 
@@ -24,7 +27,7 @@ SQLite stores (3b). Phases 4 through 8 untouched.
 | 1 | Catalog teardown + enforced CC gate | done (code); live ingest operator-pending | `3d06bf2` `2f2833f` `f6c0c6c` `8c4f204` `46aa166` `dbe2db1` + frontend teardown; see below |
 | 2 | Guard generative + slim the image | done, verified | `f27aecb`; `tests/test_generative_gate.py` (11) + `tests/test_root_route.py` (5); demucs kept (subprocess, not imported) |
 | 3 | User contextvar + per-user data | done, verified | `653633a` (3a) + 3b batch; `tests/test_user_scope.py` (21); migrations verified on live-DB copies |
-| 4 | Auth + tenancy (Supabase) | not started | |
+| 4 | Auth + tenancy (Supabase) | backend done | `tests/test_auth.py` (13, synthetic RS256, incl. real-app gate + role check) + `tests/test_migrate_uids.py` (4); frontend shell + 2-account isolation operator-pending |
 | 5 | SQLite to Postgres | not started | |
 | 6 | Per-user mix retention | not started | |
 | 7 | Deploy / infra | not started | |
@@ -34,7 +37,7 @@ SQLite stores (3b). Phases 4 through 8 untouched.
 
 | Check | Result | Note |
 |---|---|---|
-| safe pytest subset | 743 passed, 90 deselected, ~15s | 706 through Phase 1; +16 Phase 2; +6 Phase 3a (`test_user_scope.py`); +15 Phase 3b |
+| safe pytest subset | 760 passed, 90 deselected, ~15s | 706 through Phase 1; +16 Phase 2; +6 Phase 3a; +15 Phase 3b; +13 `test_auth.py` +4 `test_migrate_uids.py` Phase 4 backend |
 | import smoke | `scripts.api.main` / `.routes` / `.tasks` / `scripts.download` all import | proves nothing references the three deleted modules |
 | `uvx ruff check` (repo-wide) | ~1580 findings on a clean `HEAD` | not a usable gate as it stands: pre-existing debt, ~1100 `W293` blank-line whitespace + ~200 `I001` + ~150 `F401`, none introduced by this migration. `E501` is correctly ignored so the config is being read. Run `ruff check --fix` repo-wide and move the config to `[tool.ruff.lint]` before Phase 7 CI. |
 | `uvx ruff check` (teardown files) | ~54 findings, all pre-existing style | the teardown adds none; `analysis_pipeline.py` had 2 (`F401` numpy, `I001`) in code it did not touch |
@@ -156,19 +159,23 @@ Nothing is deployed. The single-user local app still runs as
 `PROJECT_OVERVIEW.md` describes: transition engine, music understanding, setlist
 intelligence, search, and the 9-page SPA. The migration has removed capability
 (all download paths, generative routes behind a default-off flag) and added the
-licence model + attribution and per-user data scoping. Still missing: auth,
-tenancy, Postgres, mix retention, any deploy artifact.
+licence model + attribution, per-user data scoping, and the backend auth gate.
+Still missing: the frontend auth shell, a live Supabase project, Postgres, mix
+retention, any deploy artifact.
 
-Phases 1, 2, and 3 are done in code. Next is **Phase 4** — Supabase JWT auth:
-`require_user` dependency, cookie-authenticated SSE, the frontend auth shell, and
-the one-time `outputs/` + DB namespace migration from `"local"` to real uids.
-Phase 3's contextvar is the load-bearing piece it plugs into.
+Phases 1, 2, and 3 are done in code; Phase 4's **backend** is done (RS256/JWKS
+`require_user`, cookie-auth SSE, `scripts/migrate_uids.py`), tested with synthetic
+tokens. Next: **Phase 4 commit 2** — `frontend/src/lib/api.ts` `credentials:
+'include'`, `@supabase/supabase-js`, a `<RequireAuth>` shell + login page, and
+resolving the Supabase SSR chunked-cookie format so `_extract_token` sees the
+access token. Then a live 2-account isolation run (operator-pending).
 
 ## Honest gaps against a real hosted product
 
-- No auth on any endpoint. `REMIXMATE_AUTH_ENABLED` does not exist yet (Phase 4).
-  Every request runs as `"local"` — the scoping is real but there is only one
-  tenant until Phase 4 sets `current_user` from a verified JWT.
+- Auth backend is flag-gated (`REMIXMATE_AUTH_ENABLED`, off by default → every
+  request is `"local"`). No frontend login yet, and no Supabase project has been
+  provisioned — the JWKS handshake and browser cookie flow are unverified against
+  anything real (synthetic RSA tokens only).
 - Per-user scoping is column-only for crates/tags/favorites: `crates.name UNIQUE`
   and the `song_tags` / `song_favorites` PKs are still global. Phase 4 must
   rebuild those keys before a second real user exists (pinned by a test).

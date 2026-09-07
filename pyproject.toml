@@ -28,6 +28,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.35",
     "python-multipart>=0.0.20",
+    "PyJWT[crypto]>=2.10",
     "tqdm>=4.67",
     "click>=8.2",
     "streamlit>=1.47",

@@ -18,10 +18,12 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from scripts.api.auth import auth_context_middleware, require_user
+from scripts.api.routers import system
 from scripts.api.routes import router
 from scripts.core.config import cfg, configure_logging
 from scripts.core.logging_utils import get_logger, set_request_id
@@ -156,11 +158,27 @@ async def _allow_private_network(request: Request, call_next):
         response.headers["Access-Control-Allow-Private-Network"] = "true"
     return response
 
+
+# ---------------------------------------------------------------------------
+# Auth — resolves the acting user per request and pins current_user (Phase 4).
+# No-op ("local") unless REMIXMATE_AUTH_ENABLED is truthy. Registered as HTTP
+# middleware, not a dependency, so sync handlers + the job store see the
+# contextvar (a dependency's .set() would not reach a sibling sync endpoint).
+# ---------------------------------------------------------------------------
+
+app.middleware("http")(auth_context_middleware)
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
-app.include_router(router)
+# Health probes mount first and OPEN — no require_user — so liveness/readiness
+# stay reachable when auth is on.
+app.include_router(system.router)
+
+# Everything else requires an authenticated user (401 when auth is on and the
+# request carries no valid Supabase token; "local" when auth is off).
+app.include_router(router, dependencies=[Depends(require_user)])
 
 # ---------------------------------------------------------------------------
 # Root — the SPA is a separate deploy (Cloudflare Pages). This API serves no UI.

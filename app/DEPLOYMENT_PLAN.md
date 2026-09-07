@@ -13,7 +13,7 @@
 | 1 | Catalog teardown + enforced CC gate | ☑ verified (code; live ingest pending an operator run) | 3d06bf2, 2f2833f, f6c0c6c, 8c4f204, 46aa166, dbe2db1, + frontend teardown |
 | 2 | Guard generative + slim the image | ☑ verified | f27aecb |
 | 3 | User contextvar + per-user mixes/jobs/crates/feedback | ☑ verified | 653633a (3a) + stem gate/audit/spectral/feedback/crates (3b) |
-| 4 | Auth + tenancy (Supabase) | ☐ not started | |
+| 4 | Auth + tenancy (Supabase) | ◐ backend done | RS256 JWKS gate + cookie-auth SSE + uid migration; frontend + live Supabase pending |
 | 5 | SQLite → Postgres (jobs, crates, feedback, setlists) | ☐ not started | |
 | 6 | Per-user mix retention | ☐ not started | |
 | 7 | Deploy / infra | ☐ not started | |
@@ -50,6 +50,7 @@ by a code change. Phase 3 does not depend on them.
   (generative gate + root-route tests): **722 passed**. After Phase 3a
   (`test_user_scope.py`, 6 cases): **728 passed**. After Phase 3b (stem-split
   gate, audit, spectral freeze, feedback, crates — 15 more cases): **743 passed**.
+  After Phase 4 backend (`test_auth.py` 13 + `test_migrate_uids.py` 4): **760 passed**.
 - `cd frontend && npx vite build` — clean
 
 ---
@@ -519,32 +520,66 @@ column).
 **Goal:** unauthenticated requests get 401; two accounts are fully isolated except
 the shared catalog.
 
-**Tasks**
-- [ ] `scripts/api/auth.py`: `require_user` dependency verifies the Supabase JWT
-      (JWKS or project secret), sets `current_user`, else 401. Gated by
-      `REMIXMATE_AUTH_ENABLED` (off locally → `"local"` fallback).
-- [ ] `scripts/api/main.py:170`:
-      `app.include_router(router, dependencies=[Depends(require_user)])`. Mount
-      `system.router` (`/health*`) **separately, before that line**, so probes stay open.
-- [ ] SSE: `/events/stream` authenticates via an **httpOnly secure cookie**
-      (Supabase SSR cookie flow; `allow_credentials=True` already set at
-      `main.py:130`). `EventSource` cannot send `Authorization`.
-- [ ] `frontend/src/lib/api.ts:56`: add `credentials: 'include'` to every request.
+**State:** ◐ backend done (commit `<this batch>`); frontend auth shell +
+live-Supabase verification are commit 2 / operator-pending.
+
+**Decisions (2026-09-06):** RS256 via the project **JWKS** (`SUPABASE_JWKS_URL`),
+not the HS256 project secret. No Supabase project provisioned yet, so the backend
+is flag-gated and tested with synthetic RSA-signed tokens; the real 2-account
+isolation run and the browser cookie handshake are `operator-pending`.
+
+**Tasks — backend (this batch)**
+- [x] `scripts/api/auth.py`: `_verify_token` (Supabase RS256 against a lazily
+      built, URL-keyed `PyJWKClient`; `aud="authenticated"`, `require=["exp","sub"]`);
+      `_extract_token` (Bearer header, then a raw-JWT `sb-access-token` cookie for
+      EventSource); `auth_context_middleware` sets `current_user` from the token
+      `sub` per request (blocking verify runs in a threadpool, the `.set()` back
+      in the request task); `require_user` dependency → 401 on a missing/bad
+      token, 500 on a missing `SUPABASE_JWKS_URL`. All no-ops (`"local"`, no token
+      needed) unless `REMIXMATE_AUTH_ENABLED` is truthy.
+- [x] `scripts/api/main.py`: `app.middleware("http")(auth_context_middleware)`;
+      `system.router` mounted **open** first, then
+      `app.include_router(router, dependencies=[Depends(require_user)])`.
+      `scripts/api/routes.py` no longer aggregates `system` (main.py owns it now).
+      The contextvar is set in **middleware, not the dependency** — a sync
+      dependency's `.set()` does not reach a sibling sync endpoint; the
+      middleware's does (proven by `test_auth.py`'s sync `/whoami`).
+- [x] SSE: `/events/stream` is inside the gated router, so `require_user` runs;
+      `_extract_token` reads the `sb-access-token` cookie (`EventSource` can't
+      send `Authorization`). `allow_credentials=True` already set at `main.py`.
+- [x] `scripts/migrate_uids.py`: one-time `"local"` → real-uid migration. Dry run
+      by default; `--apply` moves `outputs/local/*` → `outputs/<uid>/` (hard error
+      on a colliding dir, before any DB write) and re-stamps every `"local"` row
+      in `jobs.db` (`meta_json.user_id`), `remixmate.db` (4 crate tables), and
+      `feedback.db`. Foreign-uid rows untouched. `tests/test_migrate_uids.py` (4).
+- [x] `requirements.txt` + `pyproject.toml`: `PyJWT[crypto]==2.10.1` (pulls
+      `cryptography` for RS256). Imported lazily — a no-auth deploy never loads it.
+
+**Tasks — frontend (commit 2, not started)**
+- [ ] `frontend/src/lib/api.ts`: add `credentials: 'include'` to every request.
 - [ ] Frontend: `@supabase/supabase-js`; `frontend/src/shell/` gets `<RequireAuth>`
       + a login/signup page. EventSource hook unchanged with cookie auth.
-- [ ] One-time migration script (own data, snapshot first): move `outputs/*` →
-      `outputs/<your_uid>/`; stamp existing `jobs.db` / `remixmate.db` (crates) /
-      `feedback.db` rows with `<your_uid>`. Catalog (`library/`) not namespaced.
+- [ ] Resolve the Supabase SSR **chunked-cookie** format (`sb-<ref>-auth-token`
+      split across `.0`/`.1`), or configure a single raw-JWT cookie —
+      `_extract_token` currently expects the access token verbatim.
 
 **Verify**
-- [ ] `REMIXMATE_AUTH_ENABLED=true`: unauthenticated request → 401; `/health/ready` → 200.
-- [ ] Two Supabase accounts: `/library` identical (shared catalog); `/jobs`,
-      `/crates`, `/feedback/summary`, `/outputs/*` disjoint.
-- [ ] SSE stream connects with the session cookie, rejects without it.
-- [ ] `REMIXMATE_AUTH_ENABLED` unset: full local suite still green.
-- [ ] Green bar.
+- [x] Synthetic-token matrix — `tests/test_auth.py` (11): valid Bearer → 200 +
+      the sync handler sees `sub`; valid `sb-access-token` cookie → 200; no token
+      → 401 (`WWW-Authenticate: Bearer`); expired / wrong-aud / wrong-key /
+      malformed / no-`sub` → 401; `/health/live` + `/health/ready` open with auth
+      on; auth on + no `SUPABASE_JWKS_URL` → 500. The 401 gate and the `audience=`
+      arg were each mutation-tested red.
+- [x] `REMIXMATE_AUTH_ENABLED` unset: safe subset **760 passed**, 90 deselected
+      (743 + 11 auth + 4 migrate). `"local"` behaviour byte-identical.
+- [ ] **operator-pending** — two real Supabase accounts: `/library` identical
+      (shared catalog); `/jobs`, `/crates`, `/feedback/summary`, `/outputs/*`
+      disjoint. Needs a live project.
+- [ ] **operator-pending** — SSE stream connects with the browser session cookie,
+      rejects without it. Needs the frontend auth flow + a live project.
+- [ ] Green bar (frontend `tsc`/`vitest`/`vite build` — commit 2).
 
-**Commit:** `feat: Supabase JWT auth gate + cookie-authenticated SSE`
+**Commit:** `feat: Supabase RS256 JWT gate + cookie-auth SSE + uid migration (backend)`
 
 ---
 
@@ -615,8 +650,11 @@ tests/local — both paths exercised.
       transformers, no MusicGen weights on the box.
 - [ ] Mount the catalog volume **read-only** at `LIBRARY_DIR`.
 - [ ] `/etc/remixmate.env` (chmod 600, from `app/deploy/remixmate.env.example`):
-      `REMIXMATE_*` overrides, Supabase keys, Spotify app creds, `DATABASE_URL`,
-      `REMIXMATE_AUTH_ENABLED=true`, `REMIXMATE_LICENSE_ENFORCE=true`,
+      `REMIXMATE_*` overrides, Spotify app creds, `DATABASE_URL`,
+      `REMIXMATE_AUTH_ENABLED=true`,
+      `SUPABASE_JWKS_URL=https://<ref>.supabase.co/auth/v1/.well-known/jwks.json`
+      (+ `SUPABASE_JWT_AUD` only if not `authenticated`; `SUPABASE_COOKIE_NAME` if
+      the frontend uses a non-default session cookie), `REMIXMATE_LICENSE_ENFORCE=true`,
       `REMIXMATE_SPECTRAL_LEARNING=false`, `REMIXMATE_FRONTEND_URL=https://<domain>`,
       `REMIXMATE_STEM_SPLIT_ENABLED` unset, `REMIXMATE_GENERATIVE_ENABLED` unset.
       **Do not deploy `config.local.yaml`.**

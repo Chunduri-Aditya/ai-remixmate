@@ -41,6 +41,13 @@ fastapi==0.115.14
 uvicorn[standard]==0.35.0
 python-multipart==0.0.20    # file upload support for FastAPI
 
+# --- Auth (Phase 4 — Supabase JWT) ---
+# scripts/api/auth.py verifies Supabase RS256 access tokens against the project
+# JWKS. Imported lazily and only exercised when REMIXMATE_AUTH_ENABLED is truthy,
+# so local single-user dev runs without a token. [crypto] pulls `cryptography`
+# for RS256.
+PyJWT[crypto]==2.10.1
+
 # --- Progress / CLI ---
 tqdm==4.67.1
 click==8.2.1

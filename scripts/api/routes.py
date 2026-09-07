@@ -3,6 +3,10 @@ scripts/api/routes.py — Route aggregator.
 
 Each domain has its own sub-router in scripts/api/routers/. This module
 combines them into a single APIRouter that main.py includes.
+
+``system.router`` (``/health*``) is deliberately NOT aggregated here: main.py
+mounts it separately and *without* the ``require_user`` dependency so liveness
+and readiness probes stay reachable when auth is enabled (Phase 4).
 """
 
 from fastapi import APIRouter
@@ -19,11 +23,9 @@ from scripts.api.routers import (
     setlist,
     spotify,
     stems,
-    system,
 )
 
 router = APIRouter()
-router.include_router(system.router)
 # analysis must come before library: its static GET /library/crate-search
 # would otherwise be shadowed by library's dynamic GET /library/{name}
 # (FastAPI matches in registration order).
