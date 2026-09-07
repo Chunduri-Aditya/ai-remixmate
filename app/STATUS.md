@@ -1,8 +1,8 @@
 # Hosted migration status
 
 Where the `hosted-app` branch stands against `app/DEPLOYMENT_PLAN.md`. This is the
-delta on top of `PROJECT_OVERVIEW.md`, not a recap. Every number below came from a
-command on 2026-08-31, not an estimate.
+delta on top of `PROJECT_OVERVIEW.md`, not a recap. Numbers are revised per
+commit against a real command, not estimated.
 
 ## One line
 
@@ -17,7 +17,9 @@ stem-split gate, audit user, spectral-learning freeze, and the crates / feedback
 SQLite stores (3b). Phase 4: **backend** Supabase auth — RS256/JWKS
 `require_user` gate (`REMIXMATE_AUTH_ENABLED`, off → `"local"`), cookie-auth SSE,
 `system.router` mounted open, `scripts/migrate_uids.py` one-time re-stamp.
-Frontend auth shell + live-Supabase verification pending. Phases 5 through 8 untouched.
+Frontend auth shell (supabase-js, `<RequireAuth>`, login page, Bearer +
+credentials on every request, SSE cookie mirror) is in. Only the live-Supabase
+run is pending. Phases 5 through 8 untouched.
 
 ## Phase ledger
 
@@ -27,7 +29,7 @@ Frontend auth shell + live-Supabase verification pending. Phases 5 through 8 unt
 | 1 | Catalog teardown + enforced CC gate | done (code); live ingest operator-pending | `3d06bf2` `2f2833f` `f6c0c6c` `8c4f204` `46aa166` `dbe2db1` + frontend teardown; see below |
 | 2 | Guard generative + slim the image | done, verified | `f27aecb`; `tests/test_generative_gate.py` (11) + `tests/test_root_route.py` (5); demucs kept (subprocess, not imported) |
 | 3 | User contextvar + per-user data | done, verified | `653633a` (3a) + 3b batch; `tests/test_user_scope.py` (21); migrations verified on live-DB copies |
-| 4 | Auth + tenancy (Supabase) | backend done | `tests/test_auth.py` (13, synthetic RS256, incl. real-app gate + role check) + `tests/test_migrate_uids.py` (4); frontend shell + 2-account isolation operator-pending |
+| 4 | Auth + tenancy (Supabase) | code done | backend: `tests/test_auth.py` (13, synthetic RS256, incl. real-app gate + role check) + `tests/test_migrate_uids.py` (4). frontend: `src/shell/{authContext,AuthProvider,RequireAuth,LoginPage}` + `src/lib/supabase.ts`; `auth.test.tsx` (7) + `AuthProvider.test.tsx` (7) + `supabase.test.ts` (4). Live 2-account isolation operator-pending. |
 | 5 | SQLite to Postgres | not started | |
 | 6 | Per-user mix retention | not started | |
 | 7 | Deploy / infra | not started | |
@@ -41,7 +43,7 @@ Frontend auth shell + live-Supabase verification pending. Phases 5 through 8 unt
 | import smoke | `scripts.api.main` / `.routes` / `.tasks` / `scripts.download` all import | proves nothing references the three deleted modules |
 | `uvx ruff check` (repo-wide) | ~1580 findings on a clean `HEAD` | not a usable gate as it stands: pre-existing debt, ~1100 `W293` blank-line whitespace + ~200 `I001` + ~150 `F401`, none introduced by this migration. `E501` is correctly ignored so the config is being read. Run `ruff check --fix` repo-wide and move the config to `[tool.ruff.lint]` before Phase 7 CI. |
 | `uvx ruff check` (teardown files) | ~54 findings, all pre-existing style | the teardown adds none; `analysis_pipeline.py` had 2 (`F401` numpy, `I001`) in code it did not touch |
-| frontend gate | `tsc --noEmit` clean · `vitest run` 35 passed (7 files) · `vite build` clean (1.1s) | after the frontend teardown |
+| frontend gate | `tsc --noEmit` clean · `vitest run` 53 passed (10 files) · `vite build` clean · `eslint --max-warnings 0` clean | +18 in Phase 4 commit 2 (auth.test.tsx 7, AuthProvider.test.tsx 7, supabase.test.ts 4) |
 
 The `config.yaml` / `config.py` pair was realigned (dropped
 `download.default_source` and `spotify.redirect_uri` from both), fixing 3
@@ -159,23 +161,22 @@ Nothing is deployed. The single-user local app still runs as
 `PROJECT_OVERVIEW.md` describes: transition engine, music understanding, setlist
 intelligence, search, and the 9-page SPA. The migration has removed capability
 (all download paths, generative routes behind a default-off flag) and added the
-licence model + attribution, per-user data scoping, and the backend auth gate.
-Still missing: the frontend auth shell, a live Supabase project, Postgres, mix
-retention, any deploy artifact.
+licence model + attribution, per-user data scoping, and the full auth path
+(backend gate + frontend shell). Still missing: a live Supabase project,
+Postgres, mix retention, any deploy artifact.
 
-Phases 1, 2, and 3 are done in code; Phase 4's **backend** is done (RS256/JWKS
-`require_user`, cookie-auth SSE, `scripts/migrate_uids.py`), tested with synthetic
-tokens. Next: **Phase 4 commit 2** — `frontend/src/lib/api.ts` `credentials:
-'include'`, `@supabase/supabase-js`, a `<RequireAuth>` shell + login page, and
-resolving the Supabase SSR chunked-cookie format so `_extract_token` sees the
-access token. Then a live 2-account isolation run (operator-pending).
+Phases 1–3 done; Phase 4 is code-complete both sides — backend RS256/JWKS
+`require_user` + cookie-auth SSE + `scripts/migrate_uids.py`, frontend supabase-js
++ `<RequireAuth>` + login page + Bearer/credentials on every request. Next:
+**Phase 5** — SQLite → Postgres for jobs/crates/feedback. Phase 4's live
+2-account isolation run stays operator-pending on a provisioned project.
 
 ## Honest gaps against a real hosted product
 
-- Auth backend is flag-gated (`REMIXMATE_AUTH_ENABLED`, off by default → every
-  request is `"local"`). No frontend login yet, and no Supabase project has been
-  provisioned — the JWKS handshake and browser cookie flow are unverified against
-  anything real (synthetic RSA tokens only).
+- Auth is flag-gated (`REMIXMATE_AUTH_ENABLED` / `VITE_SUPABASE_*`, all off by
+  default → every request is `"local"`). No Supabase project has been
+  provisioned — the JWKS handshake and browser cookie flow are unverified
+  against anything real (synthetic RSA tokens + jsdom only).
 - Per-user scoping is column-only for crates/tags/favorites: `crates.name UNIQUE`
   and the `song_tags` / `song_favorites` PKs are still global. Phase 4 must
   rebuild those keys before a second real user exists (pinned by a test).

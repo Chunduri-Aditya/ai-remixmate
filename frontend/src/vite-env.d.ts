@@ -5,6 +5,10 @@ interface ImportMetaEnv {
   readonly VITE_API_BASE?: string
   /** Absolute SSE stream URL. Empty = /events/stream via Vite dev proxy. */
   readonly VITE_EVENTS_URL?: string
+  /** Supabase project URL. Set with VITE_SUPABASE_ANON_KEY to turn on auth; unset = no auth. */
+  readonly VITE_SUPABASE_URL?: string
+  /** Supabase anon/publishable key. Required alongside VITE_SUPABASE_URL for auth. */
+  readonly VITE_SUPABASE_ANON_KEY?: string
 }
 
 interface ImportMeta {

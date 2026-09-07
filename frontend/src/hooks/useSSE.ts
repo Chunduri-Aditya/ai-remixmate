@@ -31,7 +31,10 @@ export function useSSE() {
   function connect() {
     if (unmounted.current) return
 
-    const es = new EventSource(SSE_URL)
+    // withCredentials so the sb-access-token cookie rides a cross-origin
+    // stream (prod: Pages frontend → API on another domain). Harmless
+    // same-origin. See scripts/api/auth.py + lib/supabase.syncSseCookie.
+    const es = new EventSource(SSE_URL, { withCredentials: true })
     esRef.current = es
 
     es.onopen = () => {

@@ -13,7 +13,7 @@
 | 1 | Catalog teardown + enforced CC gate | ☑ verified (code; live ingest pending an operator run) | 3d06bf2, 2f2833f, f6c0c6c, 8c4f204, 46aa166, dbe2db1, + frontend teardown |
 | 2 | Guard generative + slim the image | ☑ verified | f27aecb |
 | 3 | User contextvar + per-user mixes/jobs/crates/feedback | ☑ verified | 653633a (3a) + stem gate/audit/spectral/feedback/crates (3b) |
-| 4 | Auth + tenancy (Supabase) | ◐ backend done | RS256 JWKS gate + cookie-auth SSE + uid migration; frontend + live Supabase pending |
+| 4 | Auth + tenancy (Supabase) | ◐ code done | RS256 JWKS gate + cookie-auth SSE + uid migration (backend) + auth shell (frontend); live Supabase run operator-pending |
 | 5 | SQLite → Postgres (jobs, crates, feedback, setlists) | ☐ not started | |
 | 6 | Per-user mix retention | ☐ not started | |
 | 7 | Deploy / infra | ☐ not started | |
@@ -520,8 +520,9 @@ column).
 **Goal:** unauthenticated requests get 401; two accounts are fully isolated except
 the shared catalog.
 
-**State:** ◐ backend done (commit `<this batch>`); frontend auth shell +
-live-Supabase verification are commit 2 / operator-pending.
+**State:** ◐ backend + frontend done; only the live-Supabase run (real
+2-account isolation, browser cookie handshake) is operator-pending — needs a
+provisioned project.
 
 **Decisions (2026-09-06):** RS256 via the project **JWKS** (`SUPABASE_JWKS_URL`),
 not the HS256 project secret. No Supabase project provisioned yet, so the backend
@@ -555,13 +556,37 @@ isolation run and the browser cookie handshake are `operator-pending`.
 - [x] `requirements.txt` + `pyproject.toml`: `PyJWT[crypto]==2.10.1` (pulls
       `cryptography` for RS256). Imported lazily — a no-auth deploy never loads it.
 
-**Tasks — frontend (commit 2, not started)**
-- [ ] `frontend/src/lib/api.ts`: add `credentials: 'include'` to every request.
-- [ ] Frontend: `@supabase/supabase-js`; `frontend/src/shell/` gets `<RequireAuth>`
-      + a login/signup page. EventSource hook unchanged with cookie auth.
-- [ ] Resolve the Supabase SSR **chunked-cookie** format (`sb-<ref>-auth-token`
-      split across `.0`/`.1`), or configure a single raw-JWT cookie —
-      `_extract_token` currently expects the access token verbatim.
+**Tasks — frontend (commit 2, done)**
+- [x] `frontend/src/lib/api.ts`: every request now sends `credentials: 'include'`
+      and, when a session exists, `Authorization: Bearer <access_token>` (from
+      `getAccessToken()`). New `setUnauthorizedHandler` seam — a 401 from a gated
+      route calls it (AuthProvider wires it to `signOut()`).
+- [x] `@supabase/supabase-js@^2.115` added. `frontend/src/lib/supabase.ts` —
+      client is `null` + `authConfigured=false` unless `VITE_SUPABASE_URL` +
+      `VITE_SUPABASE_ANON_KEY` are both set, so local dev / tests are unchanged.
+- [x] `frontend/src/shell/`: `authContext.ts` (context + `useAuth`, split per the
+      `toastContext` pattern), `AuthProvider.tsx` (session lifecycle,
+      `onAuthStateChange`, cookie mirror, 401 handler), `RequireAuth.tsx` (gate:
+      passthrough when unconfigured, splash while loading, `<LoginPage>` when no
+      session), `LoginPage.tsx` + `.css` (email/password sign-in + sign-up,
+      design-token styling). `LeftRail` gains a sign-out button when
+      `authConfigured && session`. Wired: `AuthProvider` in `main.tsx`,
+      `RequireAuth` around `<Routes>` in `App.tsx`.
+- [x] **Cookie decision:** no Supabase SSR chunked cookie. `syncSseCookie()`
+      writes a single readable `sb-access-token` cookie (matches
+      `auth.py::_DEFAULT_COOKIE_NAME`) kept in sync with the session
+      (`AuthProvider`'s `onAuthStateChange`) — `SameSite=None; Secure` on https
+      (cross-site prod topology), `SameSite=Lax` on http localhost. Not httpOnly
+      (JS sets it; the token is in localStorage anyway via supabase-js) — a true
+      httpOnly session cookie needs an SSR/edge proxy, deferred.
+- [x] **The plan's "EventSource hook unchanged" was wrong.** `useSSE.ts` now
+      opens `EventSource(url, { withCredentials: true })` — required for the
+      cookie to ride a cross-origin stream (prod: Pages frontend → API on
+      another domain). Harmless same-origin.
+- [x] `AuthProvider` also `queryClient.clear()`s on `SIGNED_OUT` so a re-login
+      on the same tab never shows the previous user's cached data
+      (`staleTime` is 15s). `main.tsx` nests `AuthProvider` inside
+      `QueryClientProvider` for this.
 
 **Verify**
 - [x] Synthetic-token matrix — `tests/test_auth.py` (11): valid Bearer → 200 +
@@ -577,9 +602,22 @@ isolation run and the browser cookie handshake are `operator-pending`.
       disjoint. Needs a live project.
 - [ ] **operator-pending** — SSE stream connects with the browser session cookie,
       rejects without it. Needs the frontend auth flow + a live project.
-- [ ] Green bar (frontend `tsc`/`vitest`/`vite build` — commit 2).
+- [x] Frontend gate: `tsc --noEmit` clean · `vitest run` **53 passed** (10 files;
+      +18 — `auth.test.tsx` 7, `AuthProvider.test.tsx` 7, `supabase.test.ts` 4) ·
+      `vite build` clean · `eslint --max-warnings 0` clean.
+- [x] `<RequireAuth>` covered — `authConfigured=false` passes through
+      (`supabase.test.ts` + `smoke.test.ts`); `=true` shows login with no
+      session, splash while loading, children with a session, toggles to
+      sign-up (`auth.test.tsx`). api.ts sends `Authorization` + `credentials`
+      only when a token exists; a 401 fires the unauthorized handler.
+- [x] `AuthProvider` lifecycle covered (`AuthProvider.test.tsx`, 7): initial
+      cookie mirror + 401-handler registration; cookie re-mirrored on every
+      auth-state change incl. token refresh (mutation-tested); cookie cleared +
+      `queryClient.clear()` on `SIGNED_OUT` (not on other events); subscription
+      + handler torn down on unmount.
 
-**Commit:** `feat: Supabase RS256 JWT gate + cookie-auth SSE + uid migration (backend)`
+**Commits:** `<backend batch>` (RS256 gate + SSE cookie + uid migration) ·
+`<this batch>` (frontend auth shell).
 
 ---
 
@@ -638,8 +676,12 @@ tests/local — both paths exercised.
 
 **Tasks**
 - [ ] Frontend on Cloudflare Pages; CI builds `frontend/dist`; set
-      `VITE_API_BASE=https://api.<domain>`, `VITE_EVENTS_URL=…/events/stream`.
-      Stop committing `frontend/dist/`.
+      `VITE_API_BASE=https://api.<domain>`, `VITE_EVENTS_URL=…/events/stream`,
+      `VITE_SUPABASE_URL=https://<ref>.supabase.co`, `VITE_SUPABASE_ANON_KEY=…`
+      (both required to turn auth on client-side; must pair with the API's
+      `REMIXMATE_AUTH_ENABLED=true` + `SUPABASE_JWKS_URL`). Stop committing
+      `frontend/dist/`. API CORS must echo the Pages origin (not `*`) with
+      `Access-Control-Allow-Credentials: true` for the cross-site SSE cookie.
 - [ ] Hetzner CX22: bare `uvicorn` (1 worker) under `systemd`, `Caddy` for
       auto-TLS + reverse proxy. `apt install ffmpeg libsndfile1`; project venv;
       `pip install -r requirements.txt && pip install -e .` (`demucs` is in

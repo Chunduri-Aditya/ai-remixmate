@@ -15,10 +15,13 @@ import {
   Settings,
   Radio,
   PictureInPicture2,
+  LogOut,
   type LucideIcon,
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/stores/appStore'
+import { authConfigured } from '@/lib/supabase'
+import { useAuth } from './authContext'
 import type { NavDestination } from '@/types'
 import './LeftRail.css'
 
@@ -125,6 +128,7 @@ export function LeftRail() {
   const navigate = useNavigate()
   const location = useLocation()
   const setActiveNav = useAppStore((s) => s.setActiveNav)
+  const { session, signOut } = useAuth()
 
   function handleNav(item: NavItem) {
     setActiveNav(item.id)
@@ -165,8 +169,19 @@ export function LeftRail() {
         })}
       </ul>
 
-      {/* Bottom: connection status dot */}
+      {/* Bottom: sign out (when auth is on) + connection status dot */}
       <div className="left-rail__footer">
+        {authConfigured && session && (
+          <button
+            className="left-rail__item"
+            onClick={() => void signOut()}
+            title={`Sign out — ${session.user.email ?? 'account'}`}
+            aria-label="Sign out"
+          >
+            <LogOut size={18} strokeWidth={1.5} />
+            <span className="left-rail__item-label">Sign out</span>
+          </button>
+        )}
         <div className="left-rail__status-dot">
           <ConnectionDot />
         </div>

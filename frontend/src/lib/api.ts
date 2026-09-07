@@ -29,6 +29,8 @@ import type {
 // In dev the Vite proxy rewrites /api/* → http://localhost:8000/*.
 // In static builds (GitHub Pages) VITE_API_BASE points straight at the
 // locally running backend, e.g. http://localhost:8000.
+import { getAccessToken } from './supabase'
+
 const BASE = import.meta.env.VITE_API_BASE || '/api'
 
 export const EVENTS_URL = import.meta.env.VITE_EVENTS_URL || '/events/stream'
@@ -46,6 +48,14 @@ export class ApiError extends Error {
   }
 }
 
+// Called on any 401 from a gated route — the session lapsed server-side.
+// AuthProvider registers a handler that drops the session and shows the login
+// screen. No-op when auth is off.
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  onUnauthorized = fn
+}
+
 // Generic fetcher — throws ApiError on non-2xx or timeout
 async function request<T>(
   method: string,
@@ -56,15 +66,21 @@ async function request<T>(
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
+    const headers: Record<string, string> = body ? { 'Content-Type': 'application/json' } : {}
+    const token = await getAccessToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+
     const res = await fetch(`${BASE}${path}`, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : {},
+      headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
+      credentials: 'include', // send the SSE session cookie / any auth cookie
     })
 
     if (!res.ok) {
       const text = await res.text().catch(() => res.statusText)
+      if (res.status === 401) onUnauthorized?.()
       throw new ApiError(res.status, path, text)
     }
 
