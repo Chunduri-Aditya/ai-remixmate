@@ -621,31 +621,67 @@ isolation run and the browser cookie handshake are `operator-pending`.
 
 ---
 
-## Phase 5 — SQLite → Postgres (jobs, crates, feedback, setlists)
+## Phase 5 — SQLite → Postgres (jobs, crates, feedback) — DONE
 
-**Goal:** the four per-user stores run on managed Postgres in prod, SQLite in
+**Goal:** the per-user stores run on managed Postgres in prod, SQLite in
 tests/local — both paths exercised.
 
-**Tasks**
-- [ ] New `scripts/core/db.py`: SQLAlchemy Core `Engine` from `DATABASE_URL`
-      (`sqlite:///…` local + CI, `postgresql+psycopg://…` prod). Routers stay sync `def`.
-- [ ] Replace the single connection helper in `jobs.py:83`, `crates.py:75`,
-      `feedback_store.py:84` (+ setlist store) with `engine.begin()`.
-- [ ] Wrap SQL in `sqlalchemy.text()`, convert `?` → `:name` (mechanical).
-      `INSERT … ON CONFLICT DO UPDATE` valid in both dialects; guard
-      `PRAGMA foreign_keys` to SQLite only.
-- [ ] Document "verified deferred": `track_metadata.py` `MetadataCache` (global
-      cache) and `scripts/core/database.py` `RemixMateDatabase` (CLI-only, not
-      imported by the API) stay on SQLite.
+**What shipped**
+- [x] New `scripts/core/db.py`: SQLAlchemy Core engine factory. `DATABASE_URL`
+      unset → one SQLite engine **per store**, keyed on `str(_DB_PATH)` (keeps
+      the three data files and the P0 storage-isolation fixtures' per-store path
+      override working); `DATABASE_URL` set → one shared engine
+      (`postgresql+psycopg://…`). Diverges from the "an Engine" wording on
+      purpose — collapsing to one engine when unset breaks the isolation
+      fixtures. NullPool on SQLite so `.connect()` stays connect-per-call.
+      Routers stay sync `def`.
+- [x] `jobs.py`, `crates.py`, `feedback_store.py`: `_get_conn()` / `_conn()`
+      kept as the mockable seam but hand back a SQLAlchemy `Connection`. SQL
+      wrapped in `text()`, `?` → `:name`, `jobs._query_db`'s dynamic `IN` list
+      uses generated named binds.
+- [x] Timestamp columns (`created_at`/`started_at`/`finished_at`/`added_at`/
+      `favorited_at`/`position_sec`) → `DOUBLE PRECISION` on Postgres; float4
+      `REAL` there scrambles every `ORDER BY <timestamp>` at epoch magnitudes.
+- [x] `crates._SCHEMA` multi-statement string → one `CREATE` per `execute`.
+      Phase 3b migration probe `PRAGMA table_info` → `inspect(conn).get_columns`
+      (run on the init connection so it sees the uncommitted `CREATE`s on
+      Postgres). `sqlite3.IntegrityError` → `sqlalchemy.exc.IntegrityError`.
+      `INSERT OR REPLACE INTO song_favorites` → `INSERT … ON CONFLICT DO
+      UPDATE`. `PRAGMA foreign_keys = ON` guarded to the SQLite dialect in
+      `_conn()`.
+- [x] `requirements.txt` / `pyproject.toml`: `SQLAlchemy==2.0.52`,
+      `psycopg[binary]==3.2.13`. psycopg is imported by SQLAlchemy only when a
+      postgres URL is built, so a SQLite-only install never loads it.
+- **Verified deferred:** `track_metadata.py` `MetadataCache` (global cache) and
+  `scripts/core/database.py` `RemixMateDatabase` (CLI-only, not imported by the
+  API) stay on SQLite. There is **no setlist store** — `routers/setlist.py` is
+  stateless (`setlist_planner.save(path)` writes to a caller-supplied path), so
+  the original "+ setlists" scope line was vacuous.
 
 **Verify**
-- [ ] `DATABASE_URL=sqlite://…` → full suite green.
-- [ ] Against a real Postgres (Supabase branch or local): job
-      create/poll/list/cancel/retry, crate CRUD, feedback log/summarize all pass.
-- [ ] Restart the process mid-job → history survives; RUNNING→FAILED rollback still fires.
-- [ ] Green bar.
+- [x] `DATABASE_URL` unset → safe subset **762 passed** (per-store SQLite). A
+      `DATABASE_URL=sqlite:///<file>` run confirmed the shared-engine branch:
+      all six tables coexist in one file, all three stores functional.
+- [x] Against a **real Postgres 16 container**: job
+      create/poll/list/cancel/retry with user scoping, both enum
+      serializations on the filtered read-through, crate CRUD + tags +
+      favorites with user scoping, add/tag duplicate → `False`, repeat favorite
+      → `ON CONFLICT` update, `delete_crate` FK cascade, the legacy-table
+      migration (`inspect` + `ALTER` on both dialects), feedback
+      log/list/summarize/restart.
+- [x] RUNNING→PENDING rollback: a RUNNING row re-loaded by `_load_from_db()`
+      comes back FAILED in memory **and** persisted. New regression test
+      `test_running_jobs_roll_back_to_failed_on_restart`.
+- [x] Mutation-tested: `jobs._query_db` named-bind conversion (divergent param
+      key → 5 reds), the restart rollback guard (drop RUNNING → red),
+      `crates` `IntegrityError` catch type (→ `RuntimeError` → red), the
+      `song_favorites` `ON CONFLICT` clause (dropped → red).
+- [ ] **operator-pending:** point a hosted deploy at a managed Postgres
+      (`DATABASE_URL` on the API service) and run the same flows against it.
 
-**Commit:** `refactor: SQLAlchemy Core engine, Postgres for jobs/crates/feedback/setlists`
+**Commits:** `refactor: SQLAlchemy Core engine for the job store (Phase 5
+commit 1)` · `refactor: SQLAlchemy Core for the crate + feedback stores (Phase
+5 commit 2)`
 
 ---
 

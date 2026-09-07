@@ -19,7 +19,11 @@ SQLite stores (3b). Phase 4: **backend** Supabase auth — RS256/JWKS
 `system.router` mounted open, `scripts/migrate_uids.py` one-time re-stamp.
 Frontend auth shell (supabase-js, `<RequireAuth>`, login page, Bearer +
 credentials on every request, SSE cookie mirror) is in. Only the live-Supabase
-run is pending. Phases 5 through 8 untouched.
+run is pending. Phase 5: jobs / crates / feedback stores moved onto a
+SQLAlchemy Core engine (`scripts/core/db.py`) — SQLite per store when
+`DATABASE_URL` is unset, one shared Postgres engine when it is set; verified
+against a real Postgres 16 container. Only the hosted managed-Postgres run is
+pending. Phases 6 through 8 untouched.
 
 ## Phase ledger
 
@@ -30,7 +34,7 @@ run is pending. Phases 5 through 8 untouched.
 | 2 | Guard generative + slim the image | done, verified | `f27aecb`; `tests/test_generative_gate.py` (11) + `tests/test_root_route.py` (5); demucs kept (subprocess, not imported) |
 | 3 | User contextvar + per-user data | done, verified | `653633a` (3a) + 3b batch; `tests/test_user_scope.py` (21); migrations verified on live-DB copies |
 | 4 | Auth + tenancy (Supabase) | code done | backend: `tests/test_auth.py` (13, synthetic RS256, incl. real-app gate + role check) + `tests/test_migrate_uids.py` (4). frontend: `src/shell/{authContext,AuthProvider,RequireAuth,LoginPage}` + `src/lib/supabase.ts`; `auth.test.tsx` (7) + `AuthProvider.test.tsx` (7) + `supabase.test.ts` (4). Live 2-account isolation operator-pending. |
-| 5 | SQLite to Postgres | not started | |
+| 5 | SQLite to Postgres | code done, verified vs real PG; hosted run operator-pending | `e4e894d` (jobs) + `cd0ccc8` (crates/feedback); `scripts/core/db.py`; `tests/test_user_scope.py` +3 (restart rollback, conflict paths) + `test_job_list_filters.py` reworked; Postgres 16 container exercised all store flows; mutation-tested the named-bind conversion, rollback guard, IntegrityError catch, ON CONFLICT clause |
 | 6 | Per-user mix retention | not started | |
 | 7 | Deploy / infra | not started | |
 | 8 | Legal / product surface | not started | |
@@ -39,7 +43,7 @@ run is pending. Phases 5 through 8 untouched.
 
 | Check | Result | Note |
 |---|---|---|
-| safe pytest subset | 760 passed, 90 deselected, ~15s | 706 through Phase 1; +16 Phase 2; +6 Phase 3a; +15 Phase 3b; +13 `test_auth.py` +4 `test_migrate_uids.py` Phase 4 backend |
+| safe pytest subset | 762 passed, 90 deselected, ~17s | 706 through Phase 1; +16 Phase 2; +6 Phase 3a; +15 Phase 3b; +13 `test_auth.py` +4 `test_migrate_uids.py` Phase 4 backend; +2 Phase 5 (`test_user_scope.py`: restart rollback + crate conflict paths) |
 | import smoke | `scripts.api.main` / `.routes` / `.tasks` / `scripts.download` all import | proves nothing references the three deleted modules |
 | `uvx ruff check` (repo-wide) | ~1580 findings on a clean `HEAD` | not a usable gate as it stands: pre-existing debt, ~1100 `W293` blank-line whitespace + ~200 `I001` + ~150 `F401`, none introduced by this migration. `E501` is correctly ignored so the config is being read. Run `ruff check --fix` repo-wide and move the config to `[tool.ruff.lint]` before Phase 7 CI. |
 | `uvx ruff check` (teardown files) | ~54 findings, all pre-existing style | the teardown adds none; `analysis_pipeline.py` had 2 (`F401` numpy, `I001`) in code it did not touch |
@@ -161,15 +165,19 @@ Nothing is deployed. The single-user local app still runs as
 `PROJECT_OVERVIEW.md` describes: transition engine, music understanding, setlist
 intelligence, search, and the 9-page SPA. The migration has removed capability
 (all download paths, generative routes behind a default-off flag) and added the
-licence model + attribution, per-user data scoping, and the full auth path
-(backend gate + frontend shell). Still missing: a live Supabase project,
-Postgres, mix retention, any deploy artifact.
+licence model + attribution, per-user data scoping, the full auth path
+(backend gate + frontend shell), and the Postgres-capable persistence layer.
+Still missing: a live Supabase project, a hosted managed Postgres, mix
+retention, any deploy artifact.
 
-Phases 1–3 done; Phase 4 is code-complete both sides — backend RS256/JWKS
+Phases 1–3 done; Phase 4 code-complete both sides — backend RS256/JWKS
 `require_user` + cookie-auth SSE + `scripts/migrate_uids.py`, frontend supabase-js
-+ `<RequireAuth>` + login page + Bearer/credentials on every request. Next:
-**Phase 5** — SQLite → Postgres for jobs/crates/feedback. Phase 4's live
-2-account isolation run stays operator-pending on a provisioned project.
++ `<RequireAuth>` + login page + Bearer/credentials on every request. Phase 5
+done — jobs/crates/feedback run through `scripts/core/db.py` (SQLite per store
+unset, one shared Postgres engine when `DATABASE_URL` is set), verified against
+a real Postgres 16 container. Next: **Phase 6** — per-user mix retention.
+Phase 4's live 2-account isolation run and Phase 5's hosted managed-Postgres
+run stay operator-pending.
 
 ## Honest gaps against a real hosted product
 
@@ -180,8 +188,10 @@ Phases 1–3 done; Phase 4 is code-complete both sides — backend RS256/JWKS
 - Per-user scoping is column-only for crates/tags/favorites: `crates.name UNIQUE`
   and the `song_tags` / `song_favorites` PKs are still global. Phase 4 must
   rebuild those keys before a second real user exists (pinned by a test).
-- Jobs, crates, feedback are SQLite with a load-bearing single-worker assumption
-  (Phase 5). No persistent setlist store exists.
+- Jobs, crates, feedback can run on Postgres (`DATABASE_URL`), but no hosted
+  deploy points at a managed instance yet, and the single-worker
+  `ThreadPoolExecutor(2)` job runner assumption is unchanged. There is no
+  persistent setlist store — `routers/setlist.py` is stateless.
 - `outputs/` grows without bound. No TTL, no cap (Phase 6).
 - No Caddyfile, systemd unit, CI workflow, or provisioning runbook. `app/deploy/`
   holds only a README (Phase 7).
