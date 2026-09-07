@@ -48,6 +48,14 @@ python-multipart==0.0.20    # file upload support for FastAPI
 # for RS256.
 PyJWT[crypto]==2.10.1
 
+# --- Persistence (SQLAlchemy Core) ---
+# scripts/core/db.py builds one engine per store from a SQLite path, or one
+# shared engine from DATABASE_URL (postgresql+psycopg://...) when hosted.
+# psycopg is only imported by SQLAlchemy when a postgres URL is actually built,
+# so a SQLite-only install never loads it.
+SQLAlchemy==2.0.52
+psycopg[binary]==3.2.13
+
 # --- Progress / CLI ---
 tqdm==4.67.1
 click==8.2.1

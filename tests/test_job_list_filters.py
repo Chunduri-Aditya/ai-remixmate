@@ -18,20 +18,34 @@ only the newer set and silently drops the rest.
 
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
+from sqlalchemy import text
 
 from scripts.api import jobs as job_store
+from scripts.core import db
 
 # How many rows the in-memory dict is allowed to hold, mirroring _load_from_db.
 MEMORY_CAP = 500
 
+_INSERT = text(
+    "INSERT INTO jobs (job_id, status, job_type, created_at, progress, message,"
+    " result_json, meta_json)"
+    " VALUES (:id, :status, :job_type, :created_at, 0.0, '', :result_json, '{}')"
+)
+
 
 def _write(conn, job_id, job_type, status, created_at):
     conn.execute(
-        "INSERT INTO jobs (job_id, status, job_type, created_at, progress, message,"
-        " result_json, meta_json) VALUES (?,?,?,?,0.0,'',?,'{}')",
-        (job_id, status, job_type, created_at, json.dumps(None)),
+        _INSERT,
+        {
+            "id": job_id,
+            "status": status,
+            "job_type": job_type,
+            "created_at": created_at,
+            "result_json": json.dumps(None),
+        },
     )
 
 
@@ -42,39 +56,34 @@ def store(tmp_path, monkeypatch):
     can hold, with completed remixes deliberately placed *below* the memory cap
     so that anything answering from memory alone cannot see them.
 
+    Seeds through the real scripts.core.db engine (SQLite file at a patched
+    _DB_PATH), so the code under test uses its own _get_conn unchanged.
+
     Returns (expected_total_remixes, expected_visible_from_memory).
     """
-    db = tmp_path / "jobs.db"
-    conn = sqlite3.connect(str(db))
-    conn.row_factory = sqlite3.Row
-    conn.execute(job_store._DB_SCHEMA)
+    dbfile = tmp_path / "jobs.db"
+    monkeypatch.setattr(job_store, "_DB_PATH", str(dbfile))
+    job_store._init_db()
 
-    # 10 completed remixes, oldest in the table (created_at 1000-1009):
-    # 6 in the legacy repr form, 4 in the current value form.
-    for i in range(6):
-        _write(conn, f"legacy-{i}", "JobType.DJ_REMIX", "JobStatus.DONE", 1000 + i)
-    for i in range(4):
-        _write(conn, f"current-{i}", "dj_remix", "done", 1006 + i)
-
-    # 600 newer unrelated jobs — more than the 500-row memory cap, so the
-    # remixes above are pushed out of memory entirely.
-    for i in range(600):
-        _write(conn, f"noise-{i}", "analyze", "failed", 9000 + i)
-
-    conn.commit()
-
-    def _conn():
-        c = sqlite3.connect(str(db))
-        c.row_factory = sqlite3.Row
-        return c
-
-    monkeypatch.setattr(job_store, "_DB_PATH", str(db))
-    monkeypatch.setattr(job_store, "_get_conn", _conn)
+    engine = db.get_engine(str(dbfile))
+    with engine.begin() as conn:
+        # 10 completed remixes, oldest in the table (created_at 1000-1009):
+        # 6 in the legacy repr form, 4 in the current value form.
+        for i in range(6):
+            _write(conn, f"legacy-{i}", "JobType.DJ_REMIX", "JobStatus.DONE", 1000 + i)
+        for i in range(4):
+            _write(conn, f"current-{i}", "dj_remix", "done", 1006 + i)
+        # 600 newer unrelated jobs — more than the 500-row memory cap, so the
+        # remixes above are pushed out of memory entirely.
+        for i in range(600):
+            _write(conn, f"noise-{i}", "analyze", "failed", 9000 + i)
 
     # Populate the in-memory dict the way _load_from_db would: newest 500 only.
-    rows = _conn().execute(
-        "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (MEMORY_CAP,)
-    ).fetchall()
+    with closing(job_store._get_conn()) as conn:
+        rows = conn.execute(
+            text("SELECT * FROM jobs ORDER BY created_at DESC LIMIT :n"),
+            {"n": MEMORY_CAP},
+        ).fetchall()
     mem = {}
     for row in rows:
         job = job_store._row_to_dict(row)

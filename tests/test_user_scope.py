@@ -43,21 +43,15 @@ def _isolate_user():
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
-    """A throwaway job store: fresh SQLite file, empty in-memory dict."""
+    """A throwaway job store: fresh SQLite file, empty in-memory dict.
+
+    _DB_PATH is patched to a tmp file; scripts.core.db keys its SQLite engine on
+    that path, so the code under test uses its own _get_conn unchanged.
+    """
     db = tmp_path / "jobs.db"
-    conn = sqlite3.connect(str(db))
-    conn.execute(job_store._DB_SCHEMA)
-    conn.commit()
-    conn.close()
-
-    def _conn():
-        c = sqlite3.connect(str(db))
-        c.row_factory = sqlite3.Row
-        return c
-
     monkeypatch.setattr(job_store, "_DB_PATH", str(db))
-    monkeypatch.setattr(job_store, "_get_conn", _conn)
     monkeypatch.setattr(job_store, "_jobs", {})
+    job_store._init_db()
     return db
 
 
@@ -130,6 +124,42 @@ def test_legacy_rows_without_user_id_belong_to_local(store):
 
     assert "legacy-1" in seen_local
     assert "legacy-1" not in seen_u1
+
+
+def test_running_jobs_roll_back_to_failed_on_restart(store):
+    """A crashed process cannot leave a job RUNNING: _load_from_db rewrites any
+    RUNNING/PENDING row to FAILED because the executor queue died with the old
+    process. Guards scripts/api/jobs.py::_load_from_db across the SQLAlchemy
+    swap — the row must come back FAILED both in memory and on disk.
+    """
+    from contextlib import closing
+
+    from sqlalchemy import text
+
+    with closing(job_store._get_conn()) as conn:
+        conn.execute(
+            text(
+                "INSERT INTO jobs (job_id, status, job_type, created_at, progress,"
+                " message, meta_json) VALUES (:i, 'running', 'dj_remix', :t, 0.4,"
+                " 'Running', '{}')"
+            ),
+            {"i": "orphan", "t": time.time()},
+        )
+        conn.commit()
+
+    job_store._jobs.clear()
+    job_store._load_from_db()
+
+    rolled = job_store.get_job("orphan")
+    assert rolled is not None, "orphan row was not reloaded from the store"
+    assert job_store._status_value(rolled["status"]) == "failed"
+    assert "restart" in rolled["message"].lower()
+
+    with closing(job_store._get_conn()) as conn:
+        persisted = conn.execute(
+            text("SELECT status FROM jobs WHERE job_id = 'orphan'")
+        ).scalar()
+    assert job_store._status_value(persisted) == "failed", persisted
 
 
 # ---------------------------------------------------------------------------

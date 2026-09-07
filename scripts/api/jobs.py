@@ -6,13 +6,14 @@ Architecture
 - Jobs run in a ThreadPoolExecutor (CPU-bound: librosa, demucs, scipy).
 - Each job gets a UUID. Callers poll GET /jobs/{job_id} for status.
 - Progress is updated by the task function via update_job().
-- **Job state is persisted to SQLite** (data/jobs.db) so it survives process
-  restarts. On startup, any jobs marked RUNNING are rolled back to FAILED since
-  they could not have completed cleanly.
+- **Job state is persisted** through a SQLAlchemy Core engine (scripts.core.db):
+  SQLite at data/jobs.db by default, Postgres when DATABASE_URL is set. It
+  survives process restarts. On startup, any jobs marked RUNNING are rolled
+  back to FAILED since they could not have completed cleanly.
 
 Write strategy: write-through cache.
   - In-memory _jobs dict for O(1) reads inside hot request paths.
-  - Every mutation flushes the changed row to SQLite immediately.
+  - Every mutation flushes the changed row to the database immediately.
   - On module import the full job table is loaded back into _jobs.
 
 Cancel & retry
@@ -37,71 +38,91 @@ Public API (same as before — no callers need to change)
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 import time
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
-from pathlib import Path
 from typing import Any, Callable, Dict, Optional
+
+from sqlalchemy import Connection, text
 
 from scripts.api.auth import DEFAULT_USER, current_user, get_user_id
 from scripts.api.schemas import JobResponse, JobStatus, JobType
+from scripts.core import db
 from scripts.core.logging_utils import get_logger, set_job_id
 from scripts.core.paths import DATA_DIR
 
 logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# SQLite backend
+# Database backend (SQLAlchemy Core — SQLite by default, Postgres via DATABASE_URL)
 # ---------------------------------------------------------------------------
 
 _DB_PATH = DATA_DIR / "jobs.db"
-_DB_SCHEMA = """
+
+
+def _schema_ddl(dialect_name: str) -> str:
+    """The ``jobs`` DDL for one dialect.
+
+    Timestamps are epoch seconds from ``time.time()`` (~1.7e9, needs ~16
+    significant digits). SQLite ``REAL`` is already an 8-byte double; Postgres
+    ``REAL`` is float4 (~7 digits) and would collide adjacent ``created_at``
+    values, scrambling ``ORDER BY created_at DESC`` — so it gets DOUBLE
+    PRECISION.
+    """
+    ts = "DOUBLE PRECISION" if dialect_name == "postgresql" else "REAL"
+    return f"""
 CREATE TABLE IF NOT EXISTS jobs (
     job_id      TEXT PRIMARY KEY,
     status      TEXT NOT NULL,
     job_type    TEXT NOT NULL,
-    created_at  REAL NOT NULL,
-    started_at  REAL,
-    finished_at REAL,
-    progress    REAL NOT NULL DEFAULT 0.0,
+    created_at  {ts} NOT NULL,
+    started_at  {ts},
+    finished_at {ts},
+    progress    {ts} NOT NULL DEFAULT 0.0,
     message     TEXT NOT NULL DEFAULT '',
     result_json TEXT,
     error       TEXT,
     eta_sec     INTEGER,
-    meta_json   TEXT NOT NULL DEFAULT '{}'
-);
+    meta_json   TEXT NOT NULL DEFAULT '{{}}'
+)
 """
 
 
-def _get_conn() -> sqlite3.Connection:
-    """Open a thread-local SQLite connection (check_same_thread=False is safe
-    because we serialize writes with _lock)."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(_DB_PATH), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+# Back-compat: a couple of tests read this attribute for a local SQLite build.
+_DB_SCHEMA = _schema_ddl("sqlite")
+
+
+def _get_conn() -> Connection:
+    """A SQLAlchemy Connection to the job store.
+
+    Per-store SQLite file when ``DATABASE_URL`` is unset, the shared Postgres
+    engine when it is set. Callers wrap this in ``closing()`` and call
+    ``conn.commit()`` after writes — the same lifecycle the raw sqlite3 handle
+    had. Kept as the module's mockable seam: tests patch it to inject failures.
+    """
+    return db.get_engine(str(_DB_PATH)).connect()
 
 
 def _init_db() -> None:
-    with _get_conn() as conn:
-        conn.execute(_DB_SCHEMA)
-        conn.commit()
+    engine = db.get_engine(str(_DB_PATH))
+    with engine.begin() as conn:
+        conn.execute(text(_schema_ddl(engine.dialect.name)))
 
 
-def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
-    d = dict(row)
+def _row_to_dict(row: Any) -> Dict[str, Any]:
+    d = dict(row._mapping)
     d["result"] = json.loads(d.pop("result_json") or "null")
     d["meta"]   = json.loads(d.pop("meta_json") or "{}")
     return d
 
 
-def _upsert_row(conn: sqlite3.Connection, job: Dict[str, Any]) -> None:
+def _upsert_row(conn: Connection, job: Dict[str, Any]) -> None:
     conn.execute(
-        """
+        text(
+            """
         INSERT INTO jobs
             (job_id, status, job_type, created_at, started_at, finished_at,
              progress, message, result_json, error, eta_sec, meta_json)
@@ -118,7 +139,8 @@ def _upsert_row(conn: sqlite3.Connection, job: Dict[str, Any]) -> None:
             error       = excluded.error,
             eta_sec     = excluded.eta_sec,
             meta_json   = excluded.meta_json
-        """,
+        """
+        ),
         {
             "job_id":      job["job_id"],
             "status":      _status_value(job["status"]),
@@ -222,7 +244,9 @@ def _load_from_db() -> None:
     try:
         _init_db()
         with closing(_get_conn()) as conn:
-            rows = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 500").fetchall()
+            rows = conn.execute(
+                text("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 500")
+            ).fetchall()
 
         for row in rows:
             job = _row_to_dict(row)
@@ -314,14 +338,15 @@ def _query_db(job_type: Optional[str], status: Optional[str]) -> list[Dict]:
     how Mix Vault came to hide completed mixes. SQLite is the full record.
     """
     clauses: list[str] = []
-    params: list[str] = []
+    params: dict[str, str] = {}
 
     for column, value in (("job_type", job_type), ("status", status)):
         if value is None:
             continue
         forms = _enum_forms(value)
-        clauses.append(f"lower({column}) IN ({','.join('?' * len(forms))})")
-        params.extend(forms)
+        keys = [f"{column}_{i}" for i in range(len(forms))]
+        clauses.append(f"lower({column}) IN ({', '.join(':' + k for k in keys)})")
+        params.update(zip(keys, forms))
 
     sql = "SELECT * FROM jobs"
     if clauses:
@@ -330,7 +355,7 @@ def _query_db(job_type: Optional[str], status: Optional[str]) -> list[Dict]:
 
     try:
         with closing(_get_conn()) as conn:
-            rows = conn.execute(sql, params).fetchall()
+            rows = conn.execute(text(sql), params).fetchall()
     except Exception as exc:  # noqa: BLE001
         # Fall back to the in-memory view rather than failing the request; the
         # caller still gets the newest jobs, just not the full history.
