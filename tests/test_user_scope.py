@@ -492,6 +492,24 @@ def test_crates_conflict_paths_return_false_not_raise(crate_store):
     assert c.is_favorite("s1") is False
 
 
+def test_list_crates_song_count_is_per_crate(crate_store):
+    """list_crates() runs the count as an N+1 loop over one held connection now.
+    Prove the per-crate counts are right with several crates of different sizes,
+    not just the single-crate happy path.
+    """
+    c = crate_store
+    current_user.set("u1")
+    a = c.create_crate("A")
+    b = c.create_crate("B")
+    c.create_crate("C")  # left empty
+    for s in ("s1", "s2", "s3"):
+        c.add_to_crate(a, s)
+    c.add_to_crate(b, "s1")
+
+    counts = {x["name"]: x["song_count"] for x in c.list_crates()}
+    assert counts == {"A": 3, "B": 1, "C": 0}
+
+
 def test_crates_migration_adds_user_id_and_backfills(tmp_path, monkeypatch):
     from scripts.core import crates
 

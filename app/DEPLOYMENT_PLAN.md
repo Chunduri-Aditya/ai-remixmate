@@ -14,7 +14,7 @@
 | 2 | Guard generative + slim the image | ☑ verified | f27aecb |
 | 3 | User contextvar + per-user mixes/jobs/crates/feedback | ☑ verified | 653633a (3a) + stem gate/audit/spectral/feedback/crates (3b) |
 | 4 | Auth + tenancy (Supabase) | ◐ code done | RS256 JWKS gate + cookie-auth SSE + uid migration (backend) + auth shell (frontend); live Supabase run operator-pending |
-| 5 | SQLite → Postgres (jobs, crates, feedback, setlists) | ☐ not started | |
+| 5 | SQLite → Postgres (jobs, crates, feedback) | ☑ verified (code + real Postgres 16 container; live managed-Postgres run operator-pending) | SQLAlchemy Core engine factory `scripts/core/db.py`, `jobs`/`crates`/`feedback_store` on `text()` + named binds, multi-process `_load_from_db()` safety. No setlist store — `routers/setlist.py` is stateless |
 | 6 | Per-user mix retention | ☐ not started | |
 | 7 | Deploy / infra | ☐ not started | |
 | 8 | Legal / product surface | ☐ not started | |
@@ -669,13 +669,21 @@ tests/local — both paths exercised.
       → `ON CONFLICT` update, `delete_crate` FK cascade, the legacy-table
       migration (`inspect` + `ALTER` on both dialects), feedback
       log/list/summarize/restart.
-- [x] RUNNING→PENDING rollback: a RUNNING row re-loaded by `_load_from_db()`
-      comes back FAILED in memory **and** persisted. New regression test
+- [x] Restart rollback: `_load_from_db()` rewrites any RUNNING **or** PENDING
+      row to FAILED. A RUNNING row re-loaded comes back FAILED in memory **and**
+      persisted. New regression test
       `test_running_jobs_roll_back_to_failed_on_restart`.
 - [x] Mutation-tested: `jobs._query_db` named-bind conversion (divergent param
       key → 5 reds), the restart rollback guard (drop RUNNING → red),
       `crates` `IntegrityError` catch type (→ `RuntimeError` → red), the
       `song_favorites` `ON CONFLICT` clause (dropped → red).
+- [x] Multi-process safety: two processes running `_load_from_db()` against the
+      same Postgres at once — both exit clean, no deadlock, orphaned RUNNING and
+      PENDING rows both end FAILED once (idempotent). This is the invariant the
+      hosted multi-process deploy rests on.
+- [x] `list_crates()` merged its two connections into one held read; per-crate
+      `song_count` verified right across several crates of different sizes
+      (`test_list_crates_song_count_is_per_crate`), on both dialects.
 - [ ] **operator-pending:** point a hosted deploy at a managed Postgres
       (`DATABASE_URL` on the API service) and run the same flows against it.
 
