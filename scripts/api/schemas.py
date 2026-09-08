@@ -106,6 +106,27 @@ class StorageEvictResponse(BaseModel):
     size_after_gb: float = 0.0
 
 
+class MixStorageResponse(BaseModel):
+    """Per-user rendered-mix footprint — the acting user's outputs/<uid>/ only."""
+    outputs_dir: str
+    mix_count: int
+    total_size_mb: float
+    oldest_mix_age_days: Optional[float] = None
+    newest_mix_age_days: Optional[float] = None
+    max_age_days: int
+    max_count: int
+    within_cap: bool
+
+
+class MixSweepResponse(BaseModel):
+    removed: List[str] = []
+    removed_by_ttl: List[str] = []
+    removed_by_cap: List[str] = []
+    kept: int = 0
+    freed_mb: float = 0.0
+    dry_run: bool = True
+
+
 class ProcessingStatusResponse(BaseModel):
     """Segregates the library into processing buckets for the live Operations panel."""
     fully_processed: List[str] = []   # stems + analysis both done

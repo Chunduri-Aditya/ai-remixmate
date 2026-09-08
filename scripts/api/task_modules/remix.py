@@ -235,6 +235,20 @@ def _write_mix_credits(out_dir: Path, song_names: list) -> list:
     return credits
 
 
+def _sweep_user_mixes() -> None:
+    """Bound the acting user's outputs/<uid>/ after a render. Best-effort:
+    sweep_current_user() never raises, and the flag lets an operator disable it."""
+    from scripts.core.config import cfg
+
+    if not getattr(cfg.retention, "sweep_after_render", True):
+        return
+    from scripts.core.mix_retention import sweep_current_user
+
+    res = sweep_current_user(dry_run=False)
+    if res.removed:
+        log.info("mix retention: swept %d old mix(es) for the acting user", len(res.removed))
+
+
 def task_dj_remix(
     job_id: str,
     song_a: str,
@@ -419,6 +433,7 @@ def task_dj_remix(
 
     log_audit("dj_remix_complete", resource=str(out_path), job_id=job_id,
               metadata={"song_a": song_a, "song_b": song_b, "stem_blend": use_stem_blend})
+    _sweep_user_mixes()
     return {
         "output":            str(out_path),
         "session_id":        session_id,
@@ -597,6 +612,7 @@ def task_dj_chain(
     log_audit("dj_chain_complete", resource=str(out_path), job_id=job_id,
               metadata={"n_songs": n, "duration_sec": round(len(mix_mastered) / sr, 1),
                         "quality_passed": quality_report.passed})
+    _sweep_user_mixes()
     return {
         "output":          str(out_path),
         "session_id":      session_id,

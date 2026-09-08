@@ -28,6 +28,8 @@ from scripts.api.schemas import (
     JobType,
     LibraryListResponse,
     LibraryStats,
+    MixStorageResponse,
+    MixSweepResponse,
     ProcessingStatusResponse,
     SongInfo,
     StorageEvictResponse,
@@ -285,6 +287,53 @@ def storage_evict(
         evicted=evicted, dry_run=dry_run,
         size_before_gb=round(size_before, 2), size_after_gb=round(size_after, 2),
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-user rendered-mix retention (outputs/<uid>/) — distinct from the library
+# storage endpoints above, which manage the shared source catalog.
+# ---------------------------------------------------------------------------
+
+@router.get("/library/mixes/storage", response_model=MixStorageResponse, tags=["library", "storage"])
+def mix_storage_status():
+    """The acting user's rendered-mix footprint and how it sits against the
+    retention limits. Reports on ``outputs/<uid>/`` only."""
+    import time
+
+    from scripts.core.config import cfg
+    from scripts.core.mix_retention import _dir_mtime, _dir_size
+
+    rc = cfg.retention
+    root = user_outputs_dir()
+    now = time.time()
+
+    mixes = [p for p in root.iterdir() if p.is_dir()] if root.is_dir() else []
+    total_bytes = sum(_dir_size(p) for p in mixes)
+    ages = sorted((now - _dir_mtime(p)) / 86_400 for p in mixes)
+
+    return MixStorageResponse(
+        outputs_dir=str(root),
+        mix_count=len(mixes),
+        total_size_mb=round(total_bytes / 1_048_576, 1),
+        oldest_mix_age_days=round(ages[-1], 2) if ages else None,
+        newest_mix_age_days=round(ages[0], 2) if ages else None,
+        max_age_days=rc.mix_max_age_days,
+        max_count=rc.mix_max_count,
+        within_cap=len(mixes) <= rc.mix_max_count,
+    )
+
+
+@router.post("/library/mixes/sweep", response_model=MixSweepResponse, tags=["library", "storage"])
+def mix_storage_sweep(
+    dry_run: bool = Query(True, description="Preview without deleting — defaults True for safety"),
+):
+    """Apply the TTL + count cap to the acting user's ``outputs/<uid>/``.
+    Runs automatically after each render when ``retention.sweep_after_render``
+    is set; this is the manual trigger."""
+    from scripts.core.mix_retention import sweep_current_user
+
+    result = sweep_current_user(dry_run=dry_run)
+    return MixSweepResponse(**{k: v for k, v in result.as_dict().items() if k != "freed_bytes"})
 
 
 @router.get("/library/{name}", response_model=SongInfo, tags=["library"])

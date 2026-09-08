@@ -140,6 +140,16 @@ class LibraryConfig:
 
 
 @dataclass
+class RetentionConfig:
+    # Bounds a user's outputs/<uid>/ folder — see scripts/core/mix_retention.py.
+    # The shared catalog is a fixed operator asset; per-user rendered output is
+    # not, so it gets a TTL and a count cap.
+    mix_max_age_days: int      = 30    # remove a mix dir whose newest mtime is older
+    mix_max_count: int         = 50    # then keep at most this many, oldest evicted first
+    sweep_after_render: bool   = True  # run the sweep on the acting user after each render
+
+
+@dataclass
 class DatabaseConfig:
     path: str             = "data/remixmate.db"
     embeddings_path: str  = "data/song_embeddings.json"
@@ -218,6 +228,7 @@ class AppConfig:
     metadata:   MetadataConfig   = field(default_factory=MetadataConfig)
     dj:         DJConfig         = field(default_factory=DJConfig)
     library:    LibraryConfig    = field(default_factory=LibraryConfig)
+    retention:  RetentionConfig  = field(default_factory=RetentionConfig)
     database:   DatabaseConfig   = field(default_factory=DatabaseConfig)
     api:        ApiConfig        = field(default_factory=ApiConfig)
     logging:    LoggingConfig    = field(default_factory=LoggingConfig)
