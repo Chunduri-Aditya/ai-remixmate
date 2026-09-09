@@ -378,3 +378,61 @@ def list_favorites() -> List[str]:
             {"user": _acting_user()},
         ).fetchall()
     return [r.song_name for r in rows]
+
+
+def purge_user_library(user_id: str) -> dict:
+    """Delete all crates/tags/favorites for ``user_id``. Returns per-table counts."""
+    counts = {"crates": 0, "crate_songs": 0, "song_tags": 0, "song_favorites": 0}
+    with _conn() as c:
+        for table in ("crate_songs", "crates", "song_tags", "song_favorites"):
+            cur = c.execute(
+                text(f"DELETE FROM {table} WHERE user_id = :user"),
+                {"user": user_id},
+            )
+            counts[table] = cur.rowcount
+        c.commit()
+    return counts
+
+
+def export_user_library(user_id: str) -> dict:
+    """Snapshot crates + favorites + tags for account export."""
+    with _conn() as c:
+        crates = [
+            dict(r._mapping)
+            for r in c.execute(
+                text(
+                    "SELECT crate_id, name, created_at FROM crates "
+                    "WHERE user_id = :user ORDER BY created_at DESC"
+                ),
+                {"user": user_id},
+            ).fetchall()
+        ]
+        for crate in crates:
+            songs = c.execute(
+                text(
+                    "SELECT song_name FROM crate_songs "
+                    "WHERE crate_id = :id AND user_id = :user"
+                ),
+                {"id": crate["crate_id"], "user": user_id},
+            ).fetchall()
+            crate["songs"] = [r.song_name for r in songs]
+        favorites = [
+            r.song_name
+            for r in c.execute(
+                text(
+                    "SELECT song_name FROM song_favorites "
+                    "WHERE user_id = :user ORDER BY favorited_at DESC"
+                ),
+                {"user": user_id},
+            ).fetchall()
+        ]
+        tags = [
+            dict(r._mapping)
+            for r in c.execute(
+                text(
+                    "SELECT song_name, tag FROM song_tags WHERE user_id = :user"
+                ),
+                {"user": user_id},
+            ).fetchall()
+        ]
+    return {"crates": crates, "favorites": favorites, "tags": tags}

@@ -169,8 +169,22 @@ export function LeftRail() {
         })}
       </ul>
 
-      {/* Bottom: sign out (when auth is on) + connection status dot */}
+      {/* Bottom: legal links + sign out (when auth is on) + connection status */}
       <div className="left-rail__footer">
+        <div className="left-rail__legal" aria-label="Legal">
+          <button type="button" className="left-rail__legal-link" onClick={() => navigate('/legal/terms')}>
+            Terms
+          </button>
+          <button type="button" className="left-rail__legal-link" onClick={() => navigate('/legal/privacy')}>
+            Privacy
+          </button>
+          <button type="button" className="left-rail__legal-link" onClick={() => navigate('/legal/dmca')}>
+            DMCA
+          </button>
+          <button type="button" className="left-rail__legal-link" onClick={() => navigate('/legal/acceptable-use')}>
+            AUP
+          </button>
+        </div>
         {authConfigured && session && (
           <button
             className="left-rail__item"

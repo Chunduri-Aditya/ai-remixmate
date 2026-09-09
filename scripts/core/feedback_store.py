@@ -339,3 +339,24 @@ def summarize(user_id: Optional[str] = None) -> Dict[str, Any]:
         "oldest_event_at": min((e["created_at"] for e in events), default=None),
         "newest_event_at": max((e["created_at"] for e in events), default=None),
     }
+
+
+def purge_user_events(user_id: str) -> int:
+    """Delete feedback events for ``user_id`` from memory and DB. Returns count."""
+    with _lock:
+        before = len(_events)
+        _events[:] = [
+            e for e in _events if (e.get("user_id") or _DEFAULT_USER) != user_id
+        ]
+        removed_mem = before - len(_events)
+        try:
+            with closing(_get_conn()) as conn:
+                cur = conn.execute(
+                    text("DELETE FROM feedback_events WHERE user_id = :user"),
+                    {"user": user_id},
+                )
+                conn.commit()
+                return cur.rowcount if cur.rowcount is not None else removed_mem
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Could not purge feedback events: {exc}")
+            return removed_mem

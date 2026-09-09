@@ -247,6 +247,17 @@
   color: var(--color-text-secondary);
 }
 
+.mv-credits {
+  margin-top: var(--space-3);
+  font-size: var(--text-xs);
+}
+
+.mv-credits__list {
+  margin: var(--space-1) 0 0;
+  padding-left: 1.1rem;
+  color: var(--color-text-secondary);
+}
+
 /* ── WaveSurfer player ── */
 
 .mv-waveform-player {

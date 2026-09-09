@@ -12,6 +12,8 @@ and readiness probes stay reachable when auth is enabled (Phase 4).
 from fastapi import APIRouter
 
 from scripts.api.routers import (
+    account,
+    admin,
     analysis,
     crates,
     events,
@@ -40,3 +42,5 @@ router.include_router(crates.router)
 router.include_router(events.router)
 router.include_router(setlist.router)
 router.include_router(feedback.router)
+router.include_router(account.router)
+router.include_router(admin.router)

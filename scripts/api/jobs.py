@@ -318,6 +318,63 @@ def get_job(job_id: str) -> Optional[Dict]:
     return _jobs.get(job_id)
 
 
+def delete_job(job_id: str) -> bool:
+    """Remove a job from memory and the database. Returns True if it existed."""
+    with _lock:
+        job = _jobs.pop(job_id, None)
+        try:
+            with closing(_get_conn()) as conn:
+                conn.execute(text("DELETE FROM jobs WHERE job_id = :id"), {"id": job_id})
+                conn.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Could not delete job from SQLite: {exc}")
+        return job is not None
+
+
+def purge_user_jobs(user_id: str) -> int:
+    """Delete every job owned by ``user_id``. Returns the number removed."""
+    with _lock:
+        ids = [jid for jid, j in _jobs.items() if _job_user(j) == user_id]
+        for jid in ids:
+            _jobs.pop(jid, None)
+        deleted = 0
+        try:
+            with closing(_get_conn()) as conn:
+                rows = conn.execute(text("SELECT job_id, meta_json FROM jobs")).fetchall()
+                for row in rows:
+                    meta = json.loads(row.meta_json or "{}")
+                    if (meta.get("user_id") or DEFAULT_USER) == user_id:
+                        conn.execute(
+                            text("DELETE FROM jobs WHERE job_id = :id"),
+                            {"id": row.job_id},
+                        )
+                        deleted += 1
+                conn.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Could not purge user jobs from SQLite: {exc}")
+            deleted = max(deleted, len(ids))
+        return deleted if deleted else len(ids)
+
+
+def mark_job_takedown(job_id: str) -> Optional[Dict]:
+    """Admin takedown: mark job failed/takedown and return the job snapshot."""
+    with _lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return None
+        job["status"] = JobStatus.FAILED
+        job["message"] = "Removed by admin takedown"
+        job["error"] = "admin_takedown"
+        job["finished_at"] = time.time()
+        job["result"] = None
+        try:
+            with closing(_get_conn()) as conn:
+                _upsert_row(conn, job)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Could not persist takedown to SQLite: {exc}")
+        return dict(job)
+
+
 def _enum_forms(value: str) -> list[str]:
     """
     The two lowercased spellings a single enum value can have on disk.

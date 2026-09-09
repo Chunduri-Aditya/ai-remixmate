@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from scripts.api.auth import auth_context_middleware, require_user
-from scripts.api.routers import system
+from scripts.api.routers import legal, system
 from scripts.api.routes import router
 from scripts.core.config import cfg, configure_logging
 from scripts.core.logging_utils import get_logger, set_request_id
@@ -175,6 +175,9 @@ app.middleware("http")(auth_context_middleware)
 # Health probes mount first and OPEN — no require_user — so liveness/readiness
 # stay reachable when auth is on.
 app.include_router(system.router)
+
+# Public legal pages + DMCA intake (Phase 8) — open; must not read per-user data.
+app.include_router(legal.router)
 
 # Everything else requires an authenticated user (401 when auth is on and the
 # request carries no valid Supabase token; "local" when auth is off).

@@ -49,6 +49,7 @@ _JWKS_URL_ENV = "SUPABASE_JWKS_URL"
 _AUDIENCE_ENV = "SUPABASE_JWT_AUD"          # Supabase default: "authenticated"
 _ISSUER_ENV = "SUPABASE_JWT_ISS"           # optional: https://<ref>.supabase.co/auth/v1
 _COOKIE_NAME_ENV = "SUPABASE_COOKIE_NAME"   # raw-JWT session cookie for EventSource
+_ADMIN_EMAILS_ENV = "ADMIN_EMAILS"          # comma-separated; Phase 8 admin routes
 _DEFAULT_AUDIENCE = "authenticated"
 _DEFAULT_COOKIE_NAME = "sb-access-token"
 _REQUIRED_ROLE = "authenticated"           # reject the anon / service_role keys
@@ -63,6 +64,12 @@ def auth_enabled() -> bool:
     """Whether Supabase JWT verification is active. Read per request so a test
     (or an operator) can flip it without a restart."""
     return _truthy(_AUTH_ENABLED_ENV)
+
+
+def admin_emails() -> set[str]:
+    """Lowercased admin emails from ``ADMIN_EMAILS`` (comma-separated)."""
+    raw = os.environ.get(_ADMIN_EMAILS_ENV, "")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +120,8 @@ def _get_jwks_client():
     return _jwks_client
 
 
-def _verify_token(token: str) -> str:
-    """Verify a Supabase RS256 access token, return its ``sub`` (the user id).
+def _verify_token_claims(token: str) -> dict:
+    """Verify a Supabase RS256 access token; return its claims dict.
 
     Raises HTTPException(401) for anything wrong with the token itself
     (signature, expiry, audience, issuer, role, missing claims) and
@@ -153,7 +160,12 @@ def _verify_token(token: str) -> str:
     sub = claims.get("sub")
     if not sub or not isinstance(sub, str):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="token has no subject")
-    return sub
+    return claims
+
+
+def _verify_token(token: str) -> str:
+    """Verify a Supabase RS256 access token, return its ``sub`` (the user id)."""
+    return _verify_token_claims(token)["sub"]
 
 
 def _extract_token(request: Request) -> Optional[str]:
@@ -177,6 +189,14 @@ def _authenticate(request: Request) -> Optional[str]:
     if token is None:
         return None
     return _verify_token(token)
+
+
+def _authenticate_claims(request: Request) -> Optional[dict]:
+    """Like ``_authenticate`` but returns full claims (for admin email checks)."""
+    token = _extract_token(request)
+    if token is None:
+        return None
+    return _verify_token_claims(token)
 
 
 # ---------------------------------------------------------------------------
@@ -215,15 +235,28 @@ async def auth_context_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+def _reject_if_flagged(uid: str) -> None:
+    """403 when the acting user is on the flagged-users list (Phase 8)."""
+    from scripts.core.legal_store import is_flagged
+
+    if is_flagged(uid):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="account flagged — contact support",
+        )
+
+
 def require_user(request: Request) -> str:
     """FastAPI dependency for every route that touches per-user data.
 
     * ``REMIXMATE_AUTH_ENABLED`` off → ``"local"``, no token needed.
     * on + valid token              → the token's ``sub``.
     * on + missing / invalid token  → 401.
+    * flagged user (any mode)       → 403.
     """
     if not auth_enabled():
         current_user.set(DEFAULT_USER)
+        _reject_if_flagged(DEFAULT_USER)
         return DEFAULT_USER
 
     uid = _authenticate(request)  # raises 401 on a bad token, 500 on misconfig
@@ -233,5 +266,38 @@ def require_user(request: Request) -> str:
             detail="authentication required",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    _reject_if_flagged(uid)
+    current_user.set(uid)
+    return uid
+
+
+def require_admin(request: Request) -> str:
+    """FastAPI dependency for admin-only routes (Phase 8).
+
+    Requires auth on, a valid token, and the token's ``email`` claim in
+    ``ADMIN_EMAILS``. Returns the admin's ``sub``. When auth is off, only
+    succeeds if ``local`` is somehow listed — operators should leave auth on
+    in production; tests set ``ADMIN_EMAILS`` + a signed token with email.
+    """
+    if not auth_enabled():
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="admin routes require authentication",
+        )
+
+    claims = _authenticate_claims(request)
+    if not claims:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    email = (claims.get("email") or "").strip().lower()
+    if not email or email not in admin_emails():
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="admin access required")
+
+    uid = claims["sub"]
+    _reject_if_flagged(uid)
     current_user.set(uid)
     return uid

@@ -112,12 +112,37 @@
   box-shadow: 0 0 8px var(--color-amber-glow-strong);
 }
 
-/* Footer: connection status */
+/* Footer: legal + sign out + connection status */
 .left-rail__footer {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  gap: var(--space-2);
   padding-bottom: var(--space-2);
+  width: 100%;
+}
+
+.left-rail__legal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: 0 var(--space-1);
+}
+
+.left-rail__legal-link {
+  background: none;
+  border: none;
+  color: var(--color-text-muted, #71717a);
+  font-size: 9px;
+  line-height: 1.2;
+  cursor: pointer;
+  padding: 1px 0;
+}
+
+.left-rail__legal-link:hover {
+  color: var(--color-text-secondary, #a1a1aa);
 }
 
 .left-rail__status-dot {

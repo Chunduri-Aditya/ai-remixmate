@@ -154,6 +154,14 @@ function MixCard({ job }: MixCardProps) {
     entry_bar_b?: number
     duration?: number
     lufs?: number
+    credits?: Array<{
+      song?: string
+      license?: string
+      attribution?: string
+      attribution_required?: boolean
+      artist?: string
+      source?: string
+    }>
   } | undefined
 
   const streamUrl = result?.stream_url
@@ -262,6 +270,20 @@ function MixCard({ job }: MixCardProps) {
             {result.lufs         !== undefined && <><span className="text-muted">LUFS</span><span className="font-mono">{result.lufs.toFixed(1)}</span></>}
             {result.duration     !== undefined && <><span className="text-muted">Duration</span><span className="font-mono">{formatDuration(result.duration)}</span></>}
           </div>
+          {Array.isArray(result.credits) && result.credits.length > 0 && (
+            <div className="mv-credits">
+              <span className="text-muted">Credits</span>
+              <ul className="mv-credits__list">
+                {result.credits.map((c, i) => (
+                  <li key={`${c.song ?? 'credit'}-${i}`}>
+                    <span className="font-mono">{c.song ?? 'Unknown'}</span>
+                    {c.license ? <span className="text-muted"> — {c.license}</span> : null}
+                    {c.attribution ? <span className="text-muted"> · {c.attribution}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>
