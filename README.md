@@ -2,6 +2,10 @@
 
 A real-time DJ engine that takes two songs and renders a beat-locked transition between them. BPM-matched, key-aware, stem-separated, mastered to broadcast LUFS standards. Built end-to-end in Python — analysis, mixing, the audio math, the API, the web UI, all of it.
 
+> **Hosted multi-user work** (Supabase JWT, Postgres, deploy runbook) lives on the
+> `hosted-app` branch — see [`app/deploy/PROVISION.md`](app/deploy/PROVISION.md).
+> `main` remains the working single-user local app until go-live.
+
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![FastAPI](https://img.shields.io/badge/api-FastAPI-009688) ![PyTorch](https://img.shields.io/badge/ml-PyTorch-EE4C2C) ![License](https://img.shields.io/badge/license-MIT-green)
 
 > Personal portfolio project. Active development. The library on my machine has 681 tracks and the system handles them.

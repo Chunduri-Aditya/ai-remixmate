@@ -1,0 +1,21 @@
+[Unit]
+Description=AI RemixMate API
+After=network.target
+
+[Service]
+Type=simple
+User=remixmate
+Group=remixmate
+WorkingDirectory=/opt/remixmate
+EnvironmentFile=/etc/remixmate.env
+ExecStart=/opt/remixmate/.venv/bin/uvicorn scripts.api.main:app --host 127.0.0.1 --port 8000 --workers 1
+# Lifespan already calls _executor.shutdown(wait=True); give in-flight mixes time to finish.
+TimeoutStopSec=600
+Restart=on-failure
+RestartSec=5
+# Harden a bit — catalog volume should be mounted read-only separately.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

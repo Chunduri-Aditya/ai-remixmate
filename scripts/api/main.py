@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from scripts.api.auth import auth_context_middleware, require_user
+from scripts.api.cors import resolve_cors_origins
 from scripts.api.routers import legal, system
 from scripts.api.routes import router
 from scripts.core.config import cfg, configure_logging
@@ -119,44 +120,17 @@ async def request_id_middleware(request: Request, call_next):
 
 
 # ---------------------------------------------------------------------------
-# CORS — allow all origins in dev; tighten for production
+# CORS — Vite localhost in dev; prod from REMIXMATE_FRONTEND_URL / CORS_ORIGINS
 # ---------------------------------------------------------------------------
 
-_default_origins = [
-    "http://localhost:8501",    # Streamlit (legacy primary UI)
-    "https://localhost:8501",
-    "http://127.0.0.1:8501",
-    "https://127.0.0.1:8501",
-    "http://localhost:5173",    # Vite React dev server (new primary UI)
-    "https://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://127.0.0.1:5173",
-
-    "https://chunduri-aditya.github.io",   # GitHub Pages build (static frontend → local API)
-]
+_cfg_origins = getattr(getattr(cfg, "api", None), "cors_origins", None)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=getattr(cfg, "api", None) and cfg.api.cors_origins or _default_origins,
+    allow_origins=resolve_cors_origins(_cfg_origins),
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE", "PUT", "PATCH"],
     allow_headers=["*"],
 )
-
-
-@app.middleware("http")
-async def _allow_private_network(request: Request, call_next):
-    """
-    Chrome Private Network Access: an HTTPS page (GitHub Pages) calling a
-    local server sends a preflight with Access-Control-Request-Private-Network.
-    Approve it so the static frontend can reach the local API.
-    """
-    response = await call_next(request)
-    if (
-        request.method == "OPTIONS"
-        and request.headers.get("access-control-request-private-network", "").lower() == "true"
-    ):
-        response.headers["Access-Control-Allow-Private-Network"] = "true"
-    return response
 
 
 # ---------------------------------------------------------------------------

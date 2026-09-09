@@ -1,16 +1,13 @@
 # app/deploy/
 
-Production infra files. **Populated in Phase 7** of
-[`../DEPLOYMENT_PLAN.md`](../DEPLOYMENT_PLAN.md). Empty until then.
-
-Planned contents:
+Production infra files for the hosted multi-user stack (Phase 7).
 
 | File | Purpose |
 |---|---|
-| `Caddyfile` | reverse proxy + automatic TLS in front of `uvicorn` on the VPS |
-| `remixmate.service` | systemd unit: 1 `uvicorn` worker, `EnvironmentFile=/etc/remixmate.env`, `ExecStop` drain with `TimeoutStopSec=600` |
-| `remixmate.env.example` | template for `/etc/remixmate.env` (chmod 600 on the box) — every `REMIXMATE_*` / Supabase / `DATABASE_URL` key with a placeholder value, no secrets committed |
-| `PROVISION.md` | fresh-VPS runbook: `apt` packages, venv, catalog volume mount (read-only), first deploy |
+| [`Caddyfile`](Caddyfile) | reverse proxy + automatic TLS → `uvicorn` on 127.0.0.1:8000 |
+| [`remixmate.service`](remixmate.service) | systemd unit: 1 worker, `EnvironmentFile=/etc/remixmate.env`, `TimeoutStopSec=600` drain |
+| [`remixmate.env.example`](remixmate.env.example) | template for `/etc/remixmate.env` (chmod 600) — placeholders only |
+| [`PROVISION.md`](PROVISION.md) | operator runbook + live-verify checklist |
 
-The catalog itself (audio + pre-separated stems) ships by a separate `rsync` to
-the read-only volume, not through git.
+The catalog (audio + stems) ships by a separate `rsync` to a read-only volume,
+not through git. See [`PROVISION.md`](PROVISION.md) before spending on hardware.
