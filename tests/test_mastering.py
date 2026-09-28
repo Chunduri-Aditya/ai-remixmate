@@ -108,7 +108,6 @@ class TestMasterMix:
 
 def _make_stem_dict(amplitude: float = 0.5, duration: float = 5.0):
     """Build a {stem_name: (audio, sr)} dict with different amplitudes per type."""
-    rng = np.random.default_rng(42)
     stems = {}
     for i, name in enumerate(("drums", "bass", "vocals", "other")):
         freq = 100.0 * (2 ** i)

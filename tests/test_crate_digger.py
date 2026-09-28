@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from scripts.core.crate_digger import CrateDigger
 
 # ---------------------------------------------------------------------------
 # Helpers

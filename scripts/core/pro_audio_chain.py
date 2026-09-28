@@ -54,11 +54,11 @@ class ProfessionalAudioChain:
     def high_pass_filter(self, audio: np.ndarray, cutoff_freq: float) -> np.ndarray:
         """
         Apply high-pass filter to remove low frequencies.
-        
+
         Args:
             audio: Input audio
             cutoff_freq: Cutoff frequency in Hz
-            
+
         Returns:
             High-pass filtered audio
         """
@@ -86,7 +86,7 @@ class ProfessionalAudioChain:
                             threshold: float, ratio: float, attack: float, release: float) -> np.ndarray:
         """
         Apply sidechain compression to instrumentals based on vocal level.
-        
+
         Args:
             vocals: Vocal audio (sidechain source)
             instrumentals: Instrumental audio (compressed)
@@ -94,7 +94,7 @@ class ProfessionalAudioChain:
             ratio: Compression ratio
             attack: Attack time in ms
             release: Release time in ms
-            
+
         Returns:
             Sidechain compressed instrumentals
         """
@@ -156,13 +156,13 @@ class ProfessionalAudioChain:
                     decay_time: float) -> np.ndarray:
         """
         Apply subtle reverb with pre-delay.
-        
+
         Args:
             audio: Input audio
             amount: Reverb amount (0-1)
             predelay: Pre-delay in ms
             decay_time: Decay time in seconds
-            
+
         Returns:
             Audio with reverb applied
         """
@@ -204,11 +204,11 @@ class ProfessionalAudioChain:
     def true_peak_limiter(self, audio: np.ndarray, threshold_db: float) -> np.ndarray:
         """
         Apply true-peak limiting to prevent clipping.
-        
+
         Args:
             audio: Input audio
             threshold_db: Limiter threshold in dB
-            
+
         Returns:
             Limited audio
         """
@@ -242,11 +242,11 @@ class ProfessionalAudioChain:
     def loudness_normalize(self, audio: np.ndarray, target_lufs: float) -> np.ndarray:
         """
         Normalize audio to target LUFS level.
-        
+
         Args:
             audio: Input audio
             target_lufs: Target LUFS level
-            
+
         Returns:
             Loudness-normalized audio
         """
@@ -279,10 +279,10 @@ class ProfessionalAudioChain:
     def process_vocals(self, vocals: np.ndarray) -> np.ndarray:
         """
         Process vocals through the professional chain.
-        
+
         Args:
             vocals: Raw vocal audio
-            
+
         Returns:
             Processed vocals
         """
@@ -304,11 +304,11 @@ class ProfessionalAudioChain:
     def process_instrumentals(self, instrumentals: np.ndarray, vocal_sidechain: np.ndarray) -> np.ndarray:
         """
         Process instrumentals with sidechain compression.
-        
+
         Args:
             instrumentals: Raw instrumental audio
             vocal_sidechain: Vocal audio for sidechain source
-            
+
         Returns:
             Processed instrumentals
         """
@@ -329,11 +329,11 @@ class ProfessionalAudioChain:
     def finalize_mix(self, vocals: np.ndarray, instrumentals: np.ndarray) -> np.ndarray:
         """
         Finalize the mix with limiting and normalization.
-        
+
         Args:
             vocals: Processed vocals
             instrumentals: Processed instrumentals
-            
+
         Returns:
             Final mixed audio
         """
@@ -361,11 +361,11 @@ class ProfessionalAudioChain:
     def process_remix(self, vocals: np.ndarray, instrumentals: np.ndarray) -> Tuple[np.ndarray, Dict]:
         """
         Process a complete remix through the professional chain.
-        
+
         Args:
             vocals: Raw vocal audio
             instrumentals: Raw instrumental audio
-            
+
         Returns:
             Tuple of (processed_audio, processing_info)
         """
@@ -408,7 +408,7 @@ class ProfessionalAudioChain:
     def export_high_quality(self, audio: np.ndarray, output_path: Path) -> None:
         """
         Export audio in high quality format (44.1kHz/24-bit).
-        
+
         Args:
             audio: Audio to export
             output_path: Output file path

@@ -1234,7 +1234,8 @@ class TestBassSwap:
         sr, bpm, dur = 22050, 120.0, 20.0
         dir_a = tmp_path / "stems_a"
         dir_b = tmp_path / "stems_b"
-        dir_a.mkdir(); dir_b.mkdir()
+        dir_a.mkdir()
+        dir_b.mkdir()
 
         silence = np.zeros(int(sr * dur), dtype=np.float32)
 

@@ -353,7 +353,6 @@ def _score_genre(genre: str, preset: GenrePreset,
     centroid = feats["spectral_centroid"]
     zcr = feats["zcr"]
     sub_ratio = feats["sub_bass_ratio"]
-    low_energy = feats["low_energy_ratio"]
     dynamic_range = feats["dynamic_range_db"]
 
     score = 0.0

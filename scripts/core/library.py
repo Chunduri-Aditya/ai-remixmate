@@ -35,7 +35,6 @@ log = logging.getLogger(__name__)
 
 # Lazy imports — these may be absent in lightweight envs
 try:
-    import numpy as np
     import soundfile as sf
     _AUDIO_AVAILABLE = True
 except ImportError:

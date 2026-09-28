@@ -4,7 +4,7 @@ End-to-End Test Suite for AI RemixMate
 
 This test suite validates the complete pipeline with quality thresholds:
 - Easy pair (same key/BPM ±2)
-- Tough pair (different key, BPM ±8)  
+- Tough pair (different key, BPM ±8)
 - Vocals-light track
 - Quality validation (no clipping, -14 ±1 LUFS, beat alignment, key compatibility)
 """

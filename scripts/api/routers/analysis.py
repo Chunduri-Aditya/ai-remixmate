@@ -516,7 +516,7 @@ def build_clap_index(
                 )
 
             digger = get_digger()
-            n = digger.index_library(progress_cb=_progress, force=force)
+            digger.index_library(progress_cb=_progress, force=force)
             stats = digger.get_stats()
             job_store.update_job(
                 job_id, status="done", progress=1.0,

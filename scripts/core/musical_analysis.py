@@ -78,11 +78,11 @@ class MusicalAnalyzer:
     def detect_key(self, audio: np.ndarray, method: str = 'chroma') -> KeyAnalysis:
         """
         Detect musical key using chroma analysis.
-        
+
         Args:
             audio: Audio signal
             method: Detection method ('chroma', 'krumhansl')
-            
+
         Returns:
             KeyAnalysis with detected key and confidence
         """
@@ -160,10 +160,10 @@ class MusicalAnalyzer:
     def analyze_beat_grid(self, audio: np.ndarray) -> BeatAnalysis:
         """
         Analyze beat grid and onset alignment.
-        
+
         Args:
             audio: Audio signal
-            
+
         Returns:
             BeatAnalysis with tempo, beats, and alignment info
         """
@@ -205,11 +205,11 @@ class MusicalAnalyzer:
     def calculate_key_compatibility(self, key1: str, key2: str) -> Tuple[float, int]:
         """
         Calculate key compatibility using Camelot wheel.
-        
+
         Args:
             key1: First key
             key2: Second key
-            
+
         Returns:
             Tuple of (compatibility_score, camelot_distance)
         """
@@ -238,11 +238,11 @@ class MusicalAnalyzer:
     def suggest_pitch_shift(self, base_key: str, match_key: str) -> PitchShiftParams:
         """
         Suggest optimal pitch shift for key compatibility.
-        
+
         Args:
             base_key: Base song key
             match_key: Match song key
-            
+
         Returns:
             PitchShiftParams with suggested shift
         """
@@ -270,12 +270,12 @@ class MusicalAnalyzer:
                          preserve_formants: bool = True) -> np.ndarray:
         """
         Apply pitch shifting to audio.
-        
+
         Args:
             audio: Input audio
             semitones: Pitch shift in semitones
             preserve_formants: Whether to preserve formants
-            
+
         Returns:
             Pitch-shifted audio
         """
@@ -304,11 +304,11 @@ class MusicalAnalyzer:
     def normalize_loudness(self, audio: np.ndarray, target_lufs: float = TARGET_LUFS) -> np.ndarray:
         """
         Normalize audio to target LUFS.
-        
+
         Args:
             audio: Input audio
             target_lufs: Target LUFS level
-            
+
         Returns:
             Loudness-normalized audio
         """
@@ -340,11 +340,11 @@ class MusicalAnalyzer:
     def align_beats(self, audio1: np.ndarray, audio2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         Align beats between two audio signals.
-        
+
         Args:
             audio1: First audio signal
             audio2: Second audio signal
-            
+
         Returns:
             Tuple of (aligned_audio1, aligned_audio2)
         """
@@ -380,11 +380,11 @@ class MusicalAnalyzer:
     def analyze_musical_compatibility(self, audio1: np.ndarray, audio2: np.ndarray) -> Dict:
         """
         Comprehensive musical compatibility analysis.
-        
+
         Args:
             audio1: First audio signal
             audio2: Second audio signal
-            
+
         Returns:
             Dictionary with compatibility analysis
         """
@@ -434,11 +434,11 @@ class MusicalAnalyzer:
     def apply_musical_corrections(self, vocals: np.ndarray, instrumentals: np.ndarray) -> Tuple[np.ndarray, np.ndarray, Dict]:
         """
         Apply musical corrections to improve compatibility.
-        
+
         Args:
             vocals: Vocal audio
             instrumentals: Instrumental audio
-            
+
         Returns:
             Tuple of (corrected_vocals, corrected_instrumentals, correction_info)
         """

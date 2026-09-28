@@ -94,10 +94,10 @@ class RealOptimizer:
     def repair_parameters(self, params: MixParameters) -> Tuple[MixParameters, List[str]]:
         """
         Repair layer: enforce constraints and fix invalid parameters.
-        
+
         Args:
             params: Input parameters
-            
+
         Returns:
             Tuple of (repaired_parameters, violations_fixed)
         """
@@ -179,12 +179,12 @@ class RealOptimizer:
                            params: MixParameters) -> np.ndarray:
         """
         Apply mix parameters to create a remix.
-        
+
         Args:
             vocals: Vocal audio
             instrumentals: Instrumental audio
             params: Mix parameters
-            
+
         Returns:
             Mixed audio
         """
@@ -226,7 +226,6 @@ class RealOptimizer:
         # Apply EQ (simplified high-pass filter)
         if params.eq_low_cut_freq > 20:
             # Simple high-pass filter approximation
-            cutoff_ratio = params.eq_low_cut_freq / 22050  # Assuming 44.1kHz
             # This is a very simplified EQ - in practice you'd use proper filtering
             pass
 
@@ -267,12 +266,12 @@ class RealOptimizer:
                    mixed: np.ndarray) -> float:
         """
         Score a remix using objective metrics.
-        
+
         Args:
             vocals: Original vocals
             instrumentals: Original instrumentals
             mixed: Mixed result
-            
+
         Returns:
             Quality score (0-1, higher is better)
         """
@@ -314,13 +313,13 @@ class RealOptimizer:
                 max_iterations: int = 100, seed: Optional[int] = None) -> OptimizationResult:
         """
         Optimize mix parameters using random search.
-        
+
         Args:
             vocals: Vocal audio
             instrumentals: Instrumental audio
             max_iterations: Maximum optimization iterations
             seed: Random seed for reproducibility
-            
+
         Returns:
             OptimizationResult with best parameters and score
         """

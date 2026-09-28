@@ -247,7 +247,6 @@ def render_combo(
     """
     try:
         import librosa
-        import soundfile as sf
     except ImportError as exc:
         return ComboResult(combo=combo, error=f"Missing dependency: {exc}")
 

@@ -234,7 +234,6 @@ def apply_air_eq(
         # Normalised coefficients for a 1st-order high shelf
         b0 = A * (k + A) / (k + 1.0 / A)
         b1 = A * (A - k) / (k + 1.0 / A)
-        a0 = 1.0
         a1 = (k - 1.0 / A) / (k + 1.0 / A)
 
         # pack as 1-section SOS (a0 is always 1)

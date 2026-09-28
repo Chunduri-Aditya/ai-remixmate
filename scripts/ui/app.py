@@ -5170,8 +5170,8 @@ spotify:
 
 **Step 3 — Restart the API** (Ctrl+C → `./start.sh`) and come back here.
 
-> **Free tier note:** Spotify restricted their audio features endpoint (BPM, key, energy) 
-> for new apps created after November 2024. If your app was created after that date, 
+> **Free tier note:** Spotify restricted their audio features endpoint (BPM, key, energy)
+> for new apps created after November 2024. If your app was created after that date,
 > tracks will still import correctly — they'll just be analysed locally by librosa instead.
 """)
         st.stop()

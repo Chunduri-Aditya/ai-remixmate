@@ -355,10 +355,6 @@ class TestClashPathBassSwap:
             "scripts.core.key_detection.psychoacoustic_consonance",
             return_value=0.10,   # well below the 0.35 threshold
         ):
-            # Import the module and monkey-patch its reference
-            import scripts.core.dj_analysis as _da
-            orig = getattr(_da, "_plan_transition_impl", None)
-
             # Mock at the point of import inside plan_transition
             with patch("scripts.core.key_detection.psychoacoustic_consonance", return_value=0.10):
                 song_a = _song("C", "major", camelot="8B")

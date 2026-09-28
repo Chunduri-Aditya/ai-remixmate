@@ -506,10 +506,14 @@ def update_job(
         if job is None:
             return
 
-        if status   is not None: job["status"]   = status
-        if message  is not None: job["message"]  = message
-        if result   is not None: job["result"]   = result
-        if error    is not None: job["error"]    = error
+        if status is not None:
+            job["status"] = status
+        if message is not None:
+            job["message"] = message
+        if result is not None:
+            job["result"] = result
+        if error is not None:
+            job["error"] = error
 
         if progress is not None:
             progress = round(min(1.0, max(0.0, progress)), 3)

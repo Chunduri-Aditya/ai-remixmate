@@ -164,14 +164,14 @@ class RemixMateDatabase:
                 lyrics_text: Optional[str] = None, lyrics_embedding_checksum: Optional[str] = None) -> int:
         """
         Add a song to the database.
-        
+
         Args:
             name: Song name
             file_path: Path to audio file
             features: Extracted audio features
             lyrics_text: Lyrics text (optional)
             lyrics_embedding_checksum: Lyrics embedding checksum (optional)
-            
+
         Returns:
             Song ID
         """
@@ -266,11 +266,11 @@ class RemixMateDatabase:
     def find_similar_songs(self, query_features: FeatureVector, top_k: int = 10) -> List[Tuple[str, float]]:
         """
         Find similar songs using feature similarity.
-        
+
         Args:
             query_features: Query song features
             top_k: Number of results to return
-            
+
         Returns:
             List of (song_name, similarity_score) tuples
         """

@@ -55,7 +55,7 @@ class PythonBridge:
                     optimize: bool = False, online: bool = True) -> Dict[str, Any]:
         """
         Create a complete remix using only Python.
-        
+
         Args:
             base_song: Base song name (vocals source)
             match_song: Match song name (instrumentals source)
@@ -508,13 +508,13 @@ class PythonBridge:
                    preset: str = "radio", optimize: bool = False) -> Dict[str, Any]:
         """
         Create multiple remixes in batch.
-        
+
         Args:
             remix_pairs: List of (base_song, match_song) tuples
             output_dir: Output directory for results
             preset: Mix preset
             optimize: Whether to use optimization
-            
+
         Returns:
             Dictionary with batch results
         """

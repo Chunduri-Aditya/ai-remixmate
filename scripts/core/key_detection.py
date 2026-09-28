@@ -659,11 +659,9 @@ def pitch_shift_for_camelot(source: str, target: str) -> int:
         Number of semitones to shift (positive = up, negative = down, 0 = no shift)
     """
     try:
-        # Parse Camelot codes
-        num_s = int(source[:-1])
-        letter_s = source[-1]
-        num_t = int(target[:-1])
-        letter_t = target[-1]
+        # Parse Camelot codes (int() raises ValueError on a malformed code)
+        int(source[:-1])
+        int(target[:-1])
 
         # Derive semitone mapping from the authoritative CAMELOT + NOTE_NAMES
         # constants defined at module level.  This is the single source of truth

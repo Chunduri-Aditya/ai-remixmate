@@ -110,7 +110,6 @@ class AudioMetrics:
             chroma = librosa.feature.chroma_cqt(y=audio, sr=sr)
 
             # Get key profile correlation
-            key_profiles = librosa.feature.chroma_cqt(y=audio, sr=sr, bins_per_octave=12)
             key_correlations = np.zeros(24)  # 12 major + 12 minor keys
 
             # Major key profiles (Krumhansl-Schmuckler)

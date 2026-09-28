@@ -123,7 +123,7 @@ def export_rekordbox_xml(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
-    product = ET.SubElement(root, "PRODUCT",
+    ET.SubElement(root, "PRODUCT",
         Name="RemixMate", Version="1.0", Company="RemixMate")
     collection = ET.SubElement(root, "COLLECTION", Entries=str(1))
 
@@ -284,7 +284,6 @@ def export_serato_markers(
         import shutil
 
         from mutagen.id3 import GEOB, ID3, Encoding
-        from mutagen.mp3 import MP3
     except ImportError as e:
         raise ImportError(
             "mutagen is required for Serato export.  Install with: pip install mutagen"

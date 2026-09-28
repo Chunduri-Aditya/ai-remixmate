@@ -50,11 +50,11 @@ class FeatureVector:
 def load_audio(file_path: Path, sr: int = TARGET_SR) -> Tuple[np.ndarray, int]:
     """
     Load audio file and return (audio_array, sample_rate).
-    
+
     Args:
         file_path: Path to audio file
         sr: Target sample rate (default: TARGET_SR)
-    
+
     Returns:
         Tuple of (audio_array, sample_rate)
     """
@@ -83,10 +83,10 @@ def mfcc_feature(y: np.ndarray, sr: int, n_mfcc: int = N_MFCC) -> np.ndarray:
 def extract_features_from_wav(file_path: Path) -> FeatureVector:
     """
     Extract all features from a WAV file.
-    
+
     Args:
         file_path: Path to WAV file
-    
+
     Returns:
         FeatureVector containing tempo, chroma, and MFCC features
     """
@@ -102,10 +102,10 @@ def extract_features_from_wav(file_path: Path) -> FeatureVector:
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """
     Calculate cosine similarity between two vectors.
-    
+
     Args:
         a, b: Input vectors
-    
+
     Returns:
         Cosine similarity in range [-1, 1]
     """
@@ -122,7 +122,7 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 def load_embeddings() -> Dict[str, Dict]:
     """
     Load the embeddings database from JSON file.
-    
+
     Returns:
         Dictionary mapping song names to feature dictionaries
     """
@@ -142,7 +142,7 @@ def load_embeddings() -> Dict[str, Dict]:
 def save_embeddings(embeddings: Dict[str, Dict]) -> None:
     """
     Save embeddings database to JSON file.
-    
+
     Args:
         embeddings: Dictionary mapping song names to feature dictionaries
     """

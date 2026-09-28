@@ -43,6 +43,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -686,8 +687,10 @@ class DJEngine:
 
         # Correction: shift B so phase_b == phase_a
         correction = phase_a - phase_b
-        if   correction >  half_bar: correction -= bar_samples
-        elif correction < -half_bar: correction += bar_samples
+        if correction > half_bar:
+            correction -= bar_samples
+        elif correction < -half_bar:
+            correction += bar_samples
 
         if correction:
             log.info(
@@ -737,15 +740,12 @@ class DJEngine:
                           (plan.transition_seconds / plan.transition_bars) * sr)
         swap_sample = min(swap_sample, trans_samples)
 
-        b_lp, a_lp_coeffs = _butter_lowpass(plan.eq.bass_crossover_hz, sr), None
         b_lp_b, b_lp_a = _butter_lowpass(plan.eq.bass_crossover_hz, sr)
 
         # Before swap: A keeps bass, B has no bass (already HP'd)
         # After swap: A loses bass, B gets full bass
         a_before = a_trans[:swap_sample]
         a_after  = a_trans[swap_sample:]
-        b_before = b_trans_processed[:swap_sample]
-        b_after  = b_trans_processed[swap_sample:]
 
         # Cut bass from A after swap point
         a_hp_b, a_hp_a = _butter_highpass(plan.eq.bass_crossover_hz, sr)
@@ -903,8 +903,10 @@ class DJEngine:
             phase_a    = exit_sample_a % bar_samples
             phase_b    = entry_sample_b % bar_samples
             correction = phase_a - phase_b
-            if   correction >  half_bar: correction -= bar_samples
-            elif correction < -half_bar: correction += bar_samples
+            if correction > half_bar:
+                correction -= bar_samples
+            elif correction < -half_bar:
+                correction += bar_samples
             if correction:
                 log.info(
                     "Chain beat-grid lock [%d→%d]: %+d samples (%+.1f ms)",
@@ -1115,8 +1117,10 @@ class DJEngine:
         phase_a     = exit_sample_a % bar_samples
         phase_b     = entry_sample_b % bar_samples
         correction  = phase_a - phase_b
-        if   correction >  half_bar: correction -= bar_samples
-        elif correction < -half_bar: correction += bar_samples
+        if correction > half_bar:
+            correction -= bar_samples
+        elif correction < -half_bar:
+            correction += bar_samples
         entry_sample_b = max(0, entry_sample_b + correction)
 
         # ── Per-stem similarity + crossfade curves ─────────────────────────

@@ -27,12 +27,12 @@ from scripts.core.real_optimizer import RealOptimizer
 def generate_stems_and_params(base_song: str, match_song: str, out_dir: str) -> Dict[str, Any]:
     """
     Generate stems and suggested mix parameters for bridge integration.
-    
+
     Args:
         base_song: Base song name (vocals source)
         match_song: Match song name (instrumentals source)
         out_dir: Output directory
-        
+
     Returns:
         Dictionary with stem paths and parameters
     """
@@ -155,7 +155,6 @@ def cmd_recommend(args) -> int:
 
     # Initialize components
     db = RemixMateDatabase()
-    musical_analyzer = MusicalAnalyzer()
 
     # Get base song features
     base_song = db.get_song(args.base)
@@ -220,13 +219,13 @@ def build_parser() -> argparse.ArgumentParser:
 Examples:
   # Create remix using Python-only processing
   python scripts/remixmate_cli.py bridge --base "SongA" --match "SongB" --out-dir runs/session1
-  
+
   # Create club-style remix with optimization
   python scripts/remixmate_cli.py bridge --base "SongA" --match "SongB" --out-dir runs/session1 --preset club --optimize
-  
+
   # Find key-compatible songs
   python scripts/remixmate_cli.py recommend --base "SongA" --top 5 --filter key_compatible
-  
+
   # Find similar songs
   python scripts/remixmate_cli.py recommend --base "SongA" --top 10 --filter similarity
         """

@@ -299,10 +299,8 @@ class CrateDigger:
             try:
                 if use_clap:
                     emb = _embed_audio_clap(model, audio, sr)
-                    backend = "clap"
                 else:
                     emb = self._fallback_embed(name, audio, sr)
-                    backend = "music_index"
             except Exception as exc:
                 log.warning("[crate_digger] Embedding failed for %s: %s", name, exc)
                 continue

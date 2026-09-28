@@ -109,7 +109,9 @@ def test_render_entry_past_end_of_b_is_not_silent():
     plan = TransitionPlan(0, 4.0, 0, 9.9, bars, bars * (60 / 120) * 4,
                           120.0, 120.0, 1.0, eq, 0.8)   # entry 9.9s into a 10s B
     out = eng.render(A, B, plan, full_output=True)
-    exit_s = int(4.0 * SR); ts = int(bars * (60 / 120) * 4 * SR); mid = ts // 2
+    exit_s = int(4.0 * SR)
+    ts = int(bars * (60 / 120) * 4 * SR)
+    mid = ts // 2
     second_half = out[exit_s + mid: exit_s + ts]
     rms_db = 20 * np.log10(np.sqrt(np.mean(second_half.astype(np.float64) ** 2)) + 1e-12)
     # B should be rising to full here; -74 dB means it never entered.
@@ -141,7 +143,9 @@ def test_render_late_entry_backs_up_instead_of_going_silent():
     plan = TransitionPlan(0, 4.0, 0, 29.0, bars, trans_secs,
                           120.0, 120.0, 1.0, eq, 0.8)
     out = eng.render(A, B, plan, full_output=True)
-    exit_s = int(4.0 * SR); ts = int(trans_secs * SR); mid = ts // 2
+    exit_s = int(4.0 * SR)
+    ts = int(trans_secs * SR)
+    mid = ts // 2
     second_half = out[exit_s + mid: exit_s + ts]
     rms_db = 20 * np.log10(np.sqrt(np.mean(second_half.astype(np.float64) ** 2)) + 1e-12)
     assert rms_db > -40, f"transition 2nd-half RMS {rms_db:.1f} dB — B is absent"
@@ -169,7 +173,8 @@ def test_near_silence_not_pumped_and_finite():
 
 
 def test_bass_ramp_no_simultaneous_overlap():
-    n = SR * 4; t = np.arange(n) / SR
+    n = SR * 4
+    t = np.arange(n) / SR
     da, db = _stem_bass_ramp((0.5*np.sin(2*np.pi*60*t)).astype(np.float32),
                              (0.5*np.sin(2*np.pi*90*t)).astype(np.float32),
                              n // 2, int(0.10 * SR))
@@ -181,7 +186,8 @@ def test_bass_ramp_no_simultaneous_overlap():
 
 
 def test_medium_crossfade_is_equal_power():
-    rng = np.random.default_rng(7); n = SR * 4
+    rng = np.random.default_rng(7)
+    n = SR * 4
     xa = rng.standard_normal(n).astype(np.float32) * 0.3
     xb = rng.standard_normal(n).astype(np.float32) * 0.3   # uncorrelated
     fo, fi = _stem_crossfade_curves(n, 0.5)
