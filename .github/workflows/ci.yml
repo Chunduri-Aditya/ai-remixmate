@@ -21,26 +21,17 @@ jobs:
       - name: Install
         run: |
           python -m pip install -U pip
-          pip install ruff
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
           pip install -e .
-      - name: Ruff (Phase 7/8 surface)
+      - name: Ruff
+        run: ruff check .
+      - name: Pytest
         run: >
-          ruff check
-          scripts/api/cors.py
-          scripts/api/auth.py
-          scripts/api/routers/legal.py
-          scripts/api/routers/account.py
-          scripts/api/routers/admin.py
-          scripts/core/legal_store.py
-          tests/test_legal_phase8.py
-          tests/test_cors_origins.py
-      - name: Pytest (safe subset)
-        run: >
-          python -m pytest -m "not dj_analysis and not integration"
+          python -m pytest -m "not dj_analysis"
           --ignore=tests/e2e_test_suite.py
-          --ignore=tests/test_audio_source.py
           -q
+      - name: Pytest (dj_analysis)
+        run: python -m pytest -m dj_analysis -q
 
   frontend:
     runs-on: ubuntu-latest
@@ -51,10 +42,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npx vitest run
+      - run: npx eslint . --max-warnings 0
       - run: npx vite build
