@@ -270,12 +270,12 @@ start_api() {
     scheme=https
     echo "🚀  Starting API at https://$API_HOST:$API_PORT (HTTPS)"
     echo "    Docs: https://$API_HOST:$API_PORT/docs"
-    (cd "$ROOT" && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --host "$API_HOST" --port $API_PORT \
+    (cd "$ROOT" && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --no-proxy-headers --host "$API_HOST" --port $API_PORT \
       --ssl-certfile "$CERT_FILE" --ssl-keyfile "$KEY_FILE") &
   else
     echo "🚀  Starting API at http://$API_HOST:$API_PORT"
     echo "    Docs: http://$API_HOST:$API_PORT/docs"
-    (cd "$ROOT" && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --host "$API_HOST" --port $API_PORT) &
+    (cd "$ROOT" && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --no-proxy-headers --host "$API_HOST" --port $API_PORT) &
   fi
   API_PID=$!
   echo "    PID: $API_PID"
