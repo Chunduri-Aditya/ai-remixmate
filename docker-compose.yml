@@ -18,9 +18,9 @@ services:
     build: .
     container_name: remixmate-api
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
-      - ./library:/app/library
+      - ./library:/app/library:ro
       - ./data:/app/data
       - ./outputs:/app/outputs
     environment:

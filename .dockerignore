@@ -11,3 +11,16 @@ venv
 node_modules
 .env
 *.log
+config.local.yaml
+library/
+outputs/
+data/
+models/
+remix-env/
+.venv*
+frontend/node_modules
+frontend/dist
+archive/
+library_quarantine/
+catalog/
+catalog_data/
