@@ -269,7 +269,7 @@ JobResponse(
     end_time: float
     avg_energy: float       # 0–1
     avg_spectral: float     # 0–1 brightness
-    
+
     @property is_mixable_exit() -> bool
     @property is_mixable_entry() -> bool
 
@@ -373,27 +373,27 @@ plan_transition(structure_a: SongStructure, structure_b: SongStructure) -> Trans
 ```python
 class LibraryManager:
     __init__(library_dir=None, max_size_gb=20.0)
-    
+
     touch(name: str) -> None
         # Mark song as accessed (update last_accessed timestamp)
-    
+
     get_size_gb() -> float
         # Total library disk usage
-    
+
     prune_raw(name: str) -> None
         # Delete full.wav if stems exist (save ~60% space)
-    
+
     evict_lru() -> None
         # When library > max_size_gb, remove full.wav files for LRU songs
         # Stems are preserved so remixing still works
-    
+
     add_song_entry(entry: SongEntry) -> None
     get_entry(name: str) -> Optional[SongEntry]
     list_all() -> List[SongEntry]
-    
+
     fingerprint_audio(audio_path: Path) -> str
         # SHA-256 of first 30 seconds PCM
-    
+
     is_duplicate(fingerprint: str) -> bool
         # Check if fingerprint already in index
 ```
@@ -470,17 +470,17 @@ const Widget = lazy(() => import('@/pages/Widget'))
 export function AppShell() {
   // SSE connection (persists across page navigation)
   useSSE()
-  
+
   // Polling fallback when SSE unavailable
   const sseConnected = useAppStore((s) => s.sseConnected)
   useJobPoller(!sseConnected)
-  
+
   // Job completion toast notifications
   useJobToasts()
-  
+
   // Keyboard shortcuts (Cmd+K for help modal)
   useKeyboardShortcuts()
-  
+
   // Error boundaries per page
   const inspectorOpen = useAppStore((s) => s.inspectorOpen)
   const [showShortcuts, setShowShortcuts] = useState(false)
@@ -521,7 +521,7 @@ interface AppState {
   // Navigation
   activeNav: NavDestination
   setActiveNav: (dest: NavDestination) => void
-  
+
   // Health & Connection
   apiHealth: 'unknown' | 'ok' | 'degraded' | 'down'
   sseConnected: boolean
@@ -531,22 +531,22 @@ interface AppState {
   setSseConnected: (v: boolean) => void
   setUptimeSeconds: (v: number) => void
   setMachineProfile: (p: MachineProfile) => void
-  
+
   // Live Jobs (from SSE or polling)
   jobs: Record<string, Job>    // keyed by job_id
   upsertJob: (job: Job) => void
   removeJob: (id: string) => void
   setJobs: (jobs: Job[]) => void
-  
+
   // Completion Log (timestamps of COMPLETED jobs, last 60 min)
   completionLog: number[]
   logCompletion: () => void
-  
+
   // Activity Log (recent SSE events, human-readable)
   activityLog: ActivityEntry[]
   pushActivity: (entry: Omit<ActivityEntry, 'id' | 'ts'>) => void
   clearActivity: () => void
-  
+
   // Inspector Panel
   inspectorTab: 'jobs' | 'activity' | 'system'
   setInspectorTab: (tab: AppState['inspectorTab']) => void
@@ -1602,35 +1602,35 @@ async def handle_dj_remix(req: DJRemixRequest):
 # task_modules/remix.py
 def remix_task(song_a, song_b, job_id, **kwargs):
     job_store.update_job(job_id, status=RUNNING, progress=0, message="Loading...")
-    
+
     # Load audio
     audio_a, sr = librosa.load(library.song_dir(song_a) / "full.wav")
     audio_b, sr = librosa.load(library.song_dir(song_b) / "full.wav")
-    
+
     job_store.update_job(job_id, progress=25, message="Analyzing structure...")
-    
+
     # Analyze
     struct_a = dj_analysis.analyze_structure(audio_a, sr)
     struct_b = dj_analysis.analyze_structure(audio_b, sr)
-    
+
     job_store.update_job(job_id, progress=50, message="Planning transition...")
-    
+
     # Plan
     plan = dj_analysis.plan_transition(struct_a, struct_b)
-    
+
     job_store.update_job(job_id, progress=75, message="Rendering mix...")
-    
+
     # Render
     engine = DJEngine()
     output = engine.render(audio_a, audio_b, plan, sr)
-    
+
     # Master
     output, lufs = mastering.master_to_target(output, sr, target_lufs=-14)
-    
+
     # Write output
     output_path = OUTPUT_DIR / f"mix-{job_id[:8]}.wav"
     sf.write(output_path, output, sr)
-    
+
     job_store.update_job(
         job_id,
         status=DONE,

@@ -2175,4 +2175,3 @@ curl -X POST http://localhost:8000/dj-remix \
 - ✅ Dark UI with smooth animations
 
 All code is modular, well-documented, and designed for easy extension.
-

@@ -9,10 +9,10 @@ def analyze_audio(file_path):
     print(f"🎧 Analyzing: {file_path}")
 
     y, sr = librosa.load(file_path)
-    
+
     # Tempo (BPM)
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-    
+
     # Chroma = Pitch content (for key estimation)
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     avg_chroma = np.mean(chroma, axis=1)

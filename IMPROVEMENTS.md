@@ -1,6 +1,6 @@
 # RemixMate — Gap Closure Improvements Plan
 
-> **Source:** Gap analysis vs. Spotify/Apple Music mixing pipelines (June 2026)  
+> **Source:** Gap analysis vs. Spotify/Apple Music mixing pipelines (June 2026)
 > **Principle:** Stage 1 = wire existing code. Stage 2 = new implementations. Stage 3 = research/publication.
 
 ---
@@ -39,8 +39,8 @@ These were **connection tasks**, not implementation tasks. All DSP was pre-built
 
 ### 1A. Wire per-stem LUFS normalization into `render_stem_blend()`
 
-**File:** `scripts/core/dj_engine.py`  
-**Function:** `DJEngine.render_stem_blend()` (line ~1080)  
+**File:** `scripts/core/dj_engine.py`
+**Function:** `DJEngine.render_stem_blend()` (line ~1080)
 **Import needed:** `from scripts.core.mastering import normalize_stems_to_target`
 
 **Problem:** `render_stem_blend()` loads stems and stretches them, then sums them without level alignment. A loud bass stem from Song B will crush Song A's softer stems.
@@ -70,7 +70,7 @@ stems_b_norm = normalize_stems_to_target(stems_b_input, target_lufs=-20.0)
 
 ### 1B. Wire bass-swap into `render_stem_blend()`
 
-**File:** `scripts/core/dj_engine.py`  
+**File:** `scripts/core/dj_engine.py`
 **Function:** `DJEngine.render_stem_blend()` — the per-stem crossfade loop (line ~1184)
 
 **Problem:** `render_stem_blend()` applies the same `_stem_crossfade_curves()` to the bass stem as to vocals/other. The bass stem from Song A should exit early (at the swap point) and Song B's bass should enter clean — identical to what `render()` does with `_butter_highpass` at line ~793.
@@ -80,7 +80,7 @@ stems_b_norm = normalize_stems_to_target(stems_b_input, target_lufs=-20.0)
 ```python
 for s in _STEM_NAMES:
     fade_out, fade_in = _stem_crossfade_curves(trans_samples, similarities[s])
-    
+
     # Bass stem: force early exit for A, clean entry for B (bass swap)
     if s == "bass":
         swap_sample = int(plan.eq.bass_swap_bar * (trans_samples / max(plan.transition_bars, 1)))
@@ -105,7 +105,7 @@ for s in _STEM_NAMES:
 
 ### 1C. Wire `render_stem_blend()` into `render_chain()`
 
-**File:** `scripts/core/dj_engine.py`  
+**File:** `scripts/core/dj_engine.py`
 **Function:** `DJEngine.render_chain()` (line ~860)
 
 **Problem:** `render_chain()` uses flat cosine fades without stem awareness. It never calls `render_stem_blend()`.
@@ -134,7 +134,7 @@ def render_chain(
 
 ### 2A. Real-time key transposition for harmonic match
 
-**New function to add:** `scripts/core/key_detection.py` — `pitch_shift_audio(audio, sr, semitones)`  
+**New function to add:** `scripts/core/key_detection.py` — `pitch_shift_audio(audio, sr, semitones)`
 **Uses:** `librosa.effects.pitch_shift()` or the GPU path in `scripts/core/gpu.py`
 
 **What already exists:** `pitch_shift_for_camelot(source, target)` at line 529 already computes the semitone delta. The audio pipeline just never applies it.
@@ -178,7 +178,7 @@ class TransitionPlan:
 
 ### 2B. SSM-novelty phrase-boundary cue selection
 
-**File:** `scripts/core/dj_analysis.py`  
+**File:** `scripts/core/dj_analysis.py`
 **Function:** `plan_transition()` — cue point selection logic
 
 **Problem:** Current code picks exit/entry cue points by section type label (`"outro"`, `"break"`). This doesn't guarantee an 8/16-bar phrase boundary — it just picks a structurally labeled region. Apple's AutoMix does the same thing (fires at track end), which is why user reports say "it mixes at the wrong time."
@@ -191,36 +191,36 @@ def _detect_phrase_boundaries(audio: np.ndarray, sr: int, bpm: float) -> List[fl
     """
     Detect structural boundaries aligned to 8-bar grid using SSM novelty curves.
     Returns list of boundary times in seconds.
-    
+
     Method: Vande Veire & De Bie 2018 — MFCC+RMS SSM, geometric mean,
     novelty curve peak-picking, snapped to nearest downbeat.
     """
     import librosa
-    
+
     # Compute MFCC feature matrix
     mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=13)
     rms = librosa.feature.rms(y=audio)
     features = np.vstack([mfcc, rms])
-    
+
     # Self-similarity matrix
     R = librosa.segment.recurrence_matrix(features, mode='affinity', sym=True)
-    
+
     # Novelty curve
     novelty = librosa.segment.timelag_filter(R)
     novelty_curve = np.mean(novelty, axis=0)
-    
+
     # Find peaks in novelty curve
     from scipy.signal import find_peaks
     peaks, _ = find_peaks(novelty_curve, distance=int(sr * 8 * 60.0 / bpm / 512))
-    
+
     # Convert frame indices to seconds
     times = librosa.frames_to_time(peaks, sr=sr)
-    
+
     # Snap each boundary to nearest 8-bar downbeat
     bar_sec = 4 * 60.0 / bpm
     grid_8bar = bar_sec * 8
     snapped = [round(t / grid_8bar) * grid_8bar for t in times]
-    
+
     return sorted(set(snapped))
 ```
 
@@ -285,11 +285,11 @@ def detect_key(audio, sr, method='cqt', profile='auto') -> KeyResult:
 def psychoacoustic_consonance(chroma_a: np.ndarray, chroma_b: np.ndarray) -> float:
     """
     Compute psychoacoustic consonance between two chroma vectors.
-    
+
     Based on Gebhardt, Davies & Seeber (Applied Sciences, 2016):
     computes pairwise roughness between sinusoidal partials derived
     from the top-N chroma peaks of each track.
-    
+
     Returns consonance score [0.0, 1.0]:
       1.0 = maximally consonant (unison/octave)
       0.0 = maximally dissonant (tritone/minor second)
@@ -297,7 +297,7 @@ def psychoacoustic_consonance(chroma_a: np.ndarray, chroma_b: np.ndarray) -> flo
     # Top 3 pitches from each chroma vector
     top_a = np.argsort(chroma_a)[-3:]
     top_b = np.argsort(chroma_b)[-3:]
-    
+
     # Sethares roughness between all pairs
     total_roughness = 0.0
     n_pairs = 0
@@ -310,10 +310,10 @@ def psychoacoustic_consonance(chroma_a: np.ndarray, chroma_b: np.ndarray) -> flo
                                0.2, 0.3, 0.4, 0.8, 1.0]
             total_roughness += roughness_table[semitone_diff]
             n_pairs += 1
-    
+
     if n_pairs == 0:
         return 0.5
-    
+
     avg_roughness = total_roughness / n_pairs
     return float(1.0 - avg_roughness)
 ```

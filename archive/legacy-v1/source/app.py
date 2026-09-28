@@ -133,15 +133,15 @@ def main():
     print("🎵 AI RemixMate - Web Application")
     print("=" * 60)
     print()
-    
+
     # Check dependencies without mutating the environment.
     if not check_runtime_environment():
         print("\n❌ Dependency check failed. Install the packages above and run again.")
         sys.exit(1)
-    
+
     print("\n🚀 Starting web application...")
     print()
-    
+
     # Import after dependencies are checked
     try:
         import gradio as gr
@@ -160,73 +160,73 @@ def main():
         print(f"❌ Import error: {e}")
         print("Please ensure all dependencies are installed.")
         sys.exit(1)
-    
+
     # Setup logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
-    
+
     # Initialize strategy engine
     strategy_engine = get_strategy_engine()
-    
+
     # ==================== UI Functions ====================
-    
+
     def analyze_track1(file):
         """Analyze Track 1 and show recommendations."""
         if file is None:
             return "", ""
-        
+
         try:
             file_path = file.name if hasattr(file, 'name') else str(file)
             analysis = analyze_track_for_display(file_path)
             recommendations_text = ""
-            
+
             # Get recommendations
             recs = find_compatible_songs(file_path, top_k=5)
             if recs:
                 recommendations_text = format_recommendations(recs)
             else:
                 recommendations_text = "No recommendations available. Add songs to the database first."
-            
+
             return analysis, recommendations_text
         except Exception as e:
             logger.error(f"Analysis error: {e}")
             return f"Error analyzing track: {e}", ""
-    
+
     def analyze_track2(file):
         """Analyze Track 2."""
         if file is None:
             return ""
-        
+
         try:
             file_path = file.name if hasattr(file, 'name') else str(file)
             return analyze_track_for_display(file_path)
         except Exception as e:
             logger.error(f"Analysis error: {e}")
             return f"Error analyzing track: {e}"
-    
+
     def remix_files(file1, file2, remix_mode, use_intelligent, use_arrangement,
                    aggressiveness, energy_shape):
         """Main remix function."""
         if file1 is None or file2 is None:
             return None, "Please upload both tracks"
-        
+
         try:
             # Get file paths (Gradio File object)
             file1_path = file1.name if hasattr(file1, 'name') else str(file1)
             file2_path = file2.name if hasattr(file2, 'name') else str(file2)
-            
+
             # Validate files exist
             if not os.path.exists(file1_path):
                 return None, f"Error: File 1 not found: {file1_path}"
             if not os.path.exists(file2_path):
                 return None, f"Error: File 2 not found: {file2_path}"
-            
+
             # Check file sizes (prevent processing empty/corrupted files)
             if os.path.getsize(file1_path) < 1000:  # Less than 1KB
                 return None, "Error: File 1 appears to be empty or corrupted"
             if os.path.getsize(file2_path) < 1000:
                 return None, "Error: File 2 appears to be empty or corrupted"
-            
+
             # Auto mode selection
             if remix_mode == "🎯 Auto (Recommended)":
                 try:
@@ -235,7 +235,7 @@ def main():
                 except Exception as e:
                     logger.warning(f"Auto mode selection failed: {e}, using mashup")
                     remix_mode = "mashup"
-            
+
             # Map UI mode to function mode
             mode_map = {
                 "Mashup (Mix Both Tracks)": "mashup",
@@ -243,18 +243,18 @@ def main():
                 "Track 1 Instruments + Track 2 Vocals": "base_instr_match_vocals"
             }
             actual_mode = mode_map.get(remix_mode, remix_mode)
-            
+
             # Intelligent mixing
             if use_intelligent:
                 try:
                     track1_features = recommendations.analyze_track_characteristics(file1_path)
                     track2_features = recommendations.analyze_track_characteristics(file2_path)
-                    
+
                     strategy = strategy_engine.predict_best_mixing_strategy(
                         track1_features, track2_features,
                         track1_features.get("key"), track2_features.get("key")
                     )
-                    
+
                     mixing_technique = strategy["technique"]
                     crossfade_length = strategy["crossfade_length"]
                     apply_beatmatching = strategy["apply_beatmatching"]
@@ -273,7 +273,7 @@ def main():
                 apply_beatmatching = True
                 apply_harmonic_mixing = False
                 bass_swap = False
-            
+
             # Remix
             output_path = remix_core.remix_two_files(
                 file1_path, file2_path,
@@ -288,7 +288,7 @@ def main():
                 aggressiveness=aggressiveness,
                 energy_shape=energy_shape
             )
-            
+
             if output_path and os.path.exists(output_path):
                 try:
                     remix_metadata = remix_core.load_remix_metadata(output_path)
@@ -305,22 +305,22 @@ def main():
             import traceback
             traceback.print_exc()
             return None, f"Error creating remix: {str(e)[:200]}"
-    
+
     def toggle_arrangement_controls(use_arrangement):
         """Show/hide arrangement controls."""
         return gr.update(visible=use_arrangement)
-    
+
     # ==================== UI Layout ====================
-    
+
     theme = gr.themes.Soft()
 
     with gr.Blocks(title="AI RemixMate") as app:
         gr.Markdown("""
         # 🎵 AI RemixMate - Arrangement-Level AI DJ Mixer
-        
+
         Create professional remixes with AI-powered stem separation, intelligent mixing, and arrangement-level DJ techniques.
         """)
-        
+
         with gr.Tabs():
             # ========== Remixing Tab ==========
             with gr.Tab("🎵 Remix Creator"):
@@ -330,12 +330,12 @@ def main():
                         track1 = gr.File(label="Upload Track 1", file_types=["audio"])
                         track1_analysis = gr.Markdown("**Track Analysis:** Upload a file to see analysis")
                         recommendations_display = gr.Markdown("")
-                    
+
                     with gr.Column():
                         gr.Markdown("### Track 2")
                         track2 = gr.File(label="Upload Track 2", file_types=["audio"])
                         track2_analysis = gr.Markdown("**Track Analysis:** Upload a file to see analysis")
-                
+
                 with gr.Accordion("🎛️ Remix Settings", open=True):
                     remix_mode = gr.Dropdown(
                         choices=[
@@ -347,19 +347,19 @@ def main():
                         value="🎯 Auto (Recommended)",
                         label="Remix Mode"
                     )
-                    
+
                     use_intelligent = gr.Checkbox(
                         label="🧠 Intelligent Mix (Recommended)",
                         value=True,
                         info="Automatically optimizes mixing settings"
                     )
-                    
+
                     use_arrangement = gr.Checkbox(
                         label="🎬 Arrangement-Level Mixing",
                         value=False,
                         info="DJ-style arrangement with sections and timeline"
                     )
-                    
+
                     with gr.Row(visible=False) as arrangement_controls:
                         aggressiveness = gr.Slider(
                             minimum=0.0,
@@ -369,19 +369,19 @@ def main():
                             label="🎚️ Remix Aggressiveness",
                             info="0.0 = Conservative, 1.0 = Wild"
                         )
-                        
+
                         energy_shape = gr.Dropdown(
                             choices=["chill_to_peak", "rollercoaster", "slow_build", "double_peak"],
                             value="chill_to_peak",
                             label="📈 Energy Shape"
                         )
-                    
+
                 submit_btn = gr.Button("🎵 Create Remix", variant="primary", size="lg")
-                
+
                 with gr.Row():
                     output_audio = gr.Audio(label="Remixed Output", type="filepath")
                     status = gr.Textbox(label="Status", interactive=False)
-                
+
                 # Event handlers
                 track1.change(analyze_track1, inputs=[track1], outputs=[track1_analysis, recommendations_display])
                 track2.change(analyze_track2, inputs=[track2], outputs=[track2_analysis])
@@ -396,7 +396,7 @@ def main():
                            aggressiveness, energy_shape],
                     outputs=[output_audio, status]
                 )
-            
+
             # ========== Playlist Manager Tab ==========
             with gr.Tab("📋 Playlist Manager"):
                 with gr.Row():
@@ -406,7 +406,7 @@ def main():
                         playlist_desc = gr.Textbox(label="Description (Optional)", placeholder="Best songs for remixing")
                         create_btn = gr.Button("➕ Create Playlist", variant="primary")
                         create_status = gr.Textbox(label="Status", interactive=False)
-                    
+
                     with gr.Column():
                         gr.Markdown("### Manage Playlists")
                         playlist_dropdown = gr.Dropdown(
@@ -417,9 +417,9 @@ def main():
                             allow_custom_value=False
                         )
                         playlist_info = gr.Markdown("Select a playlist to view details")
-                        
+
                         refresh_btn = gr.Button("🔄 Refresh Playlists")
-                
+
                 with gr.Row():
                     with gr.Column():
                         gr.Markdown("### Add Song to Playlist")
@@ -431,7 +431,7 @@ def main():
                             allow_custom_value=False
                         )
                         add_btn = gr.Button("➕ Add Song to Playlist")
-                    
+
                     with gr.Column():
                         gr.Markdown("### Remove Song from Playlist")
                         playlist_songs = gr.Dropdown(
@@ -442,9 +442,9 @@ def main():
                             allow_custom_value=False
                         )
                         remove_btn = gr.Button("➖ Remove Song")
-                
+
                 delete_btn = gr.Button("🗑️ Delete Playlist", variant="stop")
-                
+
                 def refresh_playlists():
                     """Refresh playlist list."""
                     playlists = playlist_manager.get_playlists()
@@ -452,7 +452,7 @@ def main():
                     songs = playlist_manager.get_available_songs()
                     song_choices = [f"{s['name']}" for s in songs] if songs else ["(No songs available)"]
                     return gr.update(choices=choices, value=None), gr.update(choices=song_choices, value=None)
-                
+
                 def create_playlist(name, desc):
                     """Create a new playlist."""
                     if not name:
@@ -462,7 +462,7 @@ def main():
                         return f"✅ Created playlist: {name}", *refresh_playlists()
                     except Exception as e:
                         return f"❌ Error: {e}", refresh_playlists()[0], refresh_playlists()[1]
-                
+
                 def update_playlist_info(playlist_name):
                     """Update playlist info display."""
                     if not playlist_name or playlist_name.startswith("(No "):
@@ -473,7 +473,7 @@ def main():
                         if playlist:
                             songs = playlist_manager.get_playlist_songs(playlist["id"])
                             song_choices = [f"{s['name']}" for s in songs] if songs else ["(No songs in playlist)"]
-                            
+
                             info = f"""
 **Playlist:** {playlist['name']}
 **Description:** {playlist.get('description', 'None')}
@@ -484,7 +484,7 @@ def main():
                         return "Playlist not found", gr.update(choices=["(No songs in playlist)"], value=None)
                     except Exception as e:
                         return f"Error: {e}", gr.update(choices=["(No songs in playlist)"], value=None)
-                
+
                 def add_song(playlist_name, song_name):
                     """Add song to playlist."""
                     if not playlist_name or playlist_name.startswith("(No ") or not song_name or song_name.startswith("(No "):
@@ -501,7 +501,7 @@ def main():
                         return "Error adding song", *refresh_playlists()
                     except Exception as e:
                         return f"Error: {e}", *refresh_playlists()
-                
+
                 def remove_song(playlist_name, song_name):
                     """Remove song from playlist."""
                     if not playlist_name or playlist_name.startswith("(No ") or not song_name or song_name.startswith("(No "):
@@ -518,7 +518,7 @@ def main():
                         return "Error removing song", *refresh_playlists()
                     except Exception as e:
                         return f"Error: {e}", *refresh_playlists()
-                
+
                 def delete_playlist(playlist_name):
                     """Delete a playlist."""
                     if not playlist_name or playlist_name.startswith("(No "):
@@ -532,7 +532,7 @@ def main():
                         return "Playlist not found", *refresh_playlists()
                     except Exception as e:
                         return f"Error: {e}", *refresh_playlists()
-                
+
                 # Event handlers
                 refresh_btn.click(refresh_playlists, outputs=[playlist_dropdown, available_songs])
                 create_btn.click(create_playlist, inputs=[playlist_name, playlist_desc],
@@ -545,10 +545,10 @@ def main():
                               outputs=[create_status, playlist_dropdown, available_songs])
                 delete_btn.click(delete_playlist, inputs=[playlist_dropdown],
                                outputs=[create_status, playlist_dropdown, available_songs])
-                
+
                 # Initial refresh
                 app.load(refresh_playlists, outputs=[playlist_dropdown, available_songs])
-        
+
         gr.Markdown("""
         ---
         ### 📖 Features
@@ -561,7 +561,7 @@ def main():
         - ✅ Playlist management
         - ✅ Song recommendations
         """)
-    
+
     # Launch app
     print("\n" + "=" * 60)
     print("🌐 Web application starting...")
@@ -570,7 +570,7 @@ def main():
     print("   (Usually: http://127.0.0.1:7860)")
     print("\n💡 Press Ctrl+C to stop the server")
     print()
-    
+
     app.launch(server_name="0.0.0.0", server_port=7860, share=False, theme=theme)
 
 if __name__ == "__main__":

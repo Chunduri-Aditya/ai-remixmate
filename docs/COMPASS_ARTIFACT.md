@@ -268,7 +268,7 @@ At each autoregressive step, all codebooks predicted in parallel but offset → 
 from audiocraft.models import MusicGen
 model = MusicGen.get_pretrained('facebook/musicgen-melody')
 model.set_generation_params(duration=8)
-wav = model.generate_with_chroma(descriptions=["electronic remix"], 
+wav = model.generate_with_chroma(descriptions=["electronic remix"],
     melody_wavs=source_tensor, melody_sample_rate=sr)
 ```
 

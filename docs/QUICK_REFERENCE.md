@@ -455,4 +455,3 @@ For issues:
 2. Review logs in `logs/remixmate.log` (if file logging enabled)
 3. Run `bash bin/check.sh` to validate environment
 4. Check GitHub Issues: https://github.com/Chunduri-Aditya/ai-remixmate/issues
-

@@ -48,15 +48,15 @@ chown -R remixmate:remixmate /opt/remixmate
 sudo -u remixmate bash <<'EOF_USER'
   set -euo pipefail
   cd /opt/remixmate
-  
+
   echo "    Checking out hosted-app branch..."
   git checkout hosted-app
-  
+
   echo "    Creating virtual environment..."
   if [ ! -d .venv ]; then
     python3 -m venv .venv
   fi
-  
+
   echo "    Installing Python dependencies..."
   .venv/bin/pip install --quiet -r requirements.txt
   .venv/bin/pip install --quiet -e .

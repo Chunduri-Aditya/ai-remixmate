@@ -20,14 +20,14 @@ def check_imports(module_path, module_name):
         if spec is None:
             issues.append(f"❌ {module_name}: Cannot create spec from file")
             return False
-        
+
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        
+
         # Check for common issues
         if not hasattr(module, '__file__'):
             warnings.append(f"⚠️  {module_name}: No __file__ attribute")
-        
+
         return True
     except Exception as e:
         issues.append(f"❌ {module_name}: Import error - {e}")
@@ -57,7 +57,7 @@ def main():
     print("🔍 Comprehensive Code Review")
     print("=" * 60)
     print()
-    
+
     # Check core modules
     modules_to_check = [
         ("remixmate.config", "src/remixmate/config.py"),
@@ -73,7 +73,7 @@ def main():
         ("remixmate.lyrics_extraction", "src/remixmate/lyrics_extraction.py"),
         ("remixmate.advanced_arrangement", "src/remixmate/advanced_arrangement.py"),
     ]
-    
+
     print("📦 Checking module imports...")
     imported_modules = {}
     for module_name, file_path in modules_to_check:
@@ -86,10 +86,10 @@ def main():
                     print(f"  ✅ {module_name}")
                 except Exception as e:
                     print(f"  ❌ {module_name}: {e}")
-    
+
     print()
     print("🔍 Checking function availability...")
-    
+
     # Check critical functions
     critical_functions = {
         "remixmate.remix_core": [
@@ -129,7 +129,7 @@ def main():
             "select_auto_mode",
         ],
     }
-    
+
     for module_name, funcs in critical_functions.items():
         if module_name in imported_modules:
             mod = imported_modules[module_name]
@@ -138,10 +138,10 @@ def main():
                     print(f"  ✅ {module_name}.{func_name}")
                 else:
                     print(f"  ❌ {module_name}.{func_name}")
-    
+
     print()
     print("📁 Checking file structure...")
-    
+
     # Check important files
     important_files = [
         ("app.py", "Main web application", False),
@@ -149,34 +149,34 @@ def main():
         ("requirements.txt", "Compatibility dependency shim", False),
         ("models/song_embeddings.json", "Song database", True),
     ]
-    
+
     for filename, description, optional in important_files:
         filepath = PROJECT_ROOT / filename
         if check_file_exists(filepath, description, optional=optional):
             print(f"  ✅ {filename}")
         else:
             print(f"  ⚠️  {filename} (optional)")
-    
+
     print()
     print("=" * 60)
     print("📊 Review Summary")
     print("=" * 60)
-    
+
     if issues:
         print(f"\n❌ Found {len(issues)} issue(s):")
         for issue in issues:
             print(f"  {issue}")
     else:
         print("\n✅ No critical issues found!")
-    
+
     if warnings:
         print(f"\n⚠️  Found {len(warnings)} warning(s):")
         for warning in warnings:
             print(f"  {warning}")
-    
+
     # Additional checks
     print("\n🔍 Additional Checks:")
-    
+
     # Check if app.py imports work
     try:
         app_path = PROJECT_ROOT / "app.py"
@@ -189,7 +189,7 @@ def main():
                     warnings.append("app.py might not be using remixmate imports correctly")
     except Exception as e:
         warnings.append(f"Could not check app.py: {e}")
-    
+
     # Check config.py has required constants
     if "remixmate.config" in imported_modules:
         config = imported_modules["remixmate.config"]
@@ -199,7 +199,7 @@ def main():
                 print(f"  ✅ config.{cfg}")
             else:
                 issues.append(f"Missing config.{cfg}")
-    
+
     print()
     if not issues and not warnings:
         print("🎉 Code review passed! No issues found.")

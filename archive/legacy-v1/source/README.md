@@ -463,29 +463,29 @@ OK
 ### Common Issues
 
 #### "Demucs not available"
-**Impact**: Stem separation limited (uses original audio for all stems)  
+**Impact**: Stem separation limited (uses original audio for all stems)
 **Solution**: Install Demucs for full functionality:
 ```bash
 pip install demucs
 ```
 
 #### "NumPy version incompatible"
-**Impact**: May cause import errors  
+**Impact**: May cause import errors
 **Solution**:
 ```bash
 pip install "numpy>=1.24.0,<2.0.0"
 ```
 
 #### "Audio too short for analysis"
-**Impact**: Uses fallback sections  
+**Impact**: Uses fallback sections
 **Solution**: Use tracks ≥5 seconds for reliable structure detection
 
 #### "ModuleNotFoundError: No module named 'remixmate'"
-**Impact**: Import errors  
+**Impact**: Import errors
 **Solution**: Run from project root directory (path setup is automatic)
 
 #### "Stem separation failed"
-**Impact**: Falls back to original audio  
+**Impact**: Falls back to original audio
 **Solution**: Check Demucs installation, disk space, file integrity
 
 ### Performance Tips

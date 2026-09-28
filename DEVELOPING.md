@@ -293,4 +293,3 @@ Separating tracks into stems and keeping the library clean. CPU is slow — plan
   set `VITE_API_BASE=http://localhost:8000` since there's no dev proxy.
 - **`ai_remixmate_feature_lab/`** is intentionally isolated — it has its own test suite and imports
   nothing from `scripts/`; it is not wired into the UI by design, not because it's abandoned.
-

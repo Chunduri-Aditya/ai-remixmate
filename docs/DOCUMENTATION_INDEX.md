@@ -478,4 +478,3 @@ This documentation provides everything needed to:
 Start with the appropriate section for your role, use the quick reference for common tasks, and dive into comprehensive documentation when you need deep details.
 
 Happy remixing! 🎵
-

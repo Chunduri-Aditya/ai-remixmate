@@ -20,7 +20,6 @@ SAMPLE_RATE = 44100
 MAX_DURATION_SEC = None  # No limit - support any length files
 
 # Create directories if they don't exist
-for dir_path in [AUDIO_INPUT_DIR, AUDIO_OUTPUT_DIR, SEPARATED_DIR, STEMS_DIR, 
+for dir_path in [AUDIO_INPUT_DIR, AUDIO_OUTPUT_DIR, SEPARATED_DIR, STEMS_DIR,
                  MODELS_DIR, LYRICS_DIR, OUTPUT_DIR, PLAYLISTS_DIR, CONVERTED_DIR]:
     os.makedirs(dir_path, exist_ok=True)
-
