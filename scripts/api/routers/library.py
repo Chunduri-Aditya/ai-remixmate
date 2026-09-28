@@ -16,11 +16,13 @@ POST /library/initialize                   — one-shot pipeline
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 
 from scripts.api import jobs as job_store
+from scripts.api.auth import require_operator
 from scripts.api.routers._helpers import _check_job_cap, _require_song, _song_info, _stem_file
+from scripts.api.routers.stems import _stem_split_enabled
 from scripts.api.schemas import (
     DeleteBatchRequest,
     InitializeLibraryRequest,
@@ -159,7 +161,13 @@ def processing_status():
     )
 
 
-@router.post("/library/analyze-missing", response_model=JobResponse, status_code=202, tags=["library", "analysis"])
+@router.post(
+    "/library/analyze-missing",
+    response_model=JobResponse,
+    status_code=202,
+    tags=["library", "analysis"],
+    dependencies=[Depends(require_operator)],
+)
 def analyze_missing(
     key_profile: str = Query(
         "auto",
@@ -204,8 +212,8 @@ def storage_status():
     with_raw = sum(1 for s in songs if s.has_full_wav)
 
     return StorageStatusResponse(
-        library_dir=str(LIBRARY_DIR),
-        outputs_dir=str(OUTPUTS_DIR),
+        library_dir=LIBRARY_DIR.name,
+        outputs_dir=OUTPUTS_DIR.name,
         total_songs=len(songs),
         total_size_gb=round(mgr.get_size_gb(), 2),
         cap_gb=mgr.max_size_gb,
@@ -218,7 +226,12 @@ def storage_status():
     )
 
 
-@router.post("/library/storage/prune", response_model=StoragePruneResponse, tags=["library", "storage"])
+@router.post(
+    "/library/storage/prune",
+    response_model=StoragePruneResponse,
+    tags=["library", "storage"],
+    dependencies=[Depends(require_operator)],
+)
 def storage_prune():
     """
     Delete full.wav AND full_enhanced.wav for every song that already has
@@ -268,7 +281,12 @@ def storage_prune():
     return StoragePruneResponse(pruned=pruned, freed_mb=round(freed_bytes / 1_048_576, 1))
 
 
-@router.post("/library/storage/evict", response_model=StorageEvictResponse, tags=["library", "storage"])
+@router.post(
+    "/library/storage/evict",
+    response_model=StorageEvictResponse,
+    tags=["library", "storage"],
+    dependencies=[Depends(require_operator)],
+)
 def storage_evict(
     target_gb: Optional[float] = Query(None, description="Evict until under this size (default: configured cap)"),
     dry_run: bool = Query(True, description="Preview without deleting — defaults True for safety"),
@@ -313,7 +331,7 @@ def mix_storage_status():
     ages = sorted((now - _dir_mtime(p)) / 86_400 for p in mixes)
 
     return MixStorageResponse(
-        outputs_dir=str(root),
+        outputs_dir=f"{OUTPUTS_DIR.name}/{root.name}",
         mix_count=len(mixes),
         total_size_mb=round(total_bytes / 1_048_576, 1),
         oldest_mix_age_days=round(ages[-1], 2) if ages else None,
@@ -342,7 +360,7 @@ def get_song(name: str):
     return _song_info(_require_song(name))
 
 
-@router.delete("/library/{name}", tags=["library"])
+@router.delete("/library/{name}", tags=["library"], dependencies=[Depends(require_operator)])
 def delete_song(name: str):
     import shutil
 
@@ -358,7 +376,7 @@ def delete_song(name: str):
     return {"deleted": name}
 
 
-@router.post("/library/delete-batch", tags=["library"])
+@router.post("/library/delete-batch", tags=["library"], dependencies=[Depends(require_operator)])
 def delete_songs_batch(req: DeleteBatchRequest):
     """
     Delete multiple songs in one call — the bulk-delete counterpart to
@@ -390,7 +408,13 @@ def delete_songs_batch(req: DeleteBatchRequest):
     return {"deleted": deleted, "failed": failed}
 
 
-@router.post("/library/scan-broken", response_model=JobResponse, status_code=202, tags=["library"])
+@router.post(
+    "/library/scan-broken",
+    response_model=JobResponse,
+    status_code=202,
+    tags=["library"],
+    dependencies=[Depends(require_operator)],
+)
 def scan_broken():
     """
     Health-scan every song in the library for structural damage — no
@@ -479,7 +503,13 @@ def stream_output(session_id: str, filename: str):
 # Full library initialisation (stem split → compress → index, one job)
 # ---------------------------------------------------------------------------
 
-@router.post("/library/calibrate-lufs", response_model=JobResponse, status_code=202, tags=["library"])
+@router.post(
+    "/library/calibrate-lufs",
+    response_model=JobResponse,
+    status_code=202,
+    tags=["library"],
+    dependencies=[Depends(require_operator)],
+)
 def calibrate_stem_lufs():
     """
     Compute per-stem-type LUFS corpus targets across the whole library.
@@ -591,7 +621,8 @@ def export_cues(
                 bpm=bpm,
                 fmt="rekordbox",
                 output_path=tmp_path,
-                audio_path=(song_dir / "full.wav") if (song_dir / "full.wav").exists() else None,
+                # library relative: the XML is downloaded, so a server path would leak and never resolve
+                audio_path=Path("library", name, "full.wav") if (song_dir / "full.wav").exists() else None,
                 artist=artist,
                 total_time_s=duration,
             )
@@ -654,7 +685,13 @@ def _delete_tmp(path: Path):
     return BackgroundTask(lambda: path.unlink(missing_ok=True))
 
 
-@router.post("/library/initialize", response_model=JobResponse, status_code=202, tags=["library"])
+@router.post(
+    "/library/initialize",
+    response_model=JobResponse,
+    status_code=202,
+    tags=["library"],
+    dependencies=[Depends(require_operator), Depends(_stem_split_enabled)],
+)
 def initialize_library(req: InitializeLibraryRequest, background_tasks=None):
     """
     One-shot pipeline: stem-split all unsplit songs → FLAC compress → rebuild RAG index.

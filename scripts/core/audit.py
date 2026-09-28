@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -97,3 +99,40 @@ def read_audit(
             except json.JSONDecodeError:
                 continue
     return list(reversed(entries))[:limit]
+
+
+def purge_user_lines(user_id: str) -> int:
+    """Remove every audit entry recorded for ``user_id`` (account deletion).
+
+    Atomic rewrite: surviving lines are copied verbatim into a temp file in the
+    same directory, which then replaces the log in one ``os.replace``. A missing
+    log is not an error. Raises on I/O failure so the caller can report it.
+    Returns the number of lines removed.
+    """
+    if not _AUDIT_PATH.exists():
+        return 0
+    kept: list[str] = []
+    removed = 0
+    with open(_AUDIT_PATH, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                kept.append(line)
+                continue
+            if isinstance(entry, dict) and entry.get("user") == user_id:
+                removed += 1
+            else:
+                kept.append(line)
+    if removed == 0:
+        return 0
+    fd, tmp = tempfile.mkstemp(dir=_AUDIT_PATH.parent, prefix=".audit.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.writelines(kept)
+        os.replace(tmp, _AUDIT_PATH)
+    except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    return removed

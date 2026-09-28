@@ -10,6 +10,10 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from scripts.api import jobs as job_store
+
+# Bound by name (not reached through job_store) so a test that patches
+# job_store with a MagicMock still applies the real cap rule.
+from scripts.api.jobs import _MAX_ACTIVE_JOBS, _is_active, _job_cap_error
 from scripts.api.schemas import SongInfo
 from scripts.core.paths import LIBRARY_DIR
 
@@ -136,17 +140,15 @@ def _require_song(name: str) -> Path:
 # Rate limiting / active job caps
 # ---------------------------------------------------------------------------
 
-_MAX_ACTIVE_JOBS = 4  # Hard cap on concurrent background jobs
-
-
 def _check_job_cap() -> None:
-    """Raise 429 if the user already has too many active jobs running."""
-    active = [j for j in job_store.list_jobs() if j["status"] == "running"]
+    """Raise 429 if the user already has too many active jobs: RUNNING, or PENDING
+    and already handed to the executor. A PENDING record that was created but never
+    submitted is not queued work and does not count.
+
+    This is the early exit before validation, not an atomic guard: it reads the
+    count before the job exists, so concurrent submits all pass it. The check that
+    holds under a burst is the one job_store.submit_job repeats under the store lock
+    at the moment the job becomes queued."""
+    active = [j for j in job_store.list_jobs() if _is_active(j)]
     if len(active) >= _MAX_ACTIVE_JOBS:
-        raise HTTPException(
-            status_code=429,
-            detail=(
-                f"Too many active jobs ({len(active)}/{_MAX_ACTIVE_JOBS}). "
-                f"Wait for one to finish before submitting another."
-            ),
-        )
+        raise _job_cap_error(len(active))

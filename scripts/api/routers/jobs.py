@@ -12,9 +12,18 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from scripts.api import jobs as job_store
+from scripts.api.auth import get_user_id
 from scripts.api.schemas import JobResponse
 
 router = APIRouter()
+
+
+def _owned_job(job_id: str) -> dict:
+    """Return the job if the acting user owns it; 404 otherwise (no existence leak)."""
+    job = job_store.get_job(job_id)
+    if job is None or job_store._job_user(job) != get_user_id():
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+    return job
 
 
 @router.get("/jobs", response_model=List[JobResponse], tags=["jobs"])
@@ -39,9 +48,7 @@ def list_jobs(
 @router.get("/jobs/{job_id}", response_model=JobResponse, tags=["jobs"])
 def get_job(job_id: str):
     """Poll the status, progress, ETA, and result of a specific job."""
-    job = job_store.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+    job = _owned_job(job_id)
     return job_store.job_to_response(job)
 
 
@@ -56,9 +63,7 @@ def cancel_job(job_id: str):
     - Returns 404 if the job does not exist.
     - Returns 409 if the job is already complete.
     """
-    job = job_store.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+    job = _owned_job(job_id)
 
     cancelled = job_store.cancel_job(job_id)
     if not cancelled:

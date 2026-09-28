@@ -19,6 +19,8 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
@@ -32,9 +34,29 @@ from scripts.core.paths import ensure_directories
 
 logger = get_logger(__name__)
 
+# First retention sweep of every outputs/<uid>/ runs this long after startup;
+# later sweeps follow cfg.retention.sweep_interval_hours.
+SWEEP_START_DELAY_SEC = 60
+
 # ---------------------------------------------------------------------------
 # Lifespan — replaces deprecated @app.on_event("startup"/"shutdown")
 # ---------------------------------------------------------------------------
+
+
+async def _retention_sweep_loop() -> None:
+    """Sweep every user's outputs after the start delay, then on the interval.
+    The filesystem work runs in a thread so the event loop stays free."""
+    import asyncio as _asyncio  # noqa: PLC0415
+
+    from scripts.core.mix_retention import sweep_all_users  # noqa: PLC0415
+
+    await _asyncio.sleep(SWEEP_START_DELAY_SEC)
+    while True:
+        results = await _asyncio.to_thread(sweep_all_users)
+        removed = sum(len(r.removed) for r in results.values())
+        if removed:
+            logger.info(f"mix retention: background sweep removed {removed} session(s)")
+        await _asyncio.sleep(float(cfg.retention.sweep_interval_hours) * 3600)
 
 
 @asynccontextmanager
@@ -47,11 +69,19 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     configure_logging()
     ensure_directories()
 
+    from scripts.core import legal_store  # noqa: PLC0415
+
+    legal_store.init_schema()
+
     # Wire SSE broadcaster into job store + start heartbeat background task
     import asyncio as _asyncio  # noqa: PLC0415
 
     from scripts.api.jobs import register_sse_hook  # noqa: PLC0415
-    from scripts.api.routers.events import broadcaster, start_heartbeat  # noqa: PLC0415
+    from scripts.api.routers.events import (  # noqa: PLC0415
+        broadcaster,
+        closing,
+        start_heartbeat,
+    )
 
     # Capture the running event loop here (async context) so worker threads
     # can schedule coroutines safely via call_soon_threadsafe.
@@ -71,12 +101,21 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
     register_sse_hook(_sync_emit)
     start_heartbeat()
+    sweep_task = _asyncio.create_task(_retention_sweep_loop())
     logger.info("AI RemixMate API started — SSE backbone active")
 
     yield  # application runs here
 
     # ── shutdown ─────────────────────────────────────────────────────────────
     from scripts.api.jobs import _executor  # noqa: PLC0415
+
+    # End open SSE streams first, so they do not hold the server open while
+    # the executor drains.
+    closing.set()
+    sweep_task.cancel()
+    (sweep_outcome,) = await _asyncio.gather(sweep_task, return_exceptions=True)
+    if isinstance(sweep_outcome, Exception):
+        logger.warning(f"mix retention: background sweep had failed: {sweep_outcome}")
 
     logger.info("Shutdown signal received — waiting for in-flight jobs…")
     _executor.shutdown(wait=True, cancel_futures=False)
@@ -99,6 +138,18 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+# ---------------------------------------------------------------------------
+# Validation errors — same 422 shape as FastAPI's default, minus the ``input``
+# echo, so no response body reflects a raw client value (e.g. a path string).
+# ---------------------------------------------------------------------------
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_without_echo(request: Request, exc: RequestValidationError):
+    detail = [{k: v for k, v in err.items() if k != "input"} for err in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(detail)})
+
 
 # ---------------------------------------------------------------------------
 # Request ID middleware — adds unique tracing ID to each request
@@ -204,4 +255,8 @@ if __name__ == "__main__":
         port=port,
         reload=reload,
         log_level="info",
+        # uvicorn waits for open connections before lifespan shutdown, and an
+        # SSE stream never closes on its own; this bounds that wait so
+        # closing.set() and the executor drain actually run.
+        timeout_graceful_shutdown=5,
     )

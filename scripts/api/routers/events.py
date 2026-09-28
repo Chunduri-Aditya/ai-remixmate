@@ -32,15 +32,44 @@ import asyncio
 import json
 import logging
 import time
+import weakref
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
+from scripts.api.auth import DEFAULT_USER, get_user_id
+
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/events", tags=["Events"])
+
+# Set by the lifespan on shutdown; every stream generator wakes on it and ends.
+# Generators await closing.wait(), which binds the event to the first loop that
+# waits on it (the serving loop in production).
+closing = asyncio.Event()
+
+_PING_SEC = 25.0    # idle time before a keep-alive comment
+
+# Machine profile from detect(), filled once at startup off the event loop.
+_machine_profile: dict | None = None
+
+
+def _frame(event_type: str, data: Any) -> str:
+    return json.dumps({
+        "type": event_type,
+        "data": data,
+        "ts":   datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+    })
+
+
+def _payload_owner(data: Any) -> str | None:
+    """Owner of a job payload (``data["meta"]["user_id"]``); None for owner-less frames."""
+    if isinstance(data, dict) and isinstance(data.get("meta"), dict):
+        return data["meta"].get("user_id") or DEFAULT_USER
+    return None
+
 
 # ---------------------------------------------------------------------------
 # SSE Broadcaster — module-level singleton
@@ -48,46 +77,72 @@ router = APIRouter(prefix="/events", tags=["Events"])
 
 class SSEBroadcaster:
     """
-    Fanout broadcaster: maintains a set of asyncio Queues, one per connected
-    client. Broadcasting puts a message on every queue; each streaming
-    generator drains its own queue.
+    Fanout broadcaster: maintains one asyncio Queue per connected client,
+    tagged with the client's user id. Job payloads go only to the owner's
+    queues; owner-less frames (library, system) go to every queue. Each
+    streaming generator drains its own queue.
     """
 
     def __init__(self) -> None:
-        self._queues: set[asyncio.Queue] = set()
+        self._queues: dict[asyncio.Queue, str] = {}
+        self._dropped: weakref.WeakSet[asyncio.Queue] = weakref.WeakSet()
         self._lock = asyncio.Lock()
         self._start_time = time.time()
 
-    async def subscribe(self) -> asyncio.Queue:
+    async def subscribe(self, user_id: str) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=200)
         async with self._lock:
-            self._queues.add(q)
+            self._queues[q] = user_id
         log.debug("[sse] Client subscribed — %d active connections", len(self._queues))
         return q
 
     async def unsubscribe(self, q: asyncio.Queue) -> None:
         async with self._lock:
-            self._queues.discard(q)
+            self._queues.pop(q, None)
+            self._dropped.discard(q)
         log.debug("[sse] Client unsubscribed — %d active connections", len(self._queues))
 
+    def is_dropped(self, q: asyncio.Queue) -> bool:
+        """True once a queue was dropped for being full; its stream should end."""
+        return q in self._dropped
+
+    def _put_or_drop(self, q: asyncio.Queue, payload: str) -> None:
+        """Enqueue without blocking; a full queue is dropped. Caller holds the lock."""
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            # Slow consumer — drop it so its stream closes instead of leaking
+            self._queues.pop(q, None)
+            self._dropped.add(q)
+            log.warning("[sse] Dropped slow consumer queue")
+
     async def broadcast(self, event_type: str, data: Any) -> None:
-        """Push a typed event to all connected clients (non-blocking)."""
-        payload = json.dumps({
-            "type": event_type,
-            "data": data,
-            "ts":   datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-        })
-        dead: list[asyncio.Queue] = []
+        """Push a typed event (non-blocking): job payloads to their owner, the rest to all."""
+        payload = _frame(event_type, data)
+        owner = _payload_owner(data)
         async with self._lock:
-            for q in self._queues:
-                try:
-                    q.put_nowait(payload)
-                except asyncio.QueueFull:
-                    # Slow consumer — mark for removal to avoid memory leak
-                    dead.append(q)
-            for q in dead:
-                self._queues.discard(q)
-                log.warning("[sse] Dropped slow consumer queue")
+            for q, uid in list(self._queues.items()):
+                if owner is None or uid == owner:
+                    self._put_or_drop(q, payload)
+
+    async def send_heartbeat(self) -> None:
+        """One heartbeat tick: each client gets its own user's active job count and the client count."""
+        # Import here to avoid circular imports at module load time
+        from scripts.api.jobs import _job_user, list_jobs  # type: ignore[import]
+
+        active: dict[str, int] = {}
+        for j in list_jobs(user_id="*"):  # box-wide read, split per user below
+            if str(j["status"]).split(".")[-1].upper() in ("PENDING", "RUNNING"):
+                uid = _job_user(j)
+                active[uid] = active.get(uid, 0) + 1
+
+        async with self._lock:
+            clients = len(self._queues)
+            for q, uid in list(self._queues.items()):
+                self._put_or_drop(q, _frame("heartbeat", {
+                    "active_jobs": active.get(uid, 0),
+                    "clients":     clients,
+                }))
 
     @property
     def client_count(self) -> int:
@@ -111,43 +166,34 @@ async def _heartbeat_loop() -> None:
     while True:
         await asyncio.sleep(15)
         try:
-            # Import here to avoid circular imports at module load time
-            from scripts.api.jobs import list_jobs  # type: ignore[import]
-            from scripts.system.detect_machine import detect, to_dict  # type: ignore[import]
-
-            jobs = list_jobs(user_id="*")  # box-wide heartbeat, not a user view
-            active = sum(
-                1 for j in jobs
-                if str(j["status"]).split(".")[-1].upper() in ("PENDING", "RUNNING")
-            )
-
-            # Include machine profile — cached after first call
-            if not hasattr(_heartbeat_loop, "_profile_cache"):
-                try:
-                    profile = to_dict(detect())
-                    _heartbeat_loop._profile_cache = profile  # type: ignore[attr-defined]
-                except Exception:
-                    _heartbeat_loop._profile_cache = None  # type: ignore[attr-defined]
-
-            await broadcaster.broadcast("heartbeat", {
-                "uptime_seconds":  broadcaster.uptime_seconds,
-                "active_jobs":     active,
-                "api_version":     "1.0.0",
-                "connected_clients": broadcaster.client_count,
-                "machine_profile": getattr(_heartbeat_loop, "_profile_cache", None),
-            })
+            await broadcaster.send_heartbeat()
         except Exception as exc:
             log.debug("[sse] Heartbeat error: %s", exc)
 
 
+def _detect_machine_once() -> None:
+    """Run detect() and cache the profile. Runs in a worker thread, never on the loop."""
+    global _machine_profile
+    from scripts.system.detect_machine import detect, to_dict  # type: ignore[import]
+
+    try:
+        _machine_profile = to_dict(detect())
+    except Exception as exc:
+        log.debug("[sse] Machine detection failed: %s", exc)
+        _machine_profile = None
+
+
 _heartbeat_task: asyncio.Task | None = None
+_detect_task: asyncio.Task | None = None
 
 
 def start_heartbeat() -> None:
-    """Schedule the heartbeat background task. Call from FastAPI lifespan startup."""
-    global _heartbeat_task
+    """Schedule the heartbeat task and the one-time machine detection. Call from lifespan startup."""
+    global _heartbeat_task, _detect_task
     try:
         loop = asyncio.get_event_loop()
+        if loop.is_running() and (_detect_task is None or _detect_task.done()):
+            _detect_task = loop.create_task(asyncio.to_thread(_detect_machine_once))
         if loop.is_running() and (_heartbeat_task is None or _heartbeat_task.done()):
             _heartbeat_task = loop.create_task(_heartbeat_loop())
             log.info("[sse] Heartbeat task started")
@@ -193,6 +239,8 @@ async def _sse_generator(queue: asyncio.Queue) -> AsyncIterator[str]:
     """
     Async generator that drains a subscriber queue and yields SSE frames.
     Sends a comment ping every 25 s to keep connections alive through proxies.
+    Ends as soon as ``closing`` is set, and once a dropped (full) queue has
+    been drained.
     """
     # Send an immediate connection-ack event
     ack = json.dumps({
@@ -202,17 +250,32 @@ async def _sse_generator(queue: asyncio.Queue) -> AsyncIterator[str]:
     })
     yield f"data: {ack}\n\n"
 
-    while True:
-        try:
-            # Wait up to 25 seconds; if nothing arrives, send a keep-alive comment
-            payload = await asyncio.wait_for(queue.get(), timeout=25.0)
-            yield f"data: {payload}\n\n"
-        except asyncio.TimeoutError:
-            yield ": ping\n\n"   # SSE comment — keeps proxies alive
-        except asyncio.CancelledError:
-            break
-        except GeneratorExit:
-            break
+    closed = asyncio.ensure_future(closing.wait())
+    getter: asyncio.Future | None = None
+    try:
+        while not closing.is_set():
+            if queue.empty() and broadcaster.is_dropped(queue):
+                break
+            # Wake on the next payload or on `closing`, whichever comes first
+            getter = asyncio.ensure_future(queue.get())
+            done, _ = await asyncio.wait(
+                {getter, closed}, timeout=_PING_SEC, return_when=asyncio.FIRST_COMPLETED,
+            )
+            if getter in done:
+                yield f"data: {getter.result()}\n\n"
+                continue
+            # A cancelled queue.get() leaves any pending item in the queue
+            getter.cancel()
+            if not done:
+                yield ": ping\n\n"   # SSE comment — keeps proxies alive
+    except asyncio.CancelledError:
+        pass
+    except GeneratorExit:
+        pass
+    finally:
+        if getter is not None and not getter.done():
+            getter.cancel()
+        closed.cancel()
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +292,7 @@ async def _sse_generator(queue: asyncio.Queue) -> AsyncIterator[str]:
     ),
 )
 async def sse_stream() -> StreamingResponse:
-    queue = await broadcaster.subscribe()
+    queue = await broadcaster.subscribe(get_user_id())
 
     async def event_stream():
         try:

@@ -49,16 +49,23 @@ _DEFAULT_USER = "local"
 # Phase 3: every row is owned by a user id (contextvar, "local" until Phase 4
 # wires auth). Reads filter `WHERE user_id = ?`; writes stamp the acting user.
 #
-# LIMITATION — the table-level uniqueness here is still user-blind:
-#   crates.name UNIQUE            → two users cannot both name a crate "Bangers"
-#   song_tags PK (song_name,tag)  → two users cannot tag the same song alike
-#   song_favorites PK (song_name) → one user's favorite ON CONFLICT-overwrites
-#                                   the other's row
-# Harmless while get_user_id() is always "local" (single writer). Phase 4 must
-# rebuild these three keys to include user_id before real multi-user. Guarded by
-# tests/test_user_scope.py::test_crates_uniqueness_is_still_user_blind_phase4.
+# B2.6: the table keys carry user_id too, so two users can each own a crate
+# named "Mix", tag the same song alike, and favorite it without clobbering:
+#   crates          UNIQUE (user_id, name)
+#   song_tags       PK (user_id, song_name, tag)
+#   song_favorites  PK (user_id, song_name)
+# _init() rebuilds an older file's user blind keys into these once. Guarded by
+# tests/test_crate_keys.py and tests/test_user_scope.py::test_crates_uniqueness_is_per_user.
 
 _TABLES = ("crates", "crate_songs", "song_tags", "song_favorites")
+
+# The per user key each table must carry. crates keeps crate_id as its PK
+# (crate_songs references it) and gains a UNIQUE; the other two rekey the PK.
+_USER_KEYS = {
+    "crates": ("user_id", "name"),
+    "song_tags": ("user_id", "song_name", "tag"),
+    "song_favorites": ("user_id", "song_name"),
+}
 
 
 def _schema_ddl(dialect_name: str) -> tuple[str, ...]:
@@ -70,9 +77,10 @@ def _schema_ddl(dialect_name: str) -> tuple[str, ...]:
     return (
         f"""CREATE TABLE IF NOT EXISTS crates (
     crate_id   TEXT PRIMARY KEY,
-    name       TEXT NOT NULL UNIQUE,
+    name       TEXT NOT NULL,
     created_at {ts} NOT NULL,
-    user_id    TEXT NOT NULL DEFAULT 'local'
+    user_id    TEXT NOT NULL DEFAULT 'local',
+    UNIQUE (user_id, name)
 )""",
         f"""CREATE TABLE IF NOT EXISTS crate_songs (
     crate_id   TEXT NOT NULL REFERENCES crates(crate_id) ON DELETE CASCADE,
@@ -86,12 +94,13 @@ def _schema_ddl(dialect_name: str) -> tuple[str, ...]:
     tag        TEXT NOT NULL,
     created_at {ts} NOT NULL,
     user_id    TEXT NOT NULL DEFAULT 'local',
-    PRIMARY KEY (song_name, tag)
+    PRIMARY KEY (user_id, song_name, tag)
 )""",
         f"""CREATE TABLE IF NOT EXISTS song_favorites (
-    song_name    TEXT PRIMARY KEY,
+    song_name    TEXT NOT NULL,
     favorited_at {ts} NOT NULL,
-    user_id      TEXT NOT NULL DEFAULT 'local'
+    user_id      TEXT NOT NULL DEFAULT 'local',
+    PRIMARY KEY (user_id, song_name)
 )""",
     )
 
@@ -121,6 +130,62 @@ def _conn() -> Connection:
     return c
 
 
+def _has_user_key(c: Connection, table: str) -> bool:
+    """True when ``table`` already carries its per user key from ``_USER_KEYS``."""
+    want = set(_USER_KEYS[table])
+    if table != "crates":
+        return set(inspect(c).get_pk_constraint(table)["constrained_columns"]) == want
+    if c.dialect.name == "sqlite":
+        # PRAGMA reports an inline column UNIQUE and a table UNIQUE alike, as an
+        # automatic unique index; SQLAlchemy's SQLite reflection parses the
+        # CREATE text instead.
+        for idx in c.exec_driver_sql(f"PRAGMA index_list({table})").fetchall():
+            # (seq, name, unique, origin, partial)
+            if not idx[2]:
+                continue
+            cols = {r[2] for r in c.exec_driver_sql(f'PRAGMA index_info("{idx[1]}")').fetchall()}
+            if cols == want:
+                return True
+        return False
+    return any(set(uc["column_names"]) == want for uc in inspect(c).get_unique_constraints(table))
+
+
+def _rebuild_sqlite(c: Connection, table: str) -> None:
+    """SQLite cannot alter a key in place: create new, copy, drop, rename. Each
+    old key is at least as strict as its per user replacement, so the copy
+    cannot conflict."""
+    new = f"{table}_new"
+    create = next(
+        s for s in _schema_ddl("sqlite") if s.startswith(f"CREATE TABLE IF NOT EXISTS {table} (")
+    )
+    cols = ", ".join(col["name"] for col in inspect(c).get_columns(table))
+    # A scratch table left by an interrupted earlier run is dropped first.
+    c.execute(text(f"DROP TABLE IF EXISTS {new}"))
+    c.execute(text(create.replace(f"IF NOT EXISTS {table} (", f"{new} (", 1)))
+    c.execute(text(f"INSERT INTO {new} ({cols}) SELECT {cols} FROM {table}"))
+    c.execute(text(f"DROP TABLE {table}"))
+    c.execute(text(f"ALTER TABLE {new} RENAME TO {table}"))
+
+
+def _rekey_postgres(c: Connection, table: str) -> None:
+    """Postgres alters keys in place: drop the user blind constraint, add the
+    per user one."""
+    insp = inspect(c)
+    quote = c.dialect.identifier_preparer.quote
+    cols = ", ".join(_USER_KEYS[table])
+    if table == "crates":
+        for uc in insp.get_unique_constraints(table):
+            if uc["column_names"] == ["name"]:
+                c.execute(text(f"ALTER TABLE crates DROP CONSTRAINT {quote(uc['name'])}"))
+        c.execute(
+            text(f"ALTER TABLE crates ADD CONSTRAINT crates_user_id_name_key UNIQUE ({cols})")
+        )
+    else:
+        pk_name = insp.get_pk_constraint(table)["name"]
+        c.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT {quote(pk_name)}"))
+        c.execute(text(f"ALTER TABLE {table} ADD PRIMARY KEY ({cols})"))
+
+
 def _init() -> None:
     engine = db.get_engine(str(_DB_PATH))
     with engine.begin() as c:
@@ -142,6 +207,21 @@ def _init() -> None:
                         "ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'"
                     )
                 )
+        # Migration (B2.6): an older file keys crates/song_tags/song_favorites
+        # user blind. Rekey each table that lacks its per user key; a file that
+        # already has them is left untouched, so this runs once.
+        stale = [t for t in _USER_KEYS if not _has_user_key(c, t)]
+        if stale and db.is_sqlite(engine):
+            # DROP TABLE crates with foreign keys on would cascade into
+            # crate_songs. They are off by default here (only _conn() turns
+            # them on); state it before the first write opens a transaction,
+            # where this pragma would be a no-op.
+            c.exec_driver_sql("PRAGMA foreign_keys = OFF")
+        for table in stale:
+            if db.is_sqlite(engine):
+                _rebuild_sqlite(c, table)
+            else:
+                _rekey_postgres(c, table)
 
 
 _init()
@@ -213,16 +293,23 @@ def rename_crate(crate_id: str, new_name: str) -> bool:
 
 
 def add_to_crate(crate_id: str, song_name: str) -> bool:
-    """Add a song to a crate. Returns False if already present."""
+    """Add a song to a crate. Returns False if already present. Raises
+    LookupError when the acting user owns no crate with this id: the INSERT
+    selects its row from crates under the user filter, so a membership write
+    can never land in another user's crate (the crate_songs PK carries no
+    user_id, so a foreign row there would block the owner's own add)."""
     try:
         with _conn() as c:
-            c.execute(
+            cur = c.execute(
                 text(
                     "INSERT INTO crate_songs (crate_id, song_name, added_at, user_id) "
-                    "VALUES (:id, :song, :ts, :user)"
+                    "SELECT crate_id, :song, :ts, user_id FROM crates "
+                    "WHERE crate_id = :id AND user_id = :user"
                 ),
                 {"id": crate_id, "song": song_name, "ts": time.time(), "user": _acting_user()},
             )
+            if cur.rowcount == 0:
+                raise LookupError(f"Crate not found: {crate_id}")
             c.commit()
         return True
     except IntegrityError:
@@ -344,8 +431,8 @@ def set_favorite(song_name: str, value: bool = True) -> None:
                 text(
                     "INSERT INTO song_favorites (song_name, favorited_at, user_id) "
                     "VALUES (:song, :ts, :user) "
-                    "ON CONFLICT(song_name) DO UPDATE SET "
-                    "favorited_at = excluded.favorited_at, user_id = excluded.user_id"
+                    "ON CONFLICT(user_id, song_name) DO UPDATE SET "
+                    "favorited_at = excluded.favorited_at"
                 ),
                 {"song": song_name, "ts": time.time(), "user": _acting_user()},
             )

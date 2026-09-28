@@ -11,8 +11,10 @@ GET  /instrument-lab/songs     — list songs eligible for stem swap
 
 import re
 import uuid
+from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 
 from scripts.api import jobs as job_store
 from scripts.api.routers._helpers import _check_job_cap, _require_song
@@ -36,6 +38,49 @@ from scripts.core.paths import user_outputs_dir
 
 router = APIRouter()
 
+_BEAT_EXTS = (".wav", ".flac")
+_GENRE_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
+_BEAT_MAX_BYTES = 100 * 1024 * 1024
+
+
+def _owns_session(session_id: str) -> bool:
+    """True when the caller's outputs hold this session as a direct child:
+    ``dj_<id>/`` for a full render, ``<id>/`` for a preview."""
+    if not session_id or any(c in session_id for c in ("/", "\\", "\x00")):
+        return False
+    root = user_outputs_dir().resolve()
+    for name in (f"dj_{session_id}", session_id):
+        candidate = (root / name).resolve()
+        if candidate.parent == root and candidate.is_dir():
+            return True
+    return False
+
+
+def _confine_beat_path(raw: Optional[str]) -> Optional[str]:
+    """Validate ``bridge_beat_path`` and return it relative to the user dir.
+
+    Accepts a bare file name or a path that resolves inside
+    ``user_outputs_dir()`` and ends in .wav or .flac; anything else is 400.
+    The error never echoes the input or a server path.
+    """
+    if not raw:
+        return None
+    if "://" in raw or "\x00" in raw or ".." in Path(raw).parts:
+        raise HTTPException(
+            status_code=400, detail="bridge_beat_path must name a beat file in your outputs"
+        )
+    root = user_outputs_dir().resolve()
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(root) or resolved.suffix.lower() not in _BEAT_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail="bridge_beat_path must name a .wav or .flac file in your outputs",
+        )
+    return resolved.relative_to(root).as_posix()
+
 
 # ---------------------------------------------------------------------------
 # DJ Remix (queued)
@@ -46,6 +91,7 @@ def dj_remix(req: DJRemixRequest, background_tasks: BackgroundTasks = None):
     _check_job_cap()
     _require_song(req.song_a)
     _require_song(req.song_b)
+    bridge_beat_path = _confine_beat_path(req.bridge_beat_path)
     job_id = job_store.create_job(
         JobType.DJ_REMIX,
         {"song_a": req.song_a, "song_b": req.song_b},
@@ -59,7 +105,7 @@ def dj_remix(req: DJRemixRequest, background_tasks: BackgroundTasks = None):
         bridge_beat_mode=req.bridge_beat_mode,
         bridge_beat_genre=req.bridge_beat_genre,
         bridge_beat_intensity=req.bridge_beat_intensity,
-        bridge_beat_path=req.bridge_beat_path,
+        bridge_beat_path=bridge_beat_path,
         transition_effect=req.transition_effect,
     )
     return job_store.job_to_response(job_store.get_job(job_id))
@@ -76,8 +122,11 @@ def dj_remix_feedback(req: RemixFeedbackRequest):
     Synchronous — one deterministic weight update against the band
     similarities stashed at render time (see scripts/core/spectral_matching).
     404 when the session has no spectral record (matching disabled, chain
-    render, or feedback already given — records are one-shot).
+    render, or feedback already given — records are one-shot), and when the
+    session directory is not under the caller's own outputs.
     """
+    if not _owns_session(req.session_id):
+        raise HTTPException(status_code=404, detail="session not found")
     from scripts.core.spectral_matching import apply_feedback
     summary = apply_feedback(req.session_id, liked=req.liked)
     if not summary.get("updated"):
@@ -142,6 +191,7 @@ def dj_chain(req: DJChainRequest, background_tasks: BackgroundTasks = None):
     _check_job_cap()
     for name in req.songs:
         _require_song(name)
+    bridge_beat_path = _confine_beat_path(req.bridge_beat_path)
 
     job_id = job_store.create_job(
         JobType.DJ_REMIX,
@@ -155,7 +205,7 @@ def dj_chain(req: DJChainRequest, background_tasks: BackgroundTasks = None):
         bridge_beat_mode=req.bridge_beat_mode,
         bridge_beat_genre=req.bridge_beat_genre,
         bridge_beat_intensity=req.bridge_beat_intensity,
-        bridge_beat_path=req.bridge_beat_path,
+        bridge_beat_path=bridge_beat_path,
         transition_effect=req.transition_effect,
     )
     return job_store.job_to_response(job_store.get_job(job_id))
@@ -178,6 +228,9 @@ def synthesize_beat(
     Returns the beat audio as a WAV file *and* the matching Strudel code so
     the user can open strudel.cc and customise the pattern manually.
     """
+    if not _GENRE_RE.fullmatch(genre):
+        raise HTTPException(status_code=400, detail="genre must match ^[a-z0-9_-]{1,32}$")
+
     import soundfile as sf
 
     from scripts.core.beat_synth import render_beat, strudel_code
@@ -196,7 +249,7 @@ def synthesize_beat(
     return {
         "beat_id":      beat_id,
         "audio_url":    f"/outputs/beat_{beat_id}/{filename}",
-        "audio_path":   str(out_path),
+        "audio_path":   f"beat_{beat_id}/{filename}",
         "bpm":          bpm,
         "genre":        genre,
         "bars":         bars,
@@ -206,26 +259,47 @@ def synthesize_beat(
 
 
 @router.post("/beat/upload", tags=["beat"])
-async def upload_beat(file: UploadFile = File(...)):
+async def upload_beat(request: Request):
     """
     Accept a user-recorded WAV (e.g. exported from Strudel) and store it
     so it can be referenced as a bridge beat in a DJ remix job.
+
+    Multipart field ``file``. A Content-Length above 100 MB is 413 before any
+    body is read; a body without one is read chunk by chunk and cut off at
+    413 once the running total passes 100 MB.
     """
-    beat_id  = str(uuid.uuid4())[:8]
-    out_dir  = user_outputs_dir() / f"beat_{beat_id}"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    # Validate file size (max 100 MB)
-    content = await file.read()
-    if len(content) > 100 * 1024 * 1024:
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > _BEAT_MAX_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 100 MB)")
+
+    received = 0
+
+    async def _capped_receive():
+        nonlocal received
+        message = await request.receive()
+        received += len(message.get("body", b""))
+        if received > _BEAT_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 100 MB)")
+        return message
+
+    form = await Request(request.scope, _capped_receive).form()
+    file = form.get("file")
+    if file is None or isinstance(file, str):
+        await form.close()
+        raise HTTPException(status_code=422, detail="multipart field 'file' is required")
+    content = await file.read()
+    await form.close()
     safe_name = re.sub(r"[^A-Za-z0-9_\-.]", "_", file.filename or "beat.wav")
     if not safe_name.lower().endswith((".wav", ".flac", ".mp3", ".ogg", ".aiff")):
         raise HTTPException(status_code=400, detail="Unsupported audio format")
+    beat_id  = str(uuid.uuid4())[:8]
+    out_dir  = user_outputs_dir() / f"beat_{beat_id}"
+    out_dir.mkdir(parents=True, exist_ok=True)
     out_path  = out_dir / safe_name
     out_path.write_bytes(content)
     return {
         "beat_id":    beat_id,
-        "audio_path": str(out_path),
+        "audio_path": f"beat_{beat_id}/{safe_name}",
         "filename":   safe_name,
         "size_kb":    round(len(content) / 1024, 1),
     }

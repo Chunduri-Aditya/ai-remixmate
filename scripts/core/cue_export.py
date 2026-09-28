@@ -43,6 +43,7 @@ import struct
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import quote
 
 log = logging.getLogger(__name__)
 
@@ -112,7 +113,9 @@ def export_rekordbox_xml(
     total_time_s : float
         Track duration in seconds (optional; stored in TotalTime attribute).
     audio_path : Path | None
-        Absolute path to the audio file (stored in Location attribute).
+        Path to the audio file (stored in Location attribute). An absolute path
+        becomes a ``file:`` URI; a relative path stays relative (percent
+        encoded), so an XML served to another machine carries no server path.
 
     Returns
     -------
@@ -139,7 +142,9 @@ def export_rekordbox_xml(
         "TotalTime": str(int(total_time_s)),
     }
     if audio_path is not None:
-        track_attrs["Location"] = audio_path.as_uri()
+        track_attrs["Location"] = (
+            audio_path.as_uri() if audio_path.is_absolute() else quote(audio_path.as_posix())
+        )
 
     track = ET.SubElement(collection, "TRACK", **track_attrs)
 

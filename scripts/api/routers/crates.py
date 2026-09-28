@@ -30,6 +30,7 @@ Favorites:
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 from scripts.api.routers._helpers import _require_song
 from scripts.api.schemas import (
@@ -55,8 +56,11 @@ def create_crate(body: CrateCreateRequest):
         raise HTTPException(status_code=400, detail="'name' is required")
     try:
         crate_id = crate_store.create_crate(name)
-    except Exception as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        # Fixed text: str(exc) carried the driver message and the INSERT.
+        raise HTTPException(
+            status_code=409, detail=f"A crate named '{name}' already exists"
+        ) from exc
     return {"crate_id": crate_id, "name": name}
 
 
@@ -100,7 +104,10 @@ def add_to_crate(crate_id: str, body: CrateAddSongRequest):
     song_name = body.song_name.strip()
     if not song_name:
         raise HTTPException(status_code=400, detail="'song_name' is required")
-    added = crate_store.add_to_crate(crate_id, song_name)
+    try:
+        added = crate_store.add_to_crate(crate_id, song_name)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=f"Crate not found: {crate_id}") from exc
     if not added:
         raise HTTPException(status_code=409, detail=f"'{song_name}' is already in crate {crate_id}")
     return {"crate_id": crate_id, "song_name": song_name, "added": True}

@@ -37,7 +37,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.pool import NullPool
 
 _DATABASE_URL_ENV = "DATABASE_URL"
@@ -89,3 +89,10 @@ def get_engine(sqlite_path: str | os.PathLike[str]) -> Engine:
 def is_sqlite(engine: Engine) -> bool:
     """True when this engine talks to SQLite (guards PRAGMA-only statements)."""
     return engine.dialect.name == "sqlite"
+
+
+def ping(engine: Engine) -> None:
+    """Run ``SELECT 1`` on ``engine``. Raises ``SQLAlchemyError`` when the
+    database cannot be opened or queried (readiness probe)."""
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))

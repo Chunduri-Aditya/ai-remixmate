@@ -11,7 +11,7 @@ import time
 import uuid
 from typing import Any, Optional
 
-from sqlalchemy import Connection, text
+from sqlalchemy import Connection, inspect, text
 
 from scripts.core import db
 from scripts.core.paths import DATA_DIR
@@ -52,6 +52,13 @@ def _ensure_schema(conn: Connection) -> None:
     dialect = conn.engine.dialect.name
     for stmt in _schema_ddl(dialect):
         conn.execute(text(stmt))
+
+
+def init_schema() -> None:
+    """Create and commit both legal tables. Called once at startup; idempotent."""
+    with _conn() as c:
+        _ensure_schema(c)
+        c.commit()
 
 
 def create_dmca_report(
@@ -141,10 +148,17 @@ def unflag_user(user_id: str) -> bool:
 
 
 def is_flagged(user_id: str) -> bool:
+    """Plain SELECT, no DDL: the schema comes from ``init_schema()`` at startup.
+
+    A database that has never had ``init_schema()`` or ``flag_user()`` run
+    against it holds no flags, so the missing table reads as "not flagged"
+    (a catalog lookup, not a CREATE) instead of a 500 on every gated route.
+    """
     if not user_id:
         return False
     with _conn() as c:
-        _ensure_schema(c)
+        if not inspect(c).has_table("flagged_users"):
+            return False
         row = c.execute(
             text("SELECT 1 FROM flagged_users WHERE user_id = :id LIMIT 1"),
             {"id": user_id},

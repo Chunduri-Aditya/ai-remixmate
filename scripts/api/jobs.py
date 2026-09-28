@@ -38,6 +38,10 @@ Public API (same as before — no callers need to change)
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
+import tempfile
 import threading
 import time
 import traceback
@@ -46,15 +50,75 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from typing import Any, Callable, Dict, Optional
 
+from fastapi import HTTPException
 from sqlalchemy import Connection, text
 
 from scripts.api.auth import DEFAULT_USER, current_user, get_user_id
 from scripts.api.schemas import JobResponse, JobStatus, JobType
-from scripts.core import db
+from scripts.core import db, paths
 from scripts.core.logging_utils import get_logger, set_job_id
-from scripts.core.paths import DATA_DIR
+from scripts.core.paths import DATA_DIR, LIBRARY_DIR, OUTPUTS_DIR, PROJECT_ROOT
 
 logger = get_logger(__name__)
+
+
+def _relativize(text: str) -> str:
+    """Strip server path prefixes from ``text`` so no absolute path is persisted.
+
+    OUTPUTS_DIR paths become outputs relative (``u1/dj_s1/mix.wav``, the shape
+    ``/outputs`` serves), LIBRARY_DIR paths become ``library/...``, anything
+    else under PROJECT_ROOT becomes root relative and anything else under the
+    server user's home (model caches such as ``~/.cache/torch``) becomes ``~/...``.
+    DATA_DIR (which REMIXMATE_DATA_DIR may place outside the root) becomes
+    ``data/...`` and the system temp dir becomes ``tmp/...``.
+    """
+    for base, sub, bare in (
+        (OUTPUTS_DIR, "", "outputs"),
+        (LIBRARY_DIR, "library/", "library"),
+        (DATA_DIR, "data/", "data"),
+        (PROJECT_ROOT, "", "."),
+        (tempfile.gettempdir(), "tmp/", "tmp"),
+        (os.path.expanduser("~"), "~/", "~"),
+    ):
+        prefix = str(base)
+        if len(prefix) < 2:  # an unresolved ("~") or root ("/") home would eat every slash
+            continue
+        text = text.replace(prefix + "/", sub).replace(prefix, bare)
+    return text
+
+
+# A slash rooted token: "/" not preceded by a word char, ".", "~", ":", "/" or
+# "-", so relative paths, ratios ("4/4") and URLs ("https://...") are left alone.
+_ABS_PATH_RE = re.compile(r"(?<![\w.~:/-])/[^\s'\"`),;\]]+")
+
+
+def _scrub(text: str) -> str:
+    """Relativize ``text`` (see _relativize), then replace any absolute path left.
+
+    For client facing error and message text only: tool paths such as
+    ``/opt/homebrew/bin/ffmpeg`` or ``/private/tmp/...`` match no known prefix.
+    Results keep the plain _relativize pass, since ``stream_url`` is a rooted
+    URL path by design.
+    """
+    return _ABS_PATH_RE.sub("<path>", _relativize(text))
+
+
+def _relativize_value(value: Any) -> Any:
+    """Relativize every string inside ``value``, walking dict values and list items."""
+    if isinstance(value, str):
+        return _relativize(value)
+    if isinstance(value, dict):
+        return {k: _relativize_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_relativize_value(v) for v in value]
+    return value
+
+
+def _relativize_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Return ``result`` with every nested string relativized (see _relativize)."""
+    if isinstance(result, dict):
+        return _relativize_value(result)
+    return result
 
 # ---------------------------------------------------------------------------
 # Database backend (SQLAlchemy Core — SQLite by default, Postgres via DATABASE_URL)
@@ -165,8 +229,11 @@ def _upsert_row(conn: Connection, job: Dict[str, Any]) -> None:
 
 _jobs: Dict[str, Dict[str, Any]] = {}
 _cancelled: set[str] = set()          # job IDs that were cancelled before starting
+_purged: set[str] = set()             # job IDs whose owner was purged (see mark_purged)
+_queued: set[str] = set()             # job IDs handed to the executor, not yet picked up by a worker
 _lock = threading.Lock()
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="remixmate-worker")
+_MAX_ACTIVE_JOBS = 4  # Hard cap on one user's concurrent background jobs
 
 # SSE hook — registered by scripts.api.routers.events on startup.
 # Signature: (event_type: str, job_dict: dict) -> None  (sync callable)
@@ -316,6 +383,70 @@ def create_job(job_type: JobType, meta: Optional[Dict] = None) -> str:
 def get_job(job_id: str) -> Optional[Dict]:
     """Return the job dict or None if not found."""
     return _jobs.get(job_id)
+
+
+def get_job_from_db(job_id: str) -> Optional[Dict]:
+    """Read one job row straight from the database, bypassing the in-memory cache.
+
+    Covers jobs evicted from ``_jobs`` (only the newest 500 are loaded at
+    startup). Returns None when no row exists.
+    """
+    with closing(_get_conn()) as conn:
+        row = conn.execute(
+            text("SELECT * FROM jobs WHERE job_id = :id"), {"id": job_id}
+        ).fetchone()
+    if row is None:
+        return None
+    job = _row_to_dict(row)
+    job["status"] = _status_value(job["status"])
+    job["job_type"] = _type_value(job["job_type"])
+    return job
+
+
+def _result_session_keys(result: Dict[str, Any]) -> set[str]:
+    """Names a job result answers to: its ``session_id`` and its output dir name.
+
+    Full renders store the bare id but write to ``dj_<id>`` / ``chain_<id>``;
+    the dir name is the parent segment of ``stream_url`` or ``output``.
+    """
+    keys = {result.get("session_id")}
+    for field in ("stream_url", "output"):
+        value = result.get(field)
+        if isinstance(value, str) and "/" in value:
+            keys.add(value.rstrip("/").rsplit("/", 2)[-2])
+    return {k for k in keys if isinstance(k, str) and k}
+
+
+def mark_expired(session_id: str) -> int:
+    """Set ``result.expired = True`` on every job whose session matches ``session_id``.
+
+    Called by the retention sweep after a session's output directory is
+    removed, with the removed directory name. A job matches on its
+    ``result.session_id`` or its output directory name (see
+    _result_session_keys). Updates the database row and the in-memory copy.
+    Returns the number of jobs flagged.
+    """
+    flagged = 0
+    with _lock:
+        with closing(_get_conn()) as conn:
+            rows = conn.execute(
+                text("SELECT job_id, result_json FROM jobs WHERE result_json IS NOT NULL")
+            ).fetchall()
+            for row in rows:
+                result = json.loads(row.result_json or "null")
+                if not isinstance(result, dict) or session_id not in _result_session_keys(result):
+                    continue
+                result["expired"] = True
+                conn.execute(
+                    text("UPDATE jobs SET result_json = :r WHERE job_id = :id"),
+                    {"r": json.dumps(result), "id": row.job_id},
+                )
+                job = _jobs.get(row.job_id)
+                if job is not None:
+                    job["result"] = {**(job.get("result") or {}), "expired": True}
+                flagged += 1
+            conn.commit()
+    return flagged
 
 
 def delete_job(job_id: str) -> bool:
@@ -509,11 +640,11 @@ def update_job(
         if status is not None:
             job["status"] = status
         if message is not None:
-            job["message"] = message
+            job["message"] = _scrub(message)
         if result is not None:
-            job["result"] = result
+            job["result"] = _relativize_result(result)
         if error is not None:
-            job["error"] = error
+            job["error"] = _scrub(error)
 
         if progress is not None:
             progress = round(min(1.0, max(0.0, progress)), 3)
@@ -584,6 +715,74 @@ def cancel_job(job_id: str) -> bool:
     return True
 
 
+def is_queued(job_id: str) -> bool:
+    """True when the job was submitted to the executor and no worker has started it yet.
+
+    A PENDING record that was created but never submitted is not queued work."""
+    return job_id in _queued
+
+
+def _is_active(job: Dict) -> bool:
+    """Counts toward the job cap: RUNNING, or PENDING and already handed to the executor."""
+    status = _status_value(job["status"])
+    return status == "running" or (status == "pending" and job.get("job_id") in _queued)
+
+
+def _job_cap_error(active: int) -> HTTPException:
+    return HTTPException(
+        status_code=429,
+        detail=(
+            f"Too many active jobs ({active}/{_MAX_ACTIVE_JOBS}). "
+            f"Wait for one to finish before submitting another."
+        ),
+    )
+
+
+def is_cancelled(job_id: str) -> bool:
+    """True when the job was cancelled. Long running tasks poll this between steps."""
+    if job_id in _cancelled:
+        return True
+    job = _jobs.get(job_id)
+    return job is not None and _status_value(job["status"]) == "cancelled"
+
+
+def cancel_user_jobs(user_id: str) -> int:
+    """Cancel every PENDING or RUNNING job owned by ``user_id``. Returns the count."""
+    with _lock:
+        ids = [
+            jid for jid, j in _jobs.items()
+            if _job_user(j) == user_id and _status_value(j["status"]) in ("pending", "running")
+        ]
+    return sum(1 for jid in ids if cancel_job(jid))
+
+
+def mark_purged(user_id: str) -> None:
+    """Flag every in-memory job owned by ``user_id`` as purged.
+
+    The executor wrapper then skips running a queued job and skips persisting
+    the outcome (status, result, output) of one already running, so an account
+    deletion is not undone by a worker writing the row back.
+    """
+    with _lock:
+        _purged.update(jid for jid, j in _jobs.items() if _job_user(j) == user_id)
+
+
+def _discard_purged_output(user_id: str) -> None:
+    """Remove ``outputs/<user_id>/`` after a purged owner's task has finished.
+
+    DELETE /account empties that directory while the task is still running;
+    a task that writes its result on the way out recreates it, so the worker
+    removes it again once the task has returned.
+    """
+    user_out = paths.OUTPUTS_DIR / user_id
+    if not user_out.exists():
+        return
+    try:
+        shutil.rmtree(user_out)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Could not remove purged user output: {exc}")
+
+
 def retry_job(job_id: str, fn: Callable, **kwargs) -> Optional[str]:
     """
     Clone a FAILED or CANCELLED job into a new job and submit it.
@@ -610,11 +809,24 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
     Submit a job to the thread pool.
     The callable receives job_id as its first argument so it can call
     update_job() for progress reporting.
+
+    Raises HTTPException(429), and marks the job FAILED, when its owner already
+    has _MAX_ACTIVE_JOBS active jobs. The count and the reservation (_queued)
+    happen under one lock: the router's _check_job_cap runs before the job
+    exists, so N simultaneous submits from one user all pass it, and only this
+    re-check at the moment the job becomes queued holds the cap.
     """
 
     def _wrapper() -> None:
+        _queued.discard(job_id)
+
         # Respect cancellations that arrived before the worker started
         if job_id in _cancelled:
+            return
+
+        # Owner purged before the worker started: no run, no persist, no output
+        if job_id in _purged:
+            _purged.discard(job_id)
             return
 
         job = _jobs.get(job_id)
@@ -626,9 +838,17 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
         # Re-establish the acting user: this runs in an executor thread, which
         # does NOT inherit the submitting thread's contextvars. Without this
         # every per-user output path and store write falls back to "local".
-        current_user.set(job.get("meta", {}).get("user_id", DEFAULT_USER))
+        owner = job.get("meta", {}).get("user_id", DEFAULT_USER)
+        current_user.set(owner)
 
         with _lock:
+            # Re-check under the lock: a cancel or purge that landed between
+            # the checks above and here must not be undone by this upsert
+            if job_id in _cancelled:
+                return
+            if job_id in _purged:
+                _purged.discard(job_id)
+                return
             job["status"]     = JobStatus.RUNNING
             job["started_at"] = time.time()
             job["message"]    = "Running"
@@ -645,6 +865,14 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
         try:
             result = fn(job_id=job_id, **kwargs)
 
+            # Owner purged mid-flight: do not persist the completion, and drop
+            # the output a task that never polls is_cancelled wrote on its way out
+            if job_id in _purged:
+                _purged.discard(job_id)
+                _cancelled.discard(job_id)
+                _discard_purged_output(owner)
+                return
+
             # Check if cancelled mid-flight
             if job_id in _cancelled:
                 _cancelled.discard(job_id)
@@ -656,7 +884,7 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
                 job["progress"]    = 1.0
                 job["message"]     = "Done"
                 if result is not None:
-                    job["result"] = result
+                    job["result"] = _relativize_result(result)
                 try:
                     with closing(_get_conn()) as conn:
                         _upsert_row(conn, job)
@@ -676,12 +904,26 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
             )
 
         except Exception as exc:  # noqa: BLE001
+            # Owner purged mid-flight: do not persist the failure either
+            if job_id in _purged:
+                _purged.discard(job_id)
+                _cancelled.discard(job_id)
+                _discard_purged_output(owner)
+                return
+
+            # A cancelled task that raises on its way out stays CANCELLED
+            if job_id in _cancelled:
+                _cancelled.discard(job_id)
+                logger.info("Cancelled job exited with an exception", extra={"job_id": job_id})
+                return
+
             exc_traceback = traceback.format_exc()
+            error = _scrub(str(exc))
             with _lock:
                 job["status"]      = JobStatus.FAILED
                 job["finished_at"] = time.time()
-                job["error"]       = str(exc)
-                job["message"]     = f"Failed: {exc}"
+                job["error"]       = error
+                job["message"]     = f"Failed: {error}"
                 try:
                     with closing(_get_conn()) as conn:
                         _upsert_row(conn, job)
@@ -702,6 +944,24 @@ def submit_job(job_id: str, fn: Callable, **kwargs) -> None:
                 },
             )
 
+    job = _jobs.get(job_id)
+    refused: Optional[int] = None
+    with _lock:
+        if job is not None:
+            owner = _job_user(job)
+            active = sum(
+                1 for jid, j in _jobs.items()
+                if jid != job_id and _job_user(j) == owner and _is_active(j)
+            )
+            if active >= _MAX_ACTIVE_JOBS:
+                refused = active
+                job["finished_at"] = time.time()
+        if refused is None:
+            _queued.add(job_id)
+    if refused is not None:
+        err = _job_cap_error(refused)
+        update_job(job_id, status=JobStatus.FAILED, error=err.detail, message=f"Failed: {err.detail}")
+        raise err
     _executor.submit(_wrapper)
 
 

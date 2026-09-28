@@ -16,9 +16,10 @@ POST /library/build-clap-index         — build / update CLAP embedding index (
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from scripts.api import jobs as job_store
+from scripts.api.auth import require_operator
 from scripts.api.routers._helpers import _check_job_cap, _require_song
 from scripts.api.schemas import (
     AnalyzeRequest,
@@ -405,7 +406,13 @@ def index_stats():
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/index/rebuild", response_model=JobResponse, status_code=202, tags=["index"])
+@router.post(
+    "/index/rebuild",
+    response_model=JobResponse,
+    status_code=202,
+    tags=["index"],
+    dependencies=[Depends(require_operator)],
+)
 def rebuild_index(background_tasks: BackgroundTasks = None):
     """
     Rebuild the RAG vector index for all library songs.
@@ -487,7 +494,13 @@ def crate_search(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/library/build-clap-index", response_model=JobResponse, status_code=202, tags=["analysis"])
+@router.post(
+    "/library/build-clap-index",
+    response_model=JobResponse,
+    status_code=202,
+    tags=["analysis"],
+    dependencies=[Depends(require_operator)],
+)
 def build_clap_index(
     force: bool = Query(False, description="Re-embed all songs even if already indexed"),
 ):

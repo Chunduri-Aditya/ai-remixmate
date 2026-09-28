@@ -342,7 +342,9 @@ def summarize(user_id: Optional[str] = None) -> Dict[str, Any]:
 
 
 def purge_user_events(user_id: str) -> int:
-    """Delete feedback events for ``user_id`` from memory and DB. Returns count."""
+    """Delete feedback events for ``user_id`` from memory and DB. Returns count.
+
+    Raises when the DB delete fails, so an account deletion can report it."""
     with _lock:
         before = len(_events)
         _events[:] = [
@@ -359,4 +361,18 @@ def purge_user_events(user_id: str) -> int:
                 return cur.rowcount if cur.rowcount is not None else removed_mem
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"Could not purge feedback events: {exc}")
-            return removed_mem
+            raise
+
+
+def export_user_events(user_id: str) -> List[Dict[str, Any]]:
+    """Every feedback event owned by ``user_id``, newest first, read from the DB
+    rather than the capped in-memory list (account export). Raises on DB failure."""
+    with closing(_get_conn()) as conn:
+        rows = conn.execute(
+            text(
+                "SELECT * FROM feedback_events WHERE user_id = :user "
+                "ORDER BY created_at DESC"
+            ),
+            {"user": user_id},
+        ).fetchall()
+    return [_row_to_dict(row) for row in rows]

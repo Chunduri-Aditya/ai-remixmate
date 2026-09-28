@@ -100,9 +100,14 @@ class DmcaRequest(BaseModel):
 
 
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Limiter key: the socket peer, or with REMIXMATE_TRUST_PROXY=1 the last
+    X-Forwarded-For entry (the one the reverse proxy appends; earlier entries
+    are client supplied and spoofable)."""
+    if os.environ.get("REMIXMATE_TRUST_PROXY") == "1":
+        forwarded = request.headers.get("x-forwarded-for", "")
+        last = forwarded.split(",")[-1].strip()
+        if last:
+            return last
     if request.client:
         return request.client.host
     return "unknown"
@@ -111,7 +116,14 @@ def _client_ip(request: Request) -> str:
 def _rate_limit_dmca(ip: str) -> None:
     now = time.time()
     window_start = now - _DMCA_WINDOW_SEC
-    hits = [t for t in _dmca_hits[ip] if t >= window_start]
+    # Prune every key on every call so the dict cannot grow without bound.
+    for key in list(_dmca_hits):
+        fresh = [t for t in _dmca_hits[key] if t >= window_start]
+        if fresh:
+            _dmca_hits[key] = fresh
+        else:
+            del _dmca_hits[key]
+    hits = list(_dmca_hits.get(ip, []))
     if len(hits) >= _DMCA_MAX_PER_WINDOW:
         raise HTTPException(429, detail="too many DMCA reports — try later")
     hits.append(now)

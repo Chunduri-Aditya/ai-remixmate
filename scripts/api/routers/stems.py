@@ -17,6 +17,7 @@ import os
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from scripts.api import jobs as job_store
+from scripts.api.auth import require_operator
 from scripts.api.routers._helpers import _check_job_cap, _require_song
 from scripts.api.schemas import (
     BatchStemSplitRequest,
@@ -52,7 +53,7 @@ def _stem_split_enabled() -> None:
     response_model=JobResponse,
     status_code=202,
     tags=["stems"],
-    dependencies=[Depends(_stem_split_enabled)],
+    dependencies=[Depends(require_operator), Depends(_stem_split_enabled)],
 )
 def stem_split(req: StemSplitRequest, background_tasks: BackgroundTasks = None):
     """
@@ -76,7 +77,7 @@ def stem_split(req: StemSplitRequest, background_tasks: BackgroundTasks = None):
     response_model=JobResponse,
     status_code=202,
     tags=["stems"],
-    dependencies=[Depends(_stem_split_enabled)],
+    dependencies=[Depends(require_operator), Depends(_stem_split_enabled)],
 )
 def stem_split_batch(req: BatchStemSplitRequest, background_tasks: BackgroundTasks = None):
     """
@@ -129,7 +130,13 @@ def stem_split_batch(req: BatchStemSplitRequest, background_tasks: BackgroundTas
     return job_store.job_to_response(job_store.get_job(job_id))
 
 
-@router.post("/stems/compress", response_model=JobResponse, status_code=202, tags=["stems"])
+@router.post(
+    "/stems/compress",
+    response_model=JobResponse,
+    status_code=202,
+    tags=["stems"],
+    dependencies=[Depends(require_operator)],
+)
 def compress_stems_single(
     song: str = Query(..., description="Song name in library"),
     delete_wav: bool = Query(True, description="Delete WAV after FLAC encode"),
@@ -146,7 +153,13 @@ def compress_stems_single(
     return job_store.job_to_response(job_store.get_job(job_id))
 
 
-@router.post("/stems/compress-batch", response_model=JobResponse, status_code=202, tags=["stems"])
+@router.post(
+    "/stems/compress-batch",
+    response_model=JobResponse,
+    status_code=202,
+    tags=["stems"],
+    dependencies=[Depends(require_operator)],
+)
 def compress_stems_batch(
     background_tasks: BackgroundTasks = None,
     delete_wav: bool = Query(True, description="Delete WAVs after FLAC encode"),

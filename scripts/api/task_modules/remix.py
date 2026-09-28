@@ -26,6 +26,15 @@ from scripts.core.paths import song_dir, user_outputs_dir
 log = logging.getLogger(__name__)
 
 
+def _user_beat_file(name: str) -> Path:
+    """Resolve a bridge beat name under the user dir; refuse any other path."""
+    root = user_outputs_dir().resolve()
+    path = (root / name).resolve()
+    if not path.is_relative_to(root) or path.suffix.lower() not in (".wav", ".flac"):
+        raise ValueError("bridge beat is not a .wav or .flac file in the user outputs")
+    return path
+
+
 class MixEngine(NamedTuple):
     """One render path: analysis, planning, rendering, and mastering together.
 
@@ -316,7 +325,7 @@ def task_dj_remix(
         update_job(job_id, progress=0.52, message="Loading bridge beat file…")
         try:
             bridge_audio, beat_sr = librosa.load(
-                bridge_beat_path, sr=sr, mono=True
+                _user_beat_file(bridge_beat_path), sr=sr, mono=True
             )
             bridge_label = f"file:{Path(bridge_beat_path).name}"
         except Exception as exc:
@@ -554,7 +563,7 @@ def task_dj_chain(
                 bb = None
         elif bridge_beat_mode == "file" and bridge_beat_path:
             try:
-                bb, _ = librosa.load(bridge_beat_path, sr=sr, mono=True)
+                bb, _ = librosa.load(_user_beat_file(bridge_beat_path), sr=sr, mono=True)
             except Exception:
                 bb = None
         bridge_audios.append(bb)
@@ -712,6 +721,7 @@ def task_remix_preview(
     duration_sec = round(len(preview_audio) / sr, 1)
     log_audit("remix_preview_complete", resource=str(out_path), job_id=job_id,
               metadata={"duration_sec": duration_sec, "transition_bars": transition_bars})
+    _sweep_user_mixes()
 
     return {
         "output":         str(out_path),

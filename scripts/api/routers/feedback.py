@@ -16,6 +16,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
 
 from scripts.api import jobs as job_store
+from scripts.api.auth import get_user_id
 from scripts.api.schemas import FeedbackEventRequest, FeedbackEventResponse, FeedbackSummaryResponse
 from scripts.core import feedback_store
 from scripts.core.logging_utils import get_logger
@@ -39,7 +40,7 @@ def _context_from_job(job_id: str) -> Dict[str, Any]:
     on an old client shouldn't block logging the event itself.
     """
     job = job_store.get_job(job_id)
-    if job is None:
+    if job is None or job_store._job_user(job) != get_user_id():
         return {}
     meta = job.get("meta") or {}
     result = job.get("result") or {}

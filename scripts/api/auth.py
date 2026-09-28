@@ -50,6 +50,7 @@ _AUDIENCE_ENV = "SUPABASE_JWT_AUD"          # Supabase default: "authenticated"
 _ISSUER_ENV = "SUPABASE_JWT_ISS"           # optional: https://<ref>.supabase.co/auth/v1
 _COOKIE_NAME_ENV = "SUPABASE_COOKIE_NAME"   # raw-JWT session cookie for EventSource
 _ADMIN_EMAILS_ENV = "ADMIN_EMAILS"          # comma-separated; Phase 8 admin routes
+_ADMIN_ALLOW_UNVERIFIED_ENV = "ADMIN_ALLOW_UNVERIFIED"  # "1" skips the email_verified check
 _DEFAULT_AUDIENCE = "authenticated"
 _DEFAULT_COOKIE_NAME = "sb-access-token"
 _REQUIRED_ROLE = "authenticated"           # reject the anon / service_role keys
@@ -297,7 +298,32 @@ def require_admin(request: Request) -> str:
     if not email or email not in admin_emails():
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="admin access required")
 
+    allow_unverified = os.environ.get(_ADMIN_ALLOW_UNVERIFIED_ENV, "").strip() == "1"
+    if not allow_unverified and not _email_verified(claims):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="admin email is not verified")
+
     uid = claims["sub"]
     _reject_if_flagged(uid)
     current_user.set(uid)
     return uid
+
+
+def _email_verified(claims: dict) -> bool:
+    """True when the token carries ``email_verified: true`` at the top level or
+    under ``user_metadata`` (Supabase puts it in either place)."""
+    if claims.get("email_verified") is True:
+        return True
+    meta = claims.get("user_metadata")
+    return isinstance(meta, dict) and meta.get("email_verified") is True
+
+
+def require_operator(request: Request) -> str:
+    """FastAPI dependency for catalog mutating routes (delete, prune, evict,
+    initialize, analysis and stem jobs over the shared library).
+
+    * ``REMIXMATE_AUTH_ENABLED`` off → ``"local"`` (single operator dev box).
+    * on                             → ``require_admin``.
+    """
+    if not auth_enabled():
+        return DEFAULT_USER
+    return require_admin(request)

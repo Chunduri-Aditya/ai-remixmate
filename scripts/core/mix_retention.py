@@ -144,12 +144,52 @@ def sweep_current_user(*, dry_run: bool = False) -> RetentionResult:
         from scripts.core.paths import user_outputs_dir
 
         rc = cfg.retention
-        return sweep_dir(
+        result = sweep_dir(
             user_outputs_dir(),
             max_age_days=rc.mix_max_age_days,
             max_count=rc.mix_max_count,
             dry_run=dry_run,
         )
+        _mark_swept_expired(result)
+        return result
     except Exception as exc:  # noqa: BLE001 - a retention failure must not break a render
         _log.warning(f"mix_retention: sweep_current_user failed: {exc}")
         return RetentionResult(dry_run=dry_run)
+
+
+def _mark_swept_expired(result: RetentionResult) -> None:
+    """Flag the job rows of every removed session ``result.expired = true``.
+    A dry run removed nothing, so it marks nothing."""
+    if result.dry_run:
+        return
+    from scripts.api import jobs as job_store
+
+    for session_id in result.removed:
+        job_store.mark_expired(session_id)
+
+
+def sweep_all_users() -> dict[str, RetentionResult]:
+    """Sweep every ``outputs/<uid>/`` with the configured limits and mark each
+    swept session's jobs expired. Independent of the acting user. Best-effort
+    per user, like ``sweep_current_user``: one failing user dir is logged and
+    the rest still run. Returns the result per user id."""
+    from scripts.core import paths
+    from scripts.core.config import cfg
+
+    rc = cfg.retention
+    results: dict[str, RetentionResult] = {}
+    root = paths.OUTPUTS_DIR
+    if not root.is_dir():
+        return results
+    for user_root in sorted(p for p in root.iterdir() if p.is_dir()):
+        try:
+            result = sweep_dir(
+                user_root,
+                max_age_days=rc.mix_max_age_days,
+                max_count=rc.mix_max_count,
+            )
+            _mark_swept_expired(result)
+            results[user_root.name] = result
+        except Exception as exc:  # noqa: BLE001 - one user's failure must not stop the sweep
+            _log.warning(f"mix_retention: sweep of {user_root.name} failed: {exc}")
+    return results

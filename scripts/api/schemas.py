@@ -7,10 +7,12 @@ from the route logic makes it easy to generate OpenAPI docs and write tests.
 
 from __future__ import annotations
 
+import json
 from enum import Enum
+from pathlib import PurePath
 from typing import Any, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -75,6 +77,12 @@ class SongInfo(BaseModel):
     energy: Optional[float] = None
     genre: Optional[str] = None
     duration: Optional[float] = None
+
+    @field_validator("path")
+    @classmethod
+    def _path_basename_only(cls, v: str) -> str:
+        """Keep only the song directory name so no absolute path reaches a client."""
+        return PurePath(v).name if v else v
 
 
 class StorageStatusResponse(BaseModel):
@@ -269,7 +277,8 @@ class DJRemixRequest(BaseModel):
     )
     bridge_beat_path: Optional[str] = Field(
         None,
-        description="Absolute path to a user-uploaded WAV (used when mode='file')",
+        description="Beat file name relative to the user outputs dir, .wav or .flac "
+        "(as returned by /beat/upload; used when mode='file')",
     )
     transition_effect: str = Field(
         "auto",
@@ -309,7 +318,9 @@ class DJChainRequest(BaseModel):
     bridge_beat_mode: str = Field("none", description="'none' | 'auto' | 'file'")
     bridge_beat_genre: str = Field("auto", description="Genre preset for auto beat synthesis")
     bridge_beat_intensity: float = Field(0.38, ge=0.0, le=1.0)
-    bridge_beat_path: Optional[str] = Field(None, description="WAV path for mode='file'")
+    bridge_beat_path: Optional[str] = Field(
+        None, description="Beat file name relative to the user outputs dir, .wav or .flac (mode='file')"
+    )
     transition_effect: str = Field(
         "auto",
         description="Effect on the outgoing track: 'auto' | 'echo' | 'filter' | 'reverb' | 'none' | "
@@ -456,11 +467,19 @@ class FeedbackEventRequest(BaseModel):
     a job_id handy don't need to re-assemble those fields themselves.
     """
     event_type:   FeedbackEventType
-    song_a:       str
-    song_b:       Optional[str]           = None
-    job_id:       Optional[str]           = None
+    song_a:       str                     = Field(..., max_length=200)
+    song_b:       Optional[str]           = Field(None, max_length=200)
+    job_id:       Optional[str]           = Field(None, max_length=200)
     position_sec: Optional[float]         = Field(None, ge=0.0)
     context:      Optional[Dict[str, Any]] = None
+
+    @field_validator("context")
+    @classmethod
+    def _cap_context(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Reject a context above 8 KB serialized."""
+        if v is not None and len(json.dumps(v, default=str).encode()) > 8 * 1024:
+            raise ValueError("context must be at most 8 KB serialized")
+        return v
 
 
 class FeedbackEventResponse(BaseModel):
@@ -603,10 +622,10 @@ class DeleteBatchRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class InstrumentLabRequest(BaseModel):
-    songs:            List[str] = Field(..., description="2+ song names (must have stems)")
+    songs:            List[str] = Field(..., max_length=4, description="2 to 4 song names (must have stems)")
     mode:             str  = Field("targeted", description="'all' for full permutation, 'targeted' for single-stem swaps")
     swap_stems:       Optional[List[str]] = Field(None, description="Which stems to swap (targeted mode only)")
-    target_duration:  Optional[float] = Field(None,  description="Trim each combo to N seconds (None = full length)")
+    target_duration:  Optional[float] = Field(None, le=300, description="Trim each combo to N seconds, at most 300 (None = full length)")
     include_pure:     bool = Field(False, description="Include combos where all stems come from one song")
 
 

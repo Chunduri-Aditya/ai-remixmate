@@ -7,8 +7,11 @@ Dev: Vite localhost ports only — no Streamlit ``:8501``, no GitHub Pages.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import List, Optional, Sequence
+
+logger = logging.getLogger(__name__)
 
 _DEV_ORIGINS: tuple[str, ...] = (
     "http://localhost:5173",
@@ -35,7 +38,10 @@ def resolve_cors_origins(config_origins: Optional[Sequence[str]] = None) -> List
     """
     env = os.environ.get("REMIXMATE_CORS_ORIGINS", "").strip()
     if env:
-        return [o.strip() for o in env.split(",") if o.strip()]
+        origins = [o.strip() for o in env.split(",") if o.strip()]
+        if "*" in origins:
+            logger.warning("Dropped '*' from REMIXMATE_CORS_ORIGINS; list explicit origins instead")
+        return [o for o in origins if o != "*"]
 
     frontend = os.environ.get("REMIXMATE_FRONTEND_URL", "").strip().rstrip("/")
     if frontend:

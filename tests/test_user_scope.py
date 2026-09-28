@@ -540,24 +540,29 @@ def test_crates_migration_adds_user_id_and_backfills(tmp_path, monkeypatch):
     ).fetchone()[0] == "local"
 
 
-def test_crates_uniqueness_is_still_user_blind_phase4(crate_store):
-    """Phase 3 adds the user_id column but NOT per-user uniqueness. These
-    asserts pin that limitation: crates.name is globally UNIQUE and
-    song_favorites' PK is (song_name) alone. Phase 4 must rebuild both keys to
-    include user_id — when it does, flip these and tick DEPLOYMENT_PLAN P4."""
+def test_crates_uniqueness_is_per_user(crate_store):
+    """Inverse of the Phase 3 pin (B2.6). crates carries a UNIQUE index on
+    (user_id, name) and no longer on name alone; song_favorites' PK is
+    (user_id, song_name). So two users can both own "Mix" and both favorite
+    the same song. The behavioural side lives in tests/test_crate_keys.py."""
     c = crate_store
 
     with c._conn() as conn:
-        indexes = conn.exec_driver_sql("PRAGMA index_list(crates)").fetchall()
-        for row in indexes:
+        unique_sets = set()
+        for row in conn.exec_driver_sql("PRAGMA index_list(crates)").fetchall():
+            if not row[2]:  # (seq, name, unique, origin, partial)
+                continue
             idx_cols = [
-                r[2] for r in conn.exec_driver_sql(f"PRAGMA index_info({row[1]})").fetchall()
+                r[2]
+                for r in conn.exec_driver_sql(f'PRAGMA index_info("{row[1]}")').fetchall()
             ]
-            assert idx_cols not in (["user_id", "name"], ["name", "user_id"])
+            unique_sets.add(frozenset(idx_cols))
 
         fav_pk = [
             r[1]
             for r in conn.exec_driver_sql("PRAGMA table_info(song_favorites)").fetchall()
             if r[5]
         ]
-    assert fav_pk == ["song_name"]
+    assert frozenset({"user_id", "name"}) in unique_sets, unique_sets
+    assert frozenset({"name"}) not in unique_sets, "crates.name is still globally UNIQUE"
+    assert set(fav_pk) == {"user_id", "song_name"}, fav_pk

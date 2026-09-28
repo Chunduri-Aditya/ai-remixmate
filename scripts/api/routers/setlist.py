@@ -20,6 +20,8 @@ from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/setlist", tags=["setlist"])
 
+_CSV_MAX_BYTES = 5 * 1024 * 1024
+
 
 # ── Pydantic request/response models ─────────────────────────────────────────
 
@@ -283,7 +285,7 @@ def optimize_setlist(req: OptimizeRequest):
 # ── POST /setlist/import-csv ──────────────────────────────────────────────────
 
 @router.post("/import-csv", response_model=OptimizeResponse)
-async def import_exportify_csv(
+def import_exportify_csv(
     file: UploadFile = File(..., description="Exportify CSV from exportify.net"),
     arc: str = Query("mountain", description="ramp_up | mountain | wave | ramp_down"),
     genius_token: Optional[str] = Query(None, description="Genius API token (optional)"),
@@ -303,7 +305,9 @@ async def import_exportify_csv(
     """
     from scripts.core.setlist_planner import SetlistPlanner, parse_exportify_csv
 
-    content = await file.read()
+    content = file.file.read(_CSV_MAX_BYTES + 1)
+    if len(content) > _CSV_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="CSV too large (max 5 MB)")
 
     try:
         nodes = parse_exportify_csv(content)

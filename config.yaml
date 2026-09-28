@@ -103,6 +103,7 @@ retention:                       # Per-user rendered-mix cleanup (outputs/<uid>/
   mix_max_age_days: 30           # Remove a mix dir whose newest file is older than this
   mix_max_count: 50              # Then keep at most this many mixes per user, oldest first
   sweep_after_render: true       # Run the sweep for the acting user after each render
+  sweep_interval_hours: 6        # Background sweep of every outputs/<uid>/ (first run 60 s after start)
 
 # ---------------------------------------------------------------------------
 database:

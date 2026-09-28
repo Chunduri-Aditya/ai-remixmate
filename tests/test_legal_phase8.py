@@ -231,12 +231,23 @@ def test_admin_flag_and_takedown(signing_key, tmp_path, monkeypatch):
     jid = job_store.create_job(
         "dj_remix", {"user_id": "victim", "session_id": "sess1"}
     )
-    mix_dir = out_root / "victim" / "sess1"
+    # the real layout task_dj_remix writes: <OUTPUTS_DIR>/<owner>/dj_<sid>/<file>
+    mix_dir = out_root / "victim" / "dj_sess1"
     mix_dir.mkdir(parents=True)
     (mix_dir / "mix.wav").write_bytes(b"x")
+    job_store.update_job(
+        jid,
+        result={
+            "session_id": "sess1",
+            "output": str(mix_dir / "mix.wav"),
+            "stream_url": "/outputs/dj_sess1/mix.wav",
+        },
+    )
 
     client = TestClient(_app_gated())
-    admin_tok = _token(signing_key, sub="admin-1", email="admin@example.com")
+    admin_tok = _token(
+        signing_key, sub="admin-1", email="admin@example.com", email_verified=True
+    )
     res = client.post(
         "/admin/user/victim/flag",
         headers={"Authorization": f"Bearer {admin_tok}"},

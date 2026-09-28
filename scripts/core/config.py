@@ -147,6 +147,7 @@ class RetentionConfig:
     mix_max_age_days: int      = 30    # remove a mix dir whose newest mtime is older
     mix_max_count: int         = 50    # then keep at most this many, oldest evicted first
     sweep_after_render: bool   = True  # run the sweep on the acting user after each render
+    sweep_interval_hours: float = 6    # lifespan task sweeps every outputs/<uid>/ this often
 
 
 @dataclass
