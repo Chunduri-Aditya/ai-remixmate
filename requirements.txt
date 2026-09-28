@@ -37,7 +37,8 @@ PyYAML==6.0.2
 mutagen==1.47.0             # read/write audio metadata (ID3, MP4, etc.) — Serato GEOB cue export
 
 # --- Web / API (Phase 1 — backend) ---
-fastapi==0.115.14
+fastapi==0.141.1
+starlette==1.3.1            # pinned: 7 advisories fixed in 1.3.1; fastapi 0.141.1 allows >=0.46
 uvicorn[standard]==0.35.0
 python-multipart==0.0.31    # file upload support for FastAPI
 

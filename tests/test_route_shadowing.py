@@ -10,21 +10,29 @@ was included after library.router in routes.py); these tests pin the fix.
 Pure route-table inspection — no TestClient, no jobs, no audio.
 """
 
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, RouteContext, iter_route_contexts
 
 from scripts.api.routes import router
+
+
+def _api_routes() -> list[RouteContext]:
+    """The flattened route table in dispatch order. FastAPI >= 0.141 keeps
+    `include_router` lazy — `router.routes` holds `_IncludedRouter` entries,
+    not `APIRoute`s — so walk it the way FastAPI's own OpenAPI generator does."""
+    return [
+        rc for rc in iter_route_contexts(router.routes)
+        if isinstance(rc.original_route, APIRoute)
+    ]
 
 
 def _first_matching_route(path: str, method: str) -> APIRoute:
     """Return the first route whose regex matches `path` for `method` —
     i.e. the one FastAPI would actually dispatch to."""
-    for route in router.routes:
-        if not isinstance(route, APIRoute):
+    for rc in _api_routes():
+        if method not in rc.methods:
             continue
-        if method not in route.methods:
-            continue
-        if route.path_regex.match(path):
-            return route
+        if rc.path_regex.match(path):
+            return rc.original_route
     raise AssertionError(f"no route matches {method} {path}")
 
 
@@ -73,10 +81,10 @@ class TestStaticRoutesWinOverDynamic:
         """Generic guard: for every static (no-param) path and method in the
         app, the route FastAPI dispatches to must be that same static route."""
         static_routes = [
-            (r.path, method)
-            for r in router.routes
-            if isinstance(r, APIRoute) and "{" not in r.path
-            for method in r.methods
+            (rc.path, method)
+            for rc in _api_routes()
+            if "{" not in rc.path
+            for method in rc.methods
         ]
         misrouted = []
         for path, method in static_routes:
