@@ -647,16 +647,21 @@ def camelot_modulation(a: str, b: str) -> dict:
 
 def pitch_shift_for_camelot(source: str, target: str) -> int:
     """
-    Calculate the semitone shift needed to transpose from source to target Camelot position.
+    Calculate the semitone shift that makes the source sit harmonically with the target.
 
-    Useful for beatmatching at a consistent pitch.
+    No shift when the pair is already compatible (same code, adjacent number
+    with the same letter, or the relative A/B pair).  Otherwise the smallest
+    shift of at most 3 semitones that lands the source on a code compatible
+    with the target, preferring 0.  A pitch shift keeps the mode, so the
+    landing code keeps the source letter.
 
     Args:
         source: Source Camelot code (e.g., '8A')
         target: Target Camelot code (e.g., '11B')
 
     Returns:
-        Number of semitones to shift (positive = up, negative = down, 0 = no shift)
+        Number of semitones to shift (positive = up, negative = down, 0 = no shift
+        or nothing compatible within 3 semitones)
     """
     try:
         # Parse Camelot codes (int() raises ValueError on a malformed code)
@@ -672,17 +677,20 @@ def pitch_shift_for_camelot(source: str, target: str) -> int:
             _root = _key_name.split()[0]           # 'C', 'G#', 'F#', …
             camelot_to_semitone[_code] = NOTE_NAMES.index(_root)
 
-        semitone_s = camelot_to_semitone.get(source, 0)
-        semitone_t = camelot_to_semitone.get(target, 0)
+        semitone_s = camelot_to_semitone[source]
+        camelot_to_semitone[target]  # KeyError on an unknown target code
 
-        shift = semitone_t - semitone_s
-        # Normalise to ±6 semitones (prefer smaller transposition)
-        if shift > 6:
-            shift -= 12
-        elif shift < -6:
-            shift += 12
+        if camelot_compatible(source, target):
+            return 0
 
-        return int(shift)
+        mode = "minor" if source.endswith("A") else "major"
+        for step in (1, 2, 3):
+            for shift in (-step, step):
+                root = NOTE_NAMES[(semitone_s + shift) % 12]
+                if camelot_compatible(CAMELOT[f"{root} {mode}"], target):
+                    return shift
+
+        return 0
 
     except (ValueError, KeyError):
         return 0

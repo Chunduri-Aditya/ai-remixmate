@@ -220,11 +220,26 @@ def test_tiv_score_within_documented_floor_on_key_templates():
     assert 0.35 <= lo and hi <= 1.0, f"TIV range [{lo:.3f},{hi:.3f}] vs documented [0.36,1.0]"
 
 
-def test_pitch_shift_for_camelot_roundtrip_and_range():
-    from scripts.core.key_detection import CAMELOT, pitch_shift_for_camelot
+def test_pitch_shift_for_camelot_range_and_landing():
+    """B3.3 contract: shifts are capped at 3 semitones, a compatible pair is
+    never shifted, and a non zero shift lands the source on a code compatible
+    with the target. The old round trip identity (shift(a, b) + shift(b, a) == 0
+    mod 12) belonged to raw transposition and does not hold by design."""
+    from scripts.core.key_detection import (
+        CAMELOT,
+        NOTE_NAMES,
+        camelot_compatible,
+        pitch_shift_for_camelot,
+    )
     codes = sorted(set(CAMELOT.values()))
+    code_of = {(NOTE_NAMES.index(k.split()[0]), v[-1]): v for k, v in CAMELOT.items()}
+    tone_of = {v: NOTE_NAMES.index(k.split()[0]) for k, v in CAMELOT.items()}
     for a in codes:
         for b in codes:
             s = pitch_shift_for_camelot(a, b)
-            assert -6 <= s <= 6
-            assert (s + pitch_shift_for_camelot(b, a)) % 12 == 0
+            assert -3 <= s <= 3, (a, b, s)
+            if camelot_compatible(a, b):
+                assert s == 0, (a, b, s)
+            elif s != 0:
+                landing = code_of[((tone_of[a] + s) % 12, a[-1])]
+                assert camelot_compatible(landing, b), (a, b, s, landing)

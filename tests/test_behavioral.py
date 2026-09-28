@@ -154,11 +154,23 @@ class TestCamelotSemitoneTable:
 
     Fix: derive from CAMELOT / NOTE_NAMES (single source of truth).
 
-    Assertions:
-      - Same code → 0 semitones (identity)
-      - Known intervals from the circle of fifths
-      - Normalised to ±6 semitones
+    Assertions (contract from plan B3.3, 2026-09-27, which replaced raw
+    transposition): a pair that is already Camelot compatible (same code,
+    adjacent number with the same letter, or the relative A/B pair) gets 0;
+    otherwise the smallest shift of at most 3 semitones that lands the source
+    on a code compatible with the target; 0 when nothing within 3 qualifies.
     """
+
+    @staticmethod
+    def _spec_compatible(a: str, b: str) -> bool:
+        """Camelot compatibility written from the wheel, not from the module."""
+        na, la = int(a[:-1]), a[-1]
+        nb, lb = int(b[:-1]), b[-1]
+        if a == b:
+            return True
+        if la == lb and (na - nb) % 12 in (1, 11):
+            return True
+        return na == nb and la != lb
 
     SAME_CODE_CASES = [
         '1A', '2A', '3A', '4A', '5A', '6A', '7A', '8A', '9A', '10A', '11A', '12A',
@@ -172,23 +184,27 @@ class TestCamelotSemitoneTable:
             f"pitch_shift_for_camelot({code!r}, {code!r}) should be 0"
         )
 
-    def test_c_to_g_major_is_seven_or_minus_five(self):
-        """C major (8B) → G major (9B): G is 7 semitones above C.
-        After ±6 normalisation, 7 → -5 (shorter path downward)."""
+    def test_c_to_g_major_is_adjacent_so_no_shift(self):
+        """C major (8B) → G major (9B): adjacent Camelot numbers, same letter.
+        B3.3: an already compatible pair is never pitch shifted (was -5 under
+        the raw transposition rule this contract replaced)."""
         from scripts.core.key_detection import pitch_shift_for_camelot
         result = pitch_shift_for_camelot('8B', '9B')
-        # Normalised shift: 7 semitones normalised to −5 (prefer the shorter path)
-        assert result == -5, (
-            f"C major → G major expected -5 semitones (normalised), got {result}"
-        )
+        assert result == 0, f"C major → G major is compatible, expected 0, got {result}"
 
-    def test_a_minor_to_e_minor_is_seven_or_minus_five(self):
-        """A minor (8A) → E minor (9A): same circle-of-fifths step."""
+    def test_a_minor_to_e_minor_is_adjacent_so_no_shift(self):
+        """A minor (8A) → E minor (9A): the same circle of fifths step, so 0."""
         from scripts.core.key_detection import pitch_shift_for_camelot
         result = pitch_shift_for_camelot('8A', '9A')
-        assert result == -5, (
-            f"A minor → E minor expected -5 semitones (normalised), got {result}"
-        )
+        assert result == 0, f"A minor → E minor is compatible, expected 0, got {result}"
+
+    def test_relative_pair_and_clash_pair(self):
+        """8A/8B (relative minor and major) is compatible: 0. 8A → 11A is not:
+        the smallest shift of at most 3 semitones onto a code compatible with
+        11A (10A, 11A, 12A or 11B, same letter kept) is +2 (8A → 10A)."""
+        from scripts.core.key_detection import pitch_shift_for_camelot
+        assert pitch_shift_for_camelot('8A', '8B') == 0
+        assert pitch_shift_for_camelot('8A', '11A') == 2
 
     def test_shift_normalised_to_pm6(self):
         """All computed shifts must be in the range [−6, 6]."""
@@ -203,29 +219,40 @@ class TestCamelotSemitoneTable:
                 )
 
     def test_agrees_with_camelot_and_note_names(self):
-        """Cross-check every (src, tgt) pair against manual derivation from CAMELOT."""
+        """Cross-check every (src, tgt) pair against the B3.3 rule derived by
+        hand from CAMELOT and NOTE_NAMES: 0 when compatible, else a shift of
+        minimal magnitude (at most 3) whose landing code is compatible with the
+        target, else 0."""
         from scripts.core.key_detection import (
             CAMELOT,
             NOTE_NAMES,
             pitch_shift_for_camelot,
         )
-        # Build ground-truth reverse map
         camelot_to_semitone: dict[str, int] = {}
+        semitone_to_code: dict[tuple[int, str], str] = {}
         for key_name, code in CAMELOT.items():
-            root = key_name.split()[0]
-            camelot_to_semitone[code] = NOTE_NAMES.index(root)
+            root, mode = key_name.split()
+            tone = NOTE_NAMES.index(root)
+            camelot_to_semitone[code] = tone
+            semitone_to_code[(tone, code[-1])] = code
 
         for src, s_tone in camelot_to_semitone.items():
-            for tgt, t_tone in camelot_to_semitone.items():
-                expected = t_tone - s_tone
-                if expected > 6:
-                    expected -= 12
-                elif expected < -6:
-                    expected += 12
+            for tgt in camelot_to_semitone:
                 actual = pitch_shift_for_camelot(src, tgt)
-                assert actual == expected, (
-                    f"pitch_shift_for_camelot({src!r}, {tgt!r}): "
-                    f"expected {expected}, got {actual}"
+                if self._spec_compatible(src, tgt):
+                    assert actual == 0, f"{src}->{tgt} is compatible, got {actual}"
+                    continue
+                candidates = [
+                    k for k in range(-3, 4) if k != 0
+                    and self._spec_compatible(semitone_to_code[((s_tone + k) % 12, src[-1])], tgt)
+                ]
+                if not candidates:
+                    assert actual == 0, f"{src}->{tgt}: nothing within 3, got {actual}"
+                    continue
+                best = min(abs(k) for k in candidates)
+                assert actual in candidates and abs(actual) == best, (
+                    f"pitch_shift_for_camelot({src!r}, {tgt!r}) = {actual}; "
+                    f"compatible landings within 3: {candidates}"
                 )
 
 
