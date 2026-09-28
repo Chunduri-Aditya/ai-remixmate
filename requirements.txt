@@ -39,14 +39,14 @@ mutagen==1.47.0             # read/write audio metadata (ID3, MP4, etc.) — Ser
 # --- Web / API (Phase 1 — backend) ---
 fastapi==0.115.14
 uvicorn[standard]==0.35.0
-python-multipart==0.0.20    # file upload support for FastAPI
+python-multipart==0.0.31    # file upload support for FastAPI
 
 # --- Auth (Phase 4 — Supabase JWT) ---
 # scripts/api/auth.py verifies Supabase RS256 access tokens against the project
 # JWKS. Imported lazily and only exercised when REMIXMATE_AUTH_ENABLED is truthy,
 # so local single-user dev runs without a token. [crypto] pulls `cryptography`
 # for RS256.
-PyJWT[crypto]==2.10.1
+PyJWT[crypto]==2.13.0
 
 # --- Persistence (SQLAlchemy Core) ---
 # scripts/core/db.py builds one engine per store from a SQLite path, or one
@@ -58,7 +58,7 @@ psycopg[binary]==3.2.13
 
 # --- Progress / CLI ---
 tqdm==4.67.1
-click==8.2.1
+click==8.3.3
 
 # --- Loudness / mastering (AI Studio per-stem LUFS analysis) ---
 pyloudnorm>=0.1.1              # ITU-R BS.1770-4 integrated loudness + true peak
@@ -83,11 +83,14 @@ pyloudnorm>=0.1.1              # ITU-R BS.1770-4 integrated loudness + true peak
 # if VampNet is not installed — all other AI Studio features work without it.
 
 # --- Utilities ---
-requests==2.32.4
+requests==2.33.0
 tenacity==9.1.2
 python-dateutil==2.9.0.post0
 packaging==25.0
 typing_extensions==4.14.1
+# Transitive, pinned for security fixes
+anyio==4.14.2
+msgpack==1.2.1
 
 # =============================================================================
 # MUSIC SOURCING
