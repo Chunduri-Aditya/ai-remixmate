@@ -204,7 +204,7 @@ class TransitionPlan:
     # BPM delta to bridge
     bpm_a: float
     bpm_b: float
-    tempo_shift_ratio: float  # bpm_b / bpm_a
+    tempo_shift_ratio: float  # bpm_a / bpm_b (stretch rate that pulls B to A's tempo)
 
     # EQ plan
     eq: EQPlan
@@ -513,7 +513,7 @@ def plan_transition(
     # --- BPM bridge ---
     bpm_a = song_a.bpm
     bpm_b = song_b.bpm
-    ratio = bpm_b / bpm_a if bpm_a > 0 else 1.0
+    ratio = bpm_a / bpm_b if bpm_a > 0 and bpm_b > 0 else 1.0
     transition_seconds = transition_bars * (60.0 / bpm_a) * 4
 
     # --- EQ plan ---

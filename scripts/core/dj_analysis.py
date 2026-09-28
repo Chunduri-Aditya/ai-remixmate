@@ -231,7 +231,7 @@ class TransitionPlan:
     # BPM delta to bridge
     bpm_a: float
     bpm_b: float
-    tempo_shift_ratio: float  # bpm_b / bpm_a
+    tempo_shift_ratio: float  # bpm_a / bpm_b (stretch rate that pulls B to A's tempo)
 
     # EQ plan
     eq: EQPlan
@@ -407,7 +407,7 @@ def analyze_structure(
             key_profile, kr.key_name, kr.mode, kr.camelot, kr.confidence,
         )
     except Exception as exc:
-        log.debug("Key detection (profile=%s) failed: %s", key_profile, exc)
+        log.warning("Key detection (profile=%s) failed: %s", key_profile, exc)
 
     # ── Per-phrase key detection (DJ_ENGINE_IMPROVEMENT_PLAN.md §1.3) ───────────
     # The whole-track kr/_key_tuple above stays exactly as it was (backward
@@ -445,7 +445,7 @@ def analyze_structure(
                     " → ".join(f"{s.type}:{s.camelot}" for s in struct.sections),
                 )
     except Exception as exc:
-        log.debug("Per-phrase key detection (profile=%s) failed: %s", key_profile, exc)
+        log.warning("Per-phrase key detection (profile=%s) failed: %s", key_profile, exc)
 
     # ── Enrich with music intelligence ──────────────────────────────
     try:
@@ -872,7 +872,7 @@ def plan_transition(
     # --- BPM bridge ---
     bpm_a = song_a.bpm
     bpm_b = song_b.bpm
-    ratio = bpm_b / bpm_a if bpm_a > 0 else 1.0
+    ratio = bpm_a / bpm_b if bpm_a > 0 and bpm_b > 0 else 1.0
     transition_seconds = transition_bars * (60.0 / bpm_a) * 4
 
     # ── Psychoacoustic consonance — computed FIRST so shortening applies

@@ -25,6 +25,7 @@ remix:
   optimizer_iterations: 50    # random-search iterations per remix
   max_pitch_shift_semitones: 2  # maximum allowed pitch correction
   beat_alignment_tolerance_ms: 40  # max allowed beat phase error
+  max_song_seconds: 180       # load cap per song for DJ remix/chain renders; a truncated song B fades out over 3 s
 
 # ---------------------------------------------------------------------------
 separation:

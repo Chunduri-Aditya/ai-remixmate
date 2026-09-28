@@ -986,11 +986,13 @@ class TestDJTransitionPlanner:
         assert abs(plan.tempo_shift_ratio - 1.0) < 0.01
 
     def test_tempo_shift_ratio_different_bpm(self):
+        """B is stretched toward A: ratio = bpm_a / bpm_b (ARCHITECTURE.md:348),
+        so a 140 BPM B against a 128 BPM A gets a rate below 1 (slow down)."""
         from scripts.core.dj_engine import plan_transition
         a = self._make_structure(128.0)
         b = self._make_structure(140.0)
         plan = plan_transition(a, b)
-        assert abs(plan.tempo_shift_ratio - 140.0 / 128.0) < 0.01
+        assert abs(plan.tempo_shift_ratio - 128.0 / 140.0) < 0.01
 
 
 # ---------------------------------------------------------------------------

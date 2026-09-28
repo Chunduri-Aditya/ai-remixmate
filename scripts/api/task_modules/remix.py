@@ -17,7 +17,7 @@ import librosa
 import numpy as np
 import soundfile as sf
 
-from scripts.api.jobs import update_job
+from scripts.api.jobs import is_cancelled, update_job
 from scripts.core.audio_source import load_source_audio
 from scripts.core.audit import log_audit
 from scripts.core.license import load_license
@@ -199,8 +199,11 @@ def _mix_credits(song_names: list) -> list:
     return credits
 
 
-def _write_mix_credits(out_dir: Path, song_names: list) -> list:
+def _write_mix_credits(out_dir: Path, song_names: list, session_id: Optional[str] = None) -> list:
     """Write `CREDITS.txt` + `manifest.json` into `out_dir`; return the credits.
+
+    `manifest.session` is the render's `session_id` (the value returned to the
+    client), falling back to the folder name when none is given.
 
     Never raises — a credits-write failure must not fail an otherwise-good
     render. The returned list also goes into the task response so the client
@@ -230,7 +233,7 @@ def _write_mix_credits(out_dir: Path, song_names: list) -> list:
         (out_dir / "manifest.json").write_text(
             json.dumps(
                 {
-                    "session": out_dir.name,
+                    "session": session_id or out_dir.name,
                     "generated_utc": generated,
                     "songs": list(song_names),
                     "credits": credits,
@@ -258,6 +261,30 @@ def _sweep_user_mixes() -> None:
         log.info("mix retention: swept %d old mix(es) for the acting user", len(res.removed))
 
 
+def _max_song_seconds() -> float:
+    """Per song load cap for DJ renders (config `remix.max_song_seconds`)."""
+    from scripts.core.config import cfg
+
+    return float(cfg.remix.max_song_seconds)
+
+
+_TRUNCATION_FADE_S = 3.0
+
+
+def _fade_out_tail(audio: np.ndarray, sr: int, seconds: float = _TRUNCATION_FADE_S) -> np.ndarray:
+    """Fade the last `seconds` of `audio` to silence (squared linear ramp, ends at 0).
+
+    Applied when song B was cut at the load cap, so the mix ends in a fade
+    instead of a hard cut."""
+    n = min(len(audio), int(seconds * sr))
+    if n <= 0:
+        return audio
+    out = np.array(audio, copy=True)
+    ramp = np.square(np.linspace(1.0, 0.0, n, dtype=np.float32))
+    out[-n:] = out[-n:] * ramp
+    return out
+
+
 def task_dj_remix(
     job_id: str,
     song_a: str,
@@ -279,8 +306,12 @@ def task_dj_remix(
     # Resolve source audio per song: full.wav → full_enhanced.wav → stem sum.
     # Raises FileNotFoundError(song name) if the song has no usable audio.
     sr = 44100
-    audio_a, _ = load_source_audio(song_a, sr=sr, mono=True, duration=180.0)
-    audio_b, _ = load_source_audio(song_b, sr=sr, mono=True, duration=180.0)
+    max_s = _max_song_seconds()
+    audio_a, _ = load_source_audio(song_a, sr=sr, mono=True, duration=max_s)
+    audio_b, _ = load_source_audio(song_b, sr=sr, mono=True, duration=max_s)
+    # B filled the whole load window (10 ms tolerance): it was cut at the cap,
+    # so the mix, which ends on B, gets a fade out instead of a hard cut.
+    b_truncated = len(audio_b) >= int(max_s * sr) - sr // 100
 
     update_job(job_id, progress=0.25, message="Analysing structure…")
 
@@ -401,6 +432,8 @@ def task_dj_remix(
     # reference-render sound); current → live chain at audio.target_lufs
     # (default −14, the streaming normalization level — see _resolve_engine).
     mix_mastered, quality_report = eng.master_mix(mix, sr=sr, target_lufs=eng.dj_target_lufs)
+    if b_truncated:
+        mix_mastered = _fade_out_tail(mix_mastered, sr)
 
     update_job(job_id, progress=0.90, message="Saving output…")
 
@@ -411,10 +444,14 @@ def task_dj_remix(
 
     sf.write(str(out_path), mix_mastered, sr, subtype="PCM_24")
 
-    credits = _write_mix_credits(out_dir, [song_a, song_b])
+    credits = _write_mix_credits(out_dir, [song_a, song_b], session_id)
 
     if spectral_info:
-        record_render(session_id, spectral_info)
+        try:
+            record_render(session_id, spectral_info)
+        except OSError as exc:   # a data/ write failure never fails a finished render
+            log.warning("record_render: could not store spectral history for %s: %s",
+                        session_id, exc)
 
     # Compute AI transition score if music intelligence features are available
     ts_data: dict = {}
@@ -518,16 +555,23 @@ def task_dj_chain(
     # ── Load audio (full.wav → full_enhanced.wav → stem sum per song) ──────
     # load_source_audio raises FileNotFoundError(name) for any unusable song.
     sr = 44100
+    max_s = _max_song_seconds()
     audios = []
     for idx, name in enumerate(songs):
+        if is_cancelled(job_id):   # stop between songs; the job stays CANCELLED
+            log.info("dj chain %s cancelled after loading %d of %d songs", job_id, idx, n)
+            return {"cancelled": True}
         prog = 0.02 + 0.18 * (idx / n)
         update_job(job_id, progress=prog, message=f"Loading {songs[idx][:30]}…")
-        audio, _ = load_source_audio(name, sr=sr, mono=True, duration=180.0)
+        audio, _ = load_source_audio(name, sr=sr, mono=True, duration=max_s)
         audios.append(audio)
 
     # ── Analyse structure ────────────────────────────────────────────────
     structures = []
     for idx, audio in enumerate(audios):
+        if is_cancelled(job_id):
+            log.info("dj chain %s cancelled after analysing %d of %d songs", job_id, idx, n)
+            return {"cancelled": True}
         prog = 0.20 + 0.25 * (idx / n)
         update_job(job_id, progress=prog, message=f"Analysing structure {idx+1}/{n}…")
         structures.append(eng.analyze(audio, sr))
@@ -595,7 +639,7 @@ def task_dj_chain(
 
     sf.write(str(out_path), mix_mastered, sr, subtype="PCM_24")
 
-    credits = _write_mix_credits(out_dir, list(songs))
+    credits = _write_mix_credits(out_dir, list(songs), session_id)
 
     # Per-transition summary (include harmonic scores + key data)
     transitions = []
@@ -716,7 +760,11 @@ def task_remix_preview(
     sf.write(str(out_path), preview_audio, sr, subtype="PCM_16")
 
     if spectral_info:
-        record_render(session_id, spectral_info)
+        try:
+            record_render(session_id, spectral_info)
+        except OSError as exc:   # a data/ write failure never fails a finished render
+            log.warning("record_render: could not store spectral history for %s: %s",
+                        session_id, exc)
 
     duration_sec = round(len(preview_audio) / sr, 1)
     log_audit("remix_preview_complete", resource=str(out_path), job_id=job_id,

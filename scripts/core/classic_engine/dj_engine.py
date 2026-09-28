@@ -858,14 +858,14 @@ class DJEngine:
             bridge_beats = [None] * (n - 1)
 
         # ── Pre-stretch: warp all songs to Song 1's BPM ──────────────────
-        # tracks[0] is the reference; tracks[i>0] are stretched so their
-        # time-stretch ratio = original_bpm_i / bpm_song1.
+        # tracks[0] is the reference; tracks[i>0] are stretched with
+        # time-stretch rate = bpm_song1 / original_bpm_i (rate > 1 shortens).
         bpm1 = plans[0].bpm_a
         stretch_ratios: list = [1.0]
         stretched: list = [tracks[0]]
         for i in range(1, n):
             orig_bpm = plans[i - 1].bpm_b
-            ratio    = orig_bpm / max(bpm1, 1.0)   # speed-up factor (bpm_b/bpm_a)
+            ratio    = bpm1 / max(orig_bpm, 1.0)   # stretch rate (bpm_a/bpm_b)
             stretch_ratios.append(ratio)
             stretched.append(_time_stretch(tracks[i], ratio))
             log.info(

@@ -51,6 +51,9 @@ class RemixConfig:
     optimizer_iterations: int        = 50
     max_pitch_shift_semitones: float = 2.0
     beat_alignment_tolerance_ms: float = 40.0
+    # Load cap (seconds) per song for task_dj_remix / task_dj_chain; env
+    # override REMIXMATE_REMIX_MAX_SONG_SECONDS.
+    max_song_seconds: int            = 180
 
 
 @dataclass
