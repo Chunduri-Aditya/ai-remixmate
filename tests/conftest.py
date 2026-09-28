@@ -70,18 +70,18 @@ if str(_PROJECT_ROOT) not in sys.path:
 # log path derives from DATA_DIR directly, so REMIXMATE_DATA_DIR covers it.)
 #
 # LIBRARY_DIR is deliberately left pointing at the real shared catalog — tests
-# read from it and never write; see the deployment plan, Phase 0. A caller may
-# pre-set REMIXMATE_LIBRARY_OUTPUTS_DIR (e.g. CI) to opt out of the shim.
-if not os.environ.get("REMIXMATE_LIBRARY_OUTPUTS_DIR"):
+# read from it and never write; see the deployment plan, Phase 0. Pre-set
+# storage vars are overwritten; the only opt out is REMIXMATE_TESTS_USE_REAL_DATA=1.
+if os.environ.get("REMIXMATE_TESTS_USE_REAL_DATA") != "1":
     _TEST_STORAGE_TMP = tempfile.TemporaryDirectory(prefix="remixmate-test-storage-")
     _test_storage_root = Path(_TEST_STORAGE_TMP.name)
     _test_data_dir = _test_storage_root / "data"
     os.environ["REMIXMATE_LIBRARY_OUTPUTS_DIR"] = str(_test_storage_root / "outputs")
-    os.environ.setdefault("REMIXMATE_DATA_DIR", str(_test_data_dir))
-    os.environ.setdefault("REMIXMATE_METADATA_CACHE_PATH", str(_test_data_dir / "metadata.db"))
-    os.environ.setdefault("REMIXMATE_DATABASE_PATH", str(_test_data_dir / "remixmate.db"))
-    os.environ.setdefault(
-        "REMIXMATE_DATABASE_EMBEDDINGS_PATH", str(_test_data_dir / "song_embeddings.json")
+    os.environ["REMIXMATE_DATA_DIR"] = str(_test_data_dir)
+    os.environ["REMIXMATE_METADATA_CACHE_PATH"] = str(_test_data_dir / "metadata.db")
+    os.environ["REMIXMATE_DATABASE_PATH"] = str(_test_data_dir / "remixmate.db")
+    os.environ["REMIXMATE_DATABASE_EMBEDDINGS_PATH"] = str(
+        _test_data_dir / "song_embeddings.json"
     )
 
 

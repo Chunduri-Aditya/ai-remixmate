@@ -7,13 +7,14 @@
 -r requirements.txt          # include all production deps
 
 # --- Testing ---
-pytest==8.4.0
-pytest-asyncio==0.25.3      # for testing async FastAPI routes
+pytest==9.0.3
+pytest-asyncio==1.4.0      # for testing async FastAPI routes
+httpx==0.28.1               # starlette TestClient transport (fastapi.testclient imports it)
 
 # --- Code quality ---
-black==25.1.0               # formatter
-ruff==0.12.0                # fast linter (replaces flake8 + isort)
-mypy==1.16.0                # static type checker
+black==26.5.1               # formatter
+ruff==0.15.21                # fast linter (replaces flake8 + isort)
+mypy==2.2.0                # static type checker
 
 # --- Pre-commit hooks ---
-pre-commit==4.2.0
+pre-commit==4.6.0

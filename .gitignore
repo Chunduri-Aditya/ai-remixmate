@@ -14,12 +14,19 @@ audio_output/
 output/
 stems/
 lyrics/
-models/
+/models/
 Downloads/
 
 # ── Virtual environment ──────────────────────────────────────
 remix-env/
 .venv/
+.venv-old/
+.venv-new/
+catalog/
+catalog_data/
+library_quarantine/
+app/deploy/remixmate.env
+.streamlit/secrets.toml
 venv/
 env/
 

@@ -121,7 +121,8 @@ clean verify harness.
       `REMIXMATE_DATABASE_EMBEDDINGS_PATH`. paths.py freezes its constants at
       import and consumers re-bind one level deeper (`jobs._DB_PATH = DATA_DIR /
       "jobs.db"`), so an after-the-fact reassign is useless. `LIBRARY_DIR` left
-      global. A caller that pre-sets `REMIXMATE_LIBRARY_OUTPUTS_DIR` opts out.
+      global. The shim always runs; the only opt out is `REMIXMATE_TESTS_USE_REAL_DATA=1`
+      (a pre-set `REMIXMATE_LIBRARY_OUTPUTS_DIR` is overwritten).
 - [x] `scripts/core/paths.py`: added the `REMIXMATE_DATA_DIR` override (it had
       none — only `library_dir` / `outputs_dir` had config/env hooks) via the
       existing `_resolve_dir()`; `import os`; header comment.
