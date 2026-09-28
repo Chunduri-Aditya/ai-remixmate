@@ -1,0 +1,509 @@
+{
+ "argv": [
+  "--source",
+  "archive",
+  "netlabel ambient",
+  "--search-only",
+  "--limit",
+  "2"
+ ],
+ "exit": 0,
+ "responses": [
+  {
+   "method": "get",
+   "requested_url": "https://archive.org/advancedsearch.php",
+   "params": {
+    "q": "(netlabel ambient) AND mediatype:audio",
+    "fl[]": [
+     "identifier",
+     "title",
+     "creator",
+     "licenseurl"
+    ],
+    "rows": 2,
+    "output": "json"
+   },
+   "final_url": "https://archive.org/advancedsearch.php?q=%28netlabel+ambient%29+AND+mediatype%3Aaudio&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=creator&fl%5B%5D=licenseurl&rows=2&output=json",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "responseHeader": {
+     "status": 0,
+     "QTime": 405,
+     "params": {
+      "query": "(((text:netlabel OR text:netlabel OR text__reviews:netlabel)(text:ambient OR text:ambient OR text__reviews:ambient)) OR (text:&quot;netlabel ambient&quot; OR text:&quot;netlabel ambient&quot; OR text__reviews:&quot;netlabel ambient&quot;)) AND mediatype:audio",
+      "qin": "(netlabel ambient) AND mediatype:audio",
+      "fields": "identifier,title,creator,licenseurl",
+      "wt": "json",
+      "rows": 2,
+      "start": 0
+     }
+    },
+    "response": {
+     "numFound": 4615,
+     "start": 0,
+     "docs": [
+      {
+       "creator": "Lost Elements Netlabel",
+       "identifier": "le004PolarAviation-MemoriesEp",
+       "licenseurl": "http://creativecommons.org/licenses/by-nc-nd/3.0/",
+       "title": "_"
+      },
+      {
+       "creator": "Exomène",
+       "identifier": "GHGR020116",
+       "licenseurl": "http://creativecommons.org/licenses/by-nc-nd/3.0/",
+       "title": "Objective Tinnitus Live Part 6 GHGR 020116"
+      }
+     ]
+    }
+   },
+   "text": null
+  },
+  {
+   "method": "get",
+   "requested_url": "https://archive.org/metadata/le004PolarAviation-MemoriesEp",
+   "params": null,
+   "final_url": "https://archive.org/metadata/le004PolarAviation-MemoriesEp",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "alternate_locations": {
+     "servers": [
+      {
+       "server": "dn710708.ca.archive.org",
+       "dir": "/0/items/le004PolarAviation-MemoriesEp"
+      }
+     ],
+     "workable": [
+      {
+       "server": "dn710708.ca.archive.org",
+       "dir": "/0/items/le004PolarAviation-MemoriesEp"
+      }
+     ]
+    },
+    "created": 1790589435,
+    "d1": "ia600506.us.archive.org",
+    "d2": "ia800506.us.archive.org",
+    "dir": "/12/items/le004PolarAviation-MemoriesEp",
+    "files": [
+     {
+      "name": "LE004.zip",
+      "source": "original",
+      "format": "ZIP",
+      "mtime": "1306216756",
+      "size": "37070762",
+      "md5": "89d8656ce3ce0fb1c414fa2c09aba218",
+      "crc32": "4ec194de",
+      "sha1": "006a7a5e2c727b89954126626eeab56e770e2c41",
+      "filecount": "5"
+     },
+     {
+      "name": "Le004Cover.jpg",
+      "source": "original",
+      "format": "JPEG",
+      "title": "LE004 Cover",
+      "mtime": "1306217958",
+      "size": "562796",
+      "md5": "f43446b16e5a25342b07e89315643c65",
+      "crc32": "8457d9bb",
+      "sha1": "b18c0bb2e8a81881299977a6a14c05e8cde05116",
+      "rotation": "0"
+     },
+     {
+      "name": "Le004Cover_thumb.jpg",
+      "source": "derivative",
+      "format": "JPEG Thumb",
+      "original": "Le004Cover.jpg",
+      "mtime": "1415107752",
+      "size": "4487",
+      "md5": "b0a606819707342b08ec09ae6755d893",
+      "crc32": "a582e7e4",
+      "sha1": "418e4fd08dfa1a1d8925f943a16a78dc8397a234"
+     },
+     {
+      "name": "LostElements004Info.doc",
+      "source": "original",
+      "format": "Word Document",
+      "title": "Lost Elements 004 Info",
+      "mtime": "1306217950",
+      "size": "588800",
+      "md5": "ca7d7312e54bdf4d370358389e5f63ee",
+      "crc32": "1ee71af",
+      "sha1": "533fc6eedeba1339b3842fd2dcb2b1fa384a3a2f"
+     },
+     {
+      "name": "PolarAviation-MemoriesOfTheSea.mp3",
+      "source": "original",
+      "format": "VBR MP3",
+      "title": "Polar Aviation - Memories of the Sea",
+      "mtime": "1306217941",
+      "size": "8683209",
+      "md5": "b16a8931faa15a03c02cf5ceab33fa4e",
+      "crc32": "b91711ec",
+      "sha1": "4b29555f0baba6b997c741809f2dec06373fe3b0",
+      "creator": "Polar Aviation",
+      "album": "LE004 [Memories EP]",
+      "track": "2",
+      "length": "217.08",
+      "height": "0",
+      "width": "0",
+      "artist": "Polar Aviation",
+      "genre": "Ambient Dub / Deep Tech",
+      "external-identifier": "urn:acoustid:26fb3307-cbac-4575-b49a-a33d499e313b",
+      "external-identifier-match-date": "acoustid:2019-03-09T07:12:25Z"
+     },
+     {
+      "name": "PolarAviation-MemoriesOfTheSea.ogg",
+      "source": "derivative",
+      "format": "Ogg Vorbis",
+      "original": "PolarAviation-MemoriesOfTheSea.mp3",
+      "mtime": "1415107751",
+      "size": "2196685",
+      "md5": "69f56c0921b242576eb173166aec33f7",
+      "crc32": "5bfe0f7b",
+      "sha1": "4073bd20c0bed01badd9204680acde4ee24a7112",
+      "length": "217.05",
+      "height": "0",
+      "width": "0"
+     },
+     {
+      "name": "PolarAviation-MemoriesOfTheSea.png",
+      "source": "derivative",
+      "format": "PNG",
+      "original": "PolarAviation-MemoriesOfTheSea.mp3",
+      "mtime": "1415107774",
+      "size": "8799",
+      "md5": "35410392a485d8b5d9470d85f7f6df46",
+      "crc32": "3686ff56",
+      "sha1": "7a61829bb9bee31048711012d367e8f3661a4be9"
+     },
+     {
+      "name": "PolarAviation-MidnightAtOgdenHearth.mp3",
+      "source": "original",
+      "format": "VBR MP3",
+      "title": "Polar Aviation - Midnight at Ogden Hearth",
+      "mtime": "1306217711",
+      "size": "16763405",
+      "md5": "fca5adfd531cbd29a95e9cd8c3b7d44f",
+      "crc32": "e7a14e28",
+      "sha1": "cd3f217a58449783d87498e88fdab11616f6a0fe",
+      "creator": "Polar Aviation",
+      "album": "LE004 [Memories EP]",
+      "track": "3",
+      "length": "419.08",
+      "height": "0",
+      "width": "0",
+      "artist": "Polar Aviation",
+      "genre": "Deep U.K. Dubstep",
+      "external-identifier": "urn:acoustid:d1b4252d-f13e-48bf-a61d-9eba6d7f71de",
+      "external-identifier-match-date": "acoustid:2019-03-09T07:12:25Z"
+     },
+     {
+      "name": "PolarAviation-MidnightAtOgdenHearth.ogg",
+      "source": "derivative",
+      "format": "Ogg Vorbis",
+      "original": "PolarAviation-MidnightAtOgdenHearth.mp3",
+      "mtime": "1415107736",
+      "size": "4692127",
+      "md5": "aab142b5bfda16a8ef4484ab1a76eb3f",
+      "crc32": "b9cf77c5",
+      "sha1": "03da6b38069175ca93d35d193a096e320861821f",
+      "length": "419.06",
+      "height": "0",
+      "width": "0"
+     },
+     {
+      "name": "PolarAviation-MidnightAtOgdenHearth.png",
+      "source": "derivative",
+      "format": "PNG",
+      "original": "PolarAviation-MidnightAtOgdenHearth.mp3",
+      "mtime": "1415107766",
+      "size": "7149",
+      "md5": "d4945dee6eb4f9a32ce0dc3182e17030",
+      "crc32": "86d7cde4",
+      "sha1": "fd82d295e778f83aa059e700f4d4b7a10c794f78"
+     },
+     {
+      "name": "__ia_thumb.jpg",
+      "source": "original",
+      "mtime": "1682499830",
+      "size": "10971",
+      "md5": "de7f7887d00f4a34a65d03df4eef7685",
+      "crc32": "470dae80",
+      "sha1": "6eed024da34401ae1d9e9516635fe1e9d4ff4f4e",
+      "format": "Item Tile",
+      "rotation": "0"
+     },
+     {
+      "name": "le004PolarAviation-MemoriesEp_archive.torrent",
+      "source": "metadata",
+      "btih": "6a04b13dd7e3f2f0680fa10a167dc451dd5628e3",
+      "mtime": "1682499831",
+      "size": "6089",
+      "md5": "ca4fba6209c266116ddd4ed907ebc083",
+      "crc32": "721ef72a",
+      "sha1": "015348e8ca829aa64f748b5c4f039604a5aca3dc",
+      "format": "Archive BitTorrent"
+     },
+     {
+      "name": "le004PolarAviation-MemoriesEp_files.xml",
+      "source": "metadata",
+      "format": "Metadata",
+      "md5": "3644cf88086f6c80e9d65e801637afb2",
+      "summation": "md5"
+     },
+     {
+      "name": "le004PolarAviation-MemoriesEp_meta.xml",
+      "source": "metadata",
+      "format": "Metadata",
+      "mtime": "1682499829",
+      "size": "1736",
+      "md5": "9a52fa1570c25b05d6328572d9c1c5f7",
+      "crc32": "3af6674e",
+      "sha1": "9105a44802551079c48fae9475b107f426e64d87"
+     }
+    ],
+    "files_count": 14,
+    "item_last_updated": 1682499831,
+    "item_size": 70597015,
+    "metadata": {
+     "identifier": "le004PolarAviation-MemoriesEp",
+     "title": "_",
+     "creator": "Lost Elements Netlabel",
+     "mediatype": "audio",
+     "collection": [
+      "folksoundomy_music_unsorted",
+      "folksoundomy_music",
+      "folksoundomy"
+     ],
+     "subject": "Polar Aviation, Lost Elements Netlabel, LE004 Memories EP, Ambient Electronica, Dub Tech, U.K. Dub Step, Deep Experimental Electronics,",
+     "licenseurl": "http://creativecommons.org/licenses/by-nc-nd/3.0/",
+     "publicdate": "2011-05-24 06:05:32",
+     "addeddate": "2011-05-24 06:04:20",
+     "uploader": "WizardofPendle@aol.com",
+     "updater": [
+      "Lost Elements",
+      "Lost Elements",
+      "Lost Elements",
+      "Lost Elements",
+      "Lost Elements"
+     ],
+     "updatedate": [
+      "2011-05-24 06:10:26",
+      "2012-02-12 17:53:56",
+      "2012-02-12 17:56:00",
+      "2012-02-12 21:35:45",
+      "2012-02-12 21:38:37"
+     ],
+     "notes": "LE004 [Polar Aviation - Memories EP] is a CC Licence release via Lost Elements Netlabel.\n\nTracks 1 and 2 written and produced by Polar Aviation in 2011. Cover photography by Polar Aviation. The Memories E.P. and all work there within is copyrighted under Creative Commons license: Attribution-Noncommercial-No Derivative Works 3.0.",
+     "curation": "[curator]malware@archive.org[/curator][date]20140327021138[/date][comment]checked for malware[/comment]",
+     "backup_location": "ia903700_9",
+     "external_metadata_update": "2019-03-09T07:12:25Z"
+    },
+    "server": "ia800506.us.archive.org",
+    "uniq": 245262800,
+    "workable_servers": [
+     "ia800506.us.archive.org",
+     "ia600506.us.archive.org"
+    ]
+   },
+   "text": null
+  },
+  {
+   "method": "get",
+   "requested_url": "https://archive.org/metadata/GHGR020116",
+   "params": null,
+   "final_url": "https://archive.org/metadata/GHGR020116",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "alternate_locations": {
+     "servers": [
+      {
+       "server": "dn710903.ca.archive.org",
+       "dir": "/0/items/GHGR020116"
+      }
+     ],
+     "workable": [
+      {
+       "server": "dn710903.ca.archive.org",
+       "dir": "/0/items/GHGR020116"
+      }
+     ]
+    },
+    "created": 1790589436,
+    "d1": "ia903209.us.archive.org",
+    "d2": "ia803209.us.archive.org",
+    "dir": "/11/items/GHGR020116",
+    "files": [
+     {
+      "name": "GHGR020116_archive.torrent",
+      "source": "metadata",
+      "btih": "eef6de2e3c44a13f63f23585a4e7497f4b8a45ea",
+      "mtime": "1641244736",
+      "size": "6096",
+      "md5": "a5e28093a84e2ba952aa8188a81bc96d",
+      "crc32": "6bcdd8ef",
+      "sha1": "5e38e38fd5a4744eefd90316e4911be3f2213bab",
+      "format": "Archive BitTorrent"
+     },
+     {
+      "name": "GHGR020116_files.xml",
+      "source": "original",
+      "format": "Metadata",
+      "md5": "eda6c0e78bb2ef8d8cd3786953fdd71d",
+      "summation": "md5"
+     },
+     {
+      "name": "GHGR020116_meta.sqlite",
+      "source": "original",
+      "mtime": "1476608639",
+      "size": "36864",
+      "md5": "4fd22a452a9b161fa9fe63039eec27ea",
+      "crc32": "6912b153",
+      "sha1": "6f47e759e27a2d165cf137aa62dd43b96e6ff3eb",
+      "format": "Metadata"
+     },
+     {
+      "name": "GHGR020116_meta.xml",
+      "source": "original",
+      "mtime": "1641244735",
+      "size": "5433",
+      "format": "Metadata",
+      "md5": "1cfdfa3dabcbbe1a0be5457b5aacdcaa",
+      "crc32": "185f35c0",
+      "sha1": "a1934fda9b00aacafa51a056a0b4e3cf4bfe7289"
+     },
+     {
+      "name": "Objective Tinnitus - Part 6 GHGR 020116 - 01 Part 6.afpk",
+      "source": "derivative",
+      "format": "Columbia Peaks",
+      "original": "Objective Tinnitus - Part 6 GHGR 020116 - 01 Part 6.mp3",
+      "mtime": "1476608852",
+      "size": "390736",
+      "md5": "4c5933a9987886cbb4e3379448d33cbd",
+      "crc32": "99c1464c",
+      "sha1": "090035503dfbcc5e9c9bc995f09f5001806e5260"
+     },
+     {
+      "name": "Objective Tinnitus - Part 6 GHGR 020116 - 01 Part 6.mp3",
+      "source": "original",
+      "mtime": "1476608618",
+      "size": "67266715",
+      "md5": "179acecbb975f1865bdba47621126c3e",
+      "crc32": "d38fd5f6",
+      "sha1": "9b63078fc0539e616e7810eb3f76113b8a72f5fe",
+      "format": "VBR MP3",
+      "length": "1678.24",
+      "height": "700",
+      "width": "700",
+      "title": "Part 6",
+      "artist": "Objective Tinnitus",
+      "track": "1",
+      "album": "Part 6 GHGR 020116",
+      "external-identifier-match-date": "acoustid:2019-03-11T03:49:24Z",
+      "external-identifier": "urn:acoustid:111ae909-1503-4480-9a30-6f889c61c2ef"
+     },
+     {
+      "name": "Objective Tinnitus - Part 6 GHGR 020116 - 01 Part 6.ogg",
+      "source": "derivative",
+      "format": "Ogg Vorbis",
+      "original": "Objective Tinnitus - Part 6 GHGR 020116 - 01 Part 6.mp3",
+      "mtime": "1476608719",
+      "size": "18895970",
+      "md5": "857e405943b2f7d351c5a1dacf83ceeb",
+      "crc32": "172b2877",
+      "sha1": "03c25b59677be7c107afb4cf3fa5746ba04e0ebc",
+      "length": "1678.2",
+      "height": "0",
+      "width": "0"
+     },
+     {
+      "name": "Objective Tinnitus - Part 6 GHGR 020116 - 01 Part 6.png",
+      "source": "derivative",
+      "format": "PNG",
+      "original": "Objective Tinnitus - Part 6 GHGR 020116 - 01 Part 6.mp3",
+      "mtime": "1476608818",
+      "size": "4271",
+      "md5": "b33edc21542c0f62f545eff9ebb24ae7",
+      "crc32": "5883b386",
+      "sha1": "d1d807fda2fc3e23db29311cbfaa82f92d69e86b"
+     },
+     {
+      "name": "__ia_thumb.jpg",
+      "source": "original",
+      "mtime": "1641244735",
+      "size": "14291",
+      "md5": "20db1768f36c95d83d193bd595cf7147",
+      "crc32": "686dbfda",
+      "sha1": "588fbefb7daacbe4088c2bd2b96520a44ec4650a",
+      "format": "Item Tile",
+      "rotation": "0"
+     },
+     {
+      "name": "cover.jpg",
+      "source": "original",
+      "mtime": "1476608631",
+      "size": "612933",
+      "md5": "60893e4ef9c69f8c1bf5a60634fc4024",
+      "crc32": "2867aeb9",
+      "sha1": "278fb4267ba7f9addf01ab95140f0ed45c2ed1e0",
+      "format": "JPEG",
+      "rotation": "0"
+     },
+     {
+      "name": "cover_thumb.jpg",
+      "source": "derivative",
+      "format": "JPEG Thumb",
+      "original": "cover.jpg",
+      "mtime": "1476608721",
+      "size": "5521",
+      "md5": "45700e69cd4695d318c4180fece114e8",
+      "crc32": "e9f2259f",
+      "sha1": "c65f3a6b6af945707872bd5a8be43153af0a96af"
+     }
+    ],
+    "files_count": 11,
+    "item_last_updated": 1641244736,
+    "item_size": 87238830,
+    "metadata": {
+     "identifier": "GHGR020116",
+     "mediatype": "audio",
+     "collection": [
+      "ghgrnetlabel",
+      "netlabels"
+     ],
+     "creator": "Exomène",
+     "description": "Objective Tinnitus part 6. \n<br /><br /><br />\nRecorded at IRL (Paris) le 2014 – 01 – 18 \n<br /><br /><br />\nObjective Tinnitus is a collection of live recordings of Exomène's \nperformances. Exomène is more a soundsmith that a musician, which means \nhe works sound as a raw material carving it to create a soundscape. \n<br />\nWith a mere drum machine and effects, Exomène generates hypnotic and \npsychedelic journeys in an experimental industrial style. Each Objective\n Tinnitus part is one of these journeys. \n<br /><br />\nOn stage, Exomène's sounds are often enhanced by the live visuals, acting and dancing of his fellow members of L:ED. \n<br /><br />\n“Disturbing music for disturbed people.” \n<br /><br />\nConventional thinking tends to teach that things of beauty are those \nwhich are found in the light. The subtle glimmer of a drop of dew on a \nflower’s petal, the simple blush of a child’s cheek, and the sweeping \nglory of a late afternoon sunset are all praised as beautiful. But what \nof those things that hide and linger in the shadows, in the dark? What \nabout those moments that lurk in the in between spaces? Is there not \nbeauty there too? \n<br /><br />\nParis-based artist and musician Exomène certainly believes so and has \ndeveloped what he refers to as an “aesthetic of desolation.” Seeking to \nconnect people with their innermost emotions and feelings, the artist \nmines the darker realms of art, oftentimes exploring harsh and violent \nthemes, to uncover the overlooked moments of beauty within. \n<br /><br />\nExploring this throughout multiple creative mediums, Exomène builds \nfirst on a template of music, something which he’s been training to do \nsince he was a child. That musical education took and the artist drew \nfrom the inspirations there and all around him, finding insights in the \nworks of Chopin, Liszt, and Stravinsky as well as Nine Inch Nails, \nMinistry, and Clint Mansell among myriad others. Even the droning lull \nof an air conditioner has served to inspire the artist’s sonic alchemy, \ngiving birth to his first track under this moniker, “Welcome Home.” \n<br /><br />\n“I make music to allow the audience to disconnect from their conscious \nthoughts and focus on their feeling and sentiments,” he shares. “(To \nthat end) I don’t compose in a traditional way. I’m a soundsmith. Sound \nis a raw material I twist and hammer until it reaches a proper form. If \nit’s melodic, it’s due to the intrinsic resonance of the material.” \n<br /><br />\nExomène also crafts his work with other materials, funneling his energies into varying digital art and installations. \n<br /><br />\n“I put the same concepts and energy in making digital art as in making \nmusic. This latter part of my creative activity goes beyond sound but my\n approach is quite the same: playing with an abstract material as if it \nwas physical in a more experimental way.” \n<br /><br />\nAnd the fans have responded to the artist’s work. With his musical \nexplorations rounding the corner from genres of Cinematic Dark Ambient \nto Industrial Doom, Exomène’s work has been likened to bands like Us As \nEffigies and featured in such places as the Linux Audio Conference, \nMusic Tech Fest, and Vision’R with fans describing the sound as \n“cerebral,” “dark-ambient,” and “penetrating.”\n<br /><br />\n“This multi-core processor uses many resources to embark his audience on\n a unique sound experience,” offers one fan. “As his notes scroll on a \npartition, an immersive atmosphere prints in us. Through listening, \nimaging settles echoing the sound he forged and we dive deep into the \nheart of his universe.” \n<br /><br />Now, Exomène invites you into a world where beauty is birthed from the \ndarkness, where images of violence and shadow give way to emotive \ntouches of beauty and poignancy. So set aside your preconceived notions \nand prepare to experience the world as you’ve never experienced it \nbefore through a journey of image and sound. \n<br /><br />\nWritten by Andrew Greenhalgh.<br /><br /><a href=\"https://godhatesgodrecords2.bandcamp.com/album/part-6-ghgr-020116\" rel=\"nofollow\">GHGR Bandcamp Available</a><br />",
+     "licenseurl": "http://creativecommons.org/licenses/by-nc-nd/3.0/",
+     "scanner": "Internet Archive HTML5 Uploader 1.6.3",
+     "subject": [
+      "Objective Tinnitus",
+      "Exomène",
+      "live",
+      "part 6",
+      "GHGR020116",
+      "electronic",
+      "soundscapes",
+      "modulation",
+      "netlabel"
+     ],
+     "title": "Objective Tinnitus Live Part 6 GHGR 020116",
+     "publicdate": "2016-10-16 09:03:38",
+     "uploader": "godhatesgodrecords@gmail.com",
+     "addeddate": "2016-10-16 09:03:38",
+     "backup_location": "ia906208_32",
+     "external_metadata_update": "2019-03-11T03:49:24Z"
+    },
+    "server": "ia803209.us.archive.org",
+    "uniq": 1725868628,
+    "workable_servers": [
+     "ia803209.us.archive.org",
+     "ia903209.us.archive.org"
+    ]
+   },
+   "text": null
+  }
+ ]
+}

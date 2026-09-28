@@ -48,7 +48,7 @@ from scripts.core.license import (
     load_license,
     save_license,
 )
-from scripts.core.paths import ensure_directories, sanitize_song_name, song_dir
+from scripts.core.paths import LIBRARY_DIR, ensure_directories, sanitize_song_name, song_dir
 
 log = logging.getLogger(__name__)
 
@@ -297,6 +297,7 @@ def ingest_track(
     separate: bool = True,
     auto_analyze: bool = True,
     progress_cb: Optional[ProgressCb] = None,
+    keep_partial: bool = False,
 ) -> IngestResult:
     """
     Fetch -> licence-classify -> publish gate -> stems -> analyse -> register.
@@ -304,10 +305,23 @@ def ingest_track(
     The gate (reject anything is_publishable() == False) is enforced only when
     license_enforce_enabled(). On rejection nothing is downloaded and
     IngestResult.success is False with rejected_license set.
+
+    A Demucs failure returns success=False and removes the partial song dir
+    unless keep_partial is set.
     """
     ensure_directories()
-    name = name or candidate.suggested_name()
+    name = name if name is not None else candidate.suggested_name()
+
+    # the name must resolve to a direct child of LIBRARY_DIR: an empty name
+    # would make song_dir() the library root, which the rmtree below would delete
+    if not sanitize_song_name(name):
+        return IngestResult(name=name, success=False, error=f"empty library name {name!r}")
     dest_dir = song_dir(name)
+    if dest_dir.resolve().parent != LIBRARY_DIR.resolve():
+        return IngestResult(
+            name=name, success=False,
+            error=f"library name {name!r} is not a direct child of the library",
+        )
 
     def _emit(frac: float, msg: str) -> None:
         if progress_cb:
@@ -315,13 +329,6 @@ def ingest_track(
                 progress_cb(min(max(frac, 0.0), 1.0), msg)
             except Exception:
                 pass
-
-    if (dest_dir / "full.wav").exists() or _has_stems(dest_dir):
-        _emit(1.0, f"Already in library: {name}")
-        return IngestResult(
-            name=name, success=True, wav=dest_dir / "full.wav",
-            stems=_collect_stems(name), license=load_license(dest_dir),
-        )
 
     # 1. classify the licence first so a rejection costs no download
     info = classify_license(
@@ -335,6 +342,21 @@ def ingest_track(
         return IngestResult(
             name=name, success=False, rejected_license=info.license_type.value,
             error=f"licence {info.license_type.value} not permitted in the catalogue",
+        )
+
+    if (dest_dir / "full.wav").exists() or _has_stems(dest_dir):
+        on_disk = load_license(dest_dir)
+        if license_enforce_enabled() and (on_disk is None or not is_publishable(on_disk)):
+            disk_type = on_disk.license_type.value if on_disk else "unknown"
+            log.warning("Rejected %r — licence on disk %s is not publishable", name, disk_type)
+            return IngestResult(
+                name=name, success=False, rejected_license=disk_type,
+                error=f"licence {disk_type} on disk not permitted in the catalogue",
+            )
+        _emit(1.0, f"Already in library: {name}")
+        return IngestResult(
+            name=name, success=True, wav=dest_dir / "full.wav",
+            stems=_collect_stems(name), license=on_disk,
         )
 
     # 2. download audio
@@ -353,6 +375,13 @@ def ingest_track(
     if separate:
         _emit(0.35, "Separating stems…")
         stems = _separate_stems(name, wav, progress_cb=lambda p, m: _emit(0.35 + 0.5 * p, m))
+        if not stems:
+            if not keep_partial:
+                shutil.rmtree(dest_dir, ignore_errors=True)
+            return IngestResult(
+                name=name, success=False, wav=wav if keep_partial else None, license=info,
+                error="stem separation failed: Demucs produced no stems",
+            )
 
     # 5. analysis — needs full.wav, so before any prune
     analyzed = False
@@ -410,6 +439,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--search-only", action="store_true", help="list candidates, do not ingest")
     p.add_argument("--pick", type=int, default=1, metavar="N",
                    help="ingest the Nth search result (default 1)")
+    p.add_argument("--keep-partial", action="store_true",
+                   help="keep the partial song dir when stem separation fails")
+    p.add_argument("--dry-run", action="store_true",
+                   help="search, classify and gate candidates, print verdicts, download nothing")
     return p
 
 
@@ -427,8 +460,12 @@ def main() -> int:
         if not args.name:
             print("--url requires --name", file=sys.stderr)
             return 1
+        if args.dry_run:
+            print("--dry-run needs a search query, not --url", file=sys.stderr)
+            return 1
         cand = CatalogCandidate(title=args.name, artist=None, audio_url=args.url, source=args.source)
-        res = ingest_track(cand, name=args.name, separate=not args.no_split)
+        res = ingest_track(cand, name=args.name, separate=not args.no_split,
+                           keep_partial=args.keep_partial)
         print(f"ingested: library/{res.name}/" if res.success else f"failed: {res.error}")
         return 0 if res.success else 1
 
@@ -448,11 +485,25 @@ def main() -> int:
             print(f"    {c.audio_url}")
         return 0
 
+    if args.dry_run:
+        enforce = license_enforce_enabled()
+        for i, c in enumerate(cands, 1):
+            info = classify_license(c.source, license_url=c.license_url, license_str=c.license_str)
+            if is_publishable(info):
+                verdict = "✓ publishable"
+            elif enforce:
+                verdict = "✗ rejected: not publishable"
+            else:
+                verdict = "✗ not publishable (gate advisory)"
+            print(f"{i:2d}. {c.artist or '?'} — {c.title}  [{info.license_type.value}] {verdict}")
+        return 0
+
     idx = max(1, args.pick) - 1
     if idx >= len(cands):
         print(f"--pick {args.pick} out of range (got {len(cands)} results)", file=sys.stderr)
         return 1
-    res = ingest_track(cands[idx], name=args.name, separate=not args.no_split)
+    res = ingest_track(cands[idx], name=args.name, separate=not args.no_split,
+                       keep_partial=args.keep_partial)
     if res.success:
         print(f"ingested: library/{res.name}/")
         return 0

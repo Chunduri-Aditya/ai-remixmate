@@ -1,0 +1,196 @@
+{
+ "argv": [
+  "--source",
+  "ccmixter",
+  "glitch hop",
+  "--search-only",
+  "--limit",
+  "3"
+ ],
+ "exit": 0,
+ "responses": [
+  {
+   "method": "get",
+   "requested_url": "https://ccmixter.org/api/query",
+   "params": {
+    "f": "json",
+    "search": "glitch hop",
+    "search_type": "all",
+    "limit": 3,
+    "sort": "rank"
+   },
+   "final_url": "https://ccmixter.org/api/query?f=json&search=glitch+hop&search_type=all&limit=3&sort=rank",
+   "status": 200,
+   "content_type": "text/plain",
+   "json": [
+    {
+     "upload_id": 25762,
+     "upload_name": "Down Like Rain",
+     "upload_extra": {
+      "usertags": "ambient,bass,downtempo,electronic,female_vocals,piano",
+      "ccud": "media,remix,bpm_120_125,trackback,in_video",
+      "systags": "non_commercial,audio,mp3,44k,stereo,CBR",
+      "featuring": "",
+      "nsfw": false,
+      "bpm": 120,
+      "relative_dir": "content/scottaltham",
+      "num_reviews": 13
+     },
+     "user_name": "scottaltham",
+     "upload_tags": "media,remix,bpm_120_125,trackback,in_video,ambient,bass,downtempo,electronic,female_vocals,piano,non_commercial,audio,mp3,44k,stereo,CBR",
+     "upload_num_scores": 37,
+     "file_page_url": "https://ccmixter.org/files/scottaltham/25762",
+     "user_real_name": "Scott Altham",
+     "artist_page_url": "https://ccmixter.org/people/scottaltham",
+     "license_logo_url": "https://ccmixter.org/ccskins/shared/images/lics/small-by-nc-3.png",
+     "license_url": "http://creativecommons.org/licenses/by-nc/3.0/",
+     "license_name": "Attribution Noncommercial  (3.0)",
+     "upload_date_format": "Fri, Mar 12, 2010 @ 3:19 PM",
+     "qrank": 170,
+     "files": [
+      {
+       "file_id": 30692,
+       "file_upload": 25762,
+       "file_name": "scottaltham_-_Down_Like_Rain.mp3",
+       "file_nicname": "mp3",
+       "file_format_info": {
+        "media-type": "audio",
+        "format-name": "audio-mp3-mp3",
+        "default-ext": "mp3",
+        "mime_type": "audio/mpeg",
+        "sr": "44k",
+        "ch": "stereo",
+        "ps": "4:08",
+        "br": "CBR"
+       },
+       "file_extra": {
+        "sha1": "46CD5VRUSXRECTWN6IQWLGWEOKLBD3HY"
+       },
+       "file_filesize": " (5.68MB)",
+       "file_order": 0,
+       "file_is_remote": 0,
+       "file_num_download": 0,
+       "download_url": "https://ccmixter.org/content/scottaltham/scottaltham_-_Down_Like_Rain.mp3",
+       "local_path": "/var/www/ccmixter/content/scottaltham/scottaltham_-_Down_Like_Rain.mp3",
+       "file_rawsize": 5957635
+      }
+     ],
+     "upload_description_plain": "So I've been in isolated hotels all week this week and when not working, my escape was listening to a few new albums of the cinematic / ambient genre and enjoying a glass of red or 3.\r\n\r\nIt's a style I've always been drawn to and mixing the ambient scents with the glitchy high end bits and bytes has always been a pleasure to work on. \r\n\r\nI've yet again broken my decent headphones so this mix has been created through a cheap pair of creative HQ-140's so hopefully the sound is crisp and not rotten.\r\n\r\nEnjoy.",
+     "upload_description_html": "So I&#8217;ve been in isolated hotels all week this week and when not working, my escape was listening to a few new albums of the cinematic / ambient genre and enjoying a glass of red or 3.<br />\r\n<br />\r\nIt&#8217;s a style I&#8217;ve always been drawn to and mixing the ambient scents with the glitchy high end bits and bytes has always been a pleasure to work on. <br />\r\n<br />\r\nI&#8217;ve yet again broken my decent headphones so this mix has been created through a cheap pair of creative HQ-140&#8217;s so hopefully the sound is crisp and not rotten.<br />\r\n<br />\r\nEnjoy."
+    },
+    {
+     "upload_id": 19031,
+     "upload_name": "Deflated & Alone",
+     "upload_extra": {
+      "usertags": "female_vocals,glitch,guitar,kaer_trouz,slow",
+      "ccud": "media,remix,bpm_060_065,trackback,in_album",
+      "systags": "nc_sampling_plus,audio,mp3,44k,stereo,VBR",
+      "featuring": "",
+      "bpm": 60,
+      "relative_dir": "content/Kaer_Trouz",
+      "nsfw": false,
+      "num_reviews": 12
+     },
+     "user_name": "Kaer_Trouz",
+     "upload_tags": "media,remix,bpm_060_065,trackback,in_album,female_vocals,glitch,guitar,kaer_trouz,slow,nc_sampling_plus,audio,mp3,44k,stereo,VBR",
+     "upload_num_scores": 32,
+     "file_page_url": "https://ccmixter.org/files/Kaer_Trouz/19031",
+     "user_real_name": "Kaer Trouz",
+     "artist_page_url": "https://ccmixter.org/people/Kaer_Trouz",
+     "license_logo_url": "http://",
+     "license_url": "http://creativecommons.org/licenses/nc-sampling+/1.0/",
+     "license_name": "Noncommercial Sampling Plus",
+     "upload_date_format": "Thu, Jan 29, 2009 @ 9:29 PM",
+     "qrank": 138,
+     "files": [
+      {
+       "file_id": 20847,
+       "file_upload": 19031,
+       "file_name": "Kaer_Trouz_-_Deflated_Alone.mp3",
+       "file_nicname": "mp3",
+       "file_format_info": {
+        "media-type": "audio",
+        "format-name": "audio-mp3-mp3",
+        "default-ext": "mp3",
+        "mime_type": "audio/mpeg",
+        "sr": "44k",
+        "ch": "stereo",
+        "ps": "4:26",
+        "br": "VBR"
+       },
+       "file_extra": {
+        "sha1": "H4OPSXJ33BA5ETKPQ6NHG35QIFVQDHOO"
+       },
+       "file_filesize": " (6.55MB)",
+       "file_order": 0,
+       "file_is_remote": 0,
+       "file_num_download": 0,
+       "download_url": "https://ccmixter.org/content/Kaer_Trouz/Kaer_Trouz_-_Deflated_Alone.mp3",
+       "local_path": "/var/www/ccmixter/content/Kaer_Trouz/Kaer_Trouz_-_Deflated_Alone.mp3",
+       "file_rawsize": 6872615
+      }
+     ],
+     "upload_description_plain": "Wretched January seems to be passing. I was stuck a little, then struck by this simple sample of a balloon popping, which I heavily effected. It reminded me of the time I thought it might be a fun idea to watch that old French classic, 'The Red Balloon' with my son, when he was seven. It's actually a very upsetting movie,and needless to say, not really for children. I left the vocal distortion in at the end, because frankly, it's surprising and upsetting too. Apologies to Shagrugge for complete dis-assembly of his cool noise core tone sequence.\r\n\r\nLyric:\r\n\r\n\r\nMy hope is gone\r\nlittle promises you made don't come\r\n\r\nI want you back\r\nYou leave here deflated and alone\r\n\r\nI loved you more\r\nAll your skin and blood was mine to adore\r\n\r\nYou disappeared\r\nYou left me here deflated and alone",
+     "upload_description_html": "Wretched January seems to be passing. I was stuck a little, then struck by this simple sample of a balloon popping, which I heavily effected. It reminded me of the time I thought it might be a fun idea to watch that old French classic, &#8216;The Red Balloon&#8217; with my son, when he was seven. It&#8217;s actually a very upsetting movie,and needless to say, not really for children. I left the vocal distortion in at the end, because frankly, it&#8217;s surprising and upsetting too. Apologies to Shagrugge for complete dis-assembly of his cool noise core tone sequence.<br />\r\n<br />\r\nLyric:<br />\r\n<br />\r\n<br />\r\nMy hope is gone<br />\r\nlittle promises you made don&#8217;t come<br />\r\n<br />\r\nI want you back<br />\r\nYou leave here deflated and alone<br />\r\n<br />\r\nI loved you more<br />\r\nAll your skin and blood was mine to adore<br />\r\n<br />\r\nYou disappeared<br />\r\nYou left me here deflated and alone"
+    },
+    {
+     "upload_id": 52193,
+     "upload_name": "Carosone - The Gigolo Song (cdk Remix)",
+     "upload_extra": {
+      "usertags": "glitch,disoc,electronic,drums,bass,dance,funky,instrumental",
+      "ccud": "media,secret_mixter,remix,fall_2015,bpm_115_120,ccplus",
+      "systags": "non_commercial,audio,mp3,44k,stereo,CBR",
+      "featuring": "Carosone",
+      "relative_dir": "content/cdk",
+      "bpm": 115,
+      "nsfw": false,
+      "num_reviews": 11,
+      "ccplus": true
+     },
+     "user_name": "cdk",
+     "upload_tags": ",media,secret_mixter,remix,fall_2015,bpm_115_120,ccplus,non_commercial,audio,mp3,44k,stereo,CBR,glitch,disoc,electronic,drums,bass,dance,funky,instrumental,",
+     "upload_num_scores": 30,
+     "file_page_url": "https://ccmixter.org/files/cdk/52193",
+     "user_real_name": "cdk",
+     "artist_page_url": "https://ccmixter.org/people/cdk",
+     "license_logo_url": "https://ccmixter.org/ccskins/shared/images/lics/small-by-nc-3.png",
+     "license_url": "http://creativecommons.org/licenses/by-nc/3.0/",
+     "license_name": "Attribution Noncommercial  (3.0)",
+     "upload_date_format": "Sun, Nov 15, 2015 @ 1:03 PM",
+     "qrank": 128,
+     "files": [
+      {
+       "file_id": 81677,
+       "file_upload": 52193,
+       "file_name": "cdk_-_Carosone_-_The_Gigolo_Song_(cdk_Remix).mp3",
+       "file_nicname": "mp3",
+       "file_format_info": {
+        "media-type": "audio",
+        "format-name": "audio-mp3-mp3",
+        "default-ext": "mp3",
+        "mime_type": "audio/mpeg",
+        "sr": "44k",
+        "ch": "stereo",
+        "ps": "4:19",
+        "br": "CBR"
+       },
+       "file_extra": {
+        "sha1": "PBRPW3HL2N4W23V7BEHC3LMA5PH3HPPH"
+       },
+       "file_filesize": " (9.90MB)",
+       "file_order": 0,
+       "file_is_remote": 0,
+       "file_num_download": 0,
+       "download_url": "https://ccmixter.org/content/cdk/cdk_-_Carosone_-_The_Gigolo_Song_(cdk_Remix).mp3",
+       "local_path": "/var/www/ccmixter/content/cdk/cdk_-_Carosone_-_The_Gigolo_Song_(cdk_Remix).mp3",
+       "file_rawsize": 10379015
+      }
+     ],
+     "upload_description_plain": "this song is free to download and share here ; http://ccmixter.org/files/cdk/52193\r\n\r\nHere we are, another secret mixter. \r\none of my favorite things about mixter is when the community pulls together for these events, you never know what will come out.\r\n\r\nthis round I got Carosone, who has so many sweet tracks to go through. I settled on The Gigolo song because I wanted to challenge myself to something I don't really do much. so here it is... Glitch-Disco.\r\n\r\nhope you like it. \r\n\r\ncheck out the video here.\r\n\r\n\r\nmore form cdk @ www.cdk.me.",
+     "upload_description_html": "this song is free to download and share here ; <a title=\"http://ccmixter.org/files/cdk/52193\" class=\"cc_format_link\" href=\"http://ccmixter.org/files/cdk/52193\">http://ccmixter.org/files/c...</a><br />\r\n<br />\r\nHere we are, another secret mixter. <br />\r\none of my favorite things about mixter is when the community pulls together for these events, you never know what will come out.<br />\r\n<br />\r\nthis round I got Carosone, who has so many sweet tracks to go through. I settled on The Gigolo song because I wanted to challenge myself to something I don&#8217;t really do much. so here it is&#8230; Glitch-Disco.<br />\r\n<br />\r\nhope you like it. <br />\r\n<br />\r\ncheck out the video  <a title=\"https://www.youtube.com/watch?v=SQ4aLFwrtO4&feature=youtu.be\" class=\"cc_format_link\" href=\"https://www.youtube.com/watch?v=SQ4aLFwrtO4&feature=youtu.be\">here.</a><br />\r\n<br />\r\n<br />\r\nmore form cdk @ www.cdk.me."
+    }
+   ],
+   "text": null
+  }
+ ]
+}

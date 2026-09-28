@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from scripts.core.license import classify_license, is_publishable, license_enforce_enabled
+from scripts.core.paths import DATA_DIR
 from scripts.download import ingest_track, search_catalog
 
 log = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ log = logging.getLogger(__name__)
 # Estimate 0.2 GB per accepted track with stems (4 × 44.1k mono WAV, ~3-4 min avg)
 _GB_PER_TRACK = 0.2
 
-_STATE_FILE = Path("data/catalog_curate_state.json")
+_STATE_FILE = DATA_DIR / "catalog_curate_state.json"
 
 
 def load_manifest(path: Path) -> List[Dict[str, Any]]:
@@ -93,6 +94,7 @@ def curate_catalog(
 
     total_candidates = 0
     publishable_count = 0
+    estimated_tracks = 0
     ingest_success_count = 0
 
     for idx, entry in enumerate(manifest, 1):
@@ -117,14 +119,12 @@ def curate_catalog(
 
         if not candidates:
             log.info("  → no results")
-            if not dry_run:
-                state[key] = True
-                save_state(state)
             continue
 
         log.info("  → found %d candidates", len(candidates))
 
         picked = 0
+        entry_publishable = 0
         for cand in candidates:
             total_candidates += 1
             info = classify_license(
@@ -140,6 +140,7 @@ def curate_catalog(
 
             if publishable:
                 publishable_count += 1
+                entry_publishable += 1
 
             if not dry_run and publishable and picked < pick:
                 try:
@@ -156,11 +157,14 @@ def curate_catalog(
             if picked >= pick:
                 break
 
-        if not dry_run:
+        estimated_tracks += min(pick, entry_publishable)
+
+        # an entry is done only once at least one track ingested
+        if not dry_run and picked > 0:
             state[key] = True
             save_state(state)
 
-    estimated_gb = publishable_count * _GB_PER_TRACK
+    estimated_gb = estimated_tracks * _GB_PER_TRACK
     log.info("")
     log.info("=" * 60)
     log.info("Total candidates examined: %d", total_candidates)
