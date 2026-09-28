@@ -92,9 +92,12 @@ def dj_remix(req: DJRemixRequest, background_tasks: BackgroundTasks = None):
     _require_song(req.song_a)
     _require_song(req.song_b)
     bridge_beat_path = _confine_beat_path(req.bridge_beat_path)
+    # meta.request is what the inspector's Retry replays; the beat path is the
+    # confined relative form so no server path lands in a job response.
+    request = {**req.model_dump(mode="json"), "bridge_beat_path": bridge_beat_path}
     job_id = job_store.create_job(
         JobType.DJ_REMIX,
-        {"song_a": req.song_a, "song_b": req.song_b},
+        {"song_a": req.song_a, "song_b": req.song_b, "request": request},
     )
     job_store.submit_job(
         job_id, task_dj_remix,
@@ -163,7 +166,8 @@ def dj_remix_preview(req: DJPreviewRequest):
 
     job_id = job_store.create_job(
         JobType.DJ_REMIX,
-        {"song_a": req.song_a, "song_b": req.song_b, "preview": True},
+        {"song_a": req.song_a, "song_b": req.song_b, "preview": True,
+         "request": req.model_dump(mode="json")},
     )
     job_store.submit_job(
         job_id,
@@ -193,9 +197,10 @@ def dj_chain(req: DJChainRequest, background_tasks: BackgroundTasks = None):
         _require_song(name)
     bridge_beat_path = _confine_beat_path(req.bridge_beat_path)
 
+    request = {**req.model_dump(mode="json"), "bridge_beat_path": bridge_beat_path}
     job_id = job_store.create_job(
         JobType.DJ_REMIX,
-        {"songs": req.songs, "n": len(req.songs)},
+        {"songs": req.songs, "n": len(req.songs), "request": request},
     )
     job_store.submit_job(
         job_id, task_dj_chain,

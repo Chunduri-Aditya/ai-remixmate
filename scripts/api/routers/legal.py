@@ -20,6 +20,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from scripts.core import legal_store
+from scripts.core.config import cfg
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ Acceptable use: do not upload or claim rights you do not hold; do not abuse the
 API; do not attempt to circumvent license gates. We may flag or remove accounts
 that violate these terms.
 
-Contact for legal notices: set REMIXMATE_DMCA_CONTACT (operator email).
+Contact for legal notices: {contact}
 """,
     "privacy": """AI RemixMate — Privacy Policy
 
@@ -58,6 +59,14 @@ Data stored
 - Crates, favorites, tags, feedback events, job history
 
 We do not sell personal data. Auth tokens are verified via Supabase JWKS.
+
+Audit log
+- Job starts and completions are recorded in an audit log under your user id
+- DELETE /account removes your lines from the audit log
+
+Retention
+- A rendered mix is deleted after {mix_max_age_days} days
+- At most {mix_max_count} mixes are kept per user; the oldest are removed first
 
 Your rights
 - GET /account/export — download a zip of manifests, crates, and favorites
@@ -71,7 +80,7 @@ To report alleged copyright infringement, POST /legal/dmca with:
   reporter_name, reporter_email, copyright_work, infringing_url, description
 
 Reports are stored and (when REMIXMATE_SMTP_* is configured) emailed to the
-operator. Agent contact: REMIXMATE_DMCA_CONTACT.
+operator. Agent contact: {contact}.
 
 Not affiliated with ccMixter, Free Music Archive, Internet Archive, Musopen,
 Spotify, or any rights holder.
@@ -182,6 +191,14 @@ def legal_page(page: str):
     text = _PAGES.get(page)
     if text is None:
         raise HTTPException(404, detail="unknown legal page")
+    # Filled per request so an env change shows without a restart, and the
+    # retention numbers come from the config the sweep enforces.
+    contact = os.environ.get("REMIXMATE_DMCA_CONTACT", "").strip() or "contact not configured"
+    text = (
+        text.replace("{contact}", contact)
+        .replace("{mix_max_age_days}", str(int(cfg.retention.mix_max_age_days)))
+        .replace("{mix_max_count}", str(int(cfg.retention.mix_max_count)))
+    )
     return PlainTextResponse(text.strip() + "\n")
 
 

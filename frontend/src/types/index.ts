@@ -328,6 +328,17 @@ export interface HealthStatus {
   uptime_seconds?: number
 }
 
+// --- Features (GET /features) ---
+
+export interface Features {
+  auth: boolean
+  stem_split: boolean
+  generative: boolean
+  license_enforce: boolean
+  spectral_learning: boolean
+  operator: boolean
+}
+
 // --- Navigation ---
 
 export type NavDestination =

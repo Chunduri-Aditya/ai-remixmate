@@ -4,15 +4,18 @@ scripts/api/routers/system.py — System health and status endpoints.
 GET  /health          — liveness check (library size + running jobs)
 GET  /health/live     — lightweight liveness probe
 GET  /health/ready    — readiness probe (thread pool, library, store DBs, catalog)
+GET  /features        — which feature flags are on and whether the caller is an operator
 """
 
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.exc import SQLAlchemyError
 
+from scripts.api import auth
 from scripts.api import jobs as job_store
 from scripts.core import crates, db, feedback_store, legal_store
+from scripts.core.license import license_enforce_enabled
 from scripts.core.logging_utils import get_logger
 from scripts.core.paths import LIBRARY_DIR
 
@@ -86,3 +89,51 @@ def readiness():
         raise HTTPException(503, detail={"reason": "catalog_empty", "catalog_songs": 0})
 
     return {"status": "ready", "catalog_songs": catalog_songs}
+
+
+# ---------------------------------------------------------------------------
+# Features
+# ---------------------------------------------------------------------------
+
+def _gate_open(gate) -> bool:
+    """True when a route gate (one that raises HTTPException 503 when its flag
+    is off) lets the request through. Reuses the gate so the flag is parsed in
+    one place."""
+    try:
+        gate()
+    except HTTPException as exc:
+        if exc.status_code != 503:
+            raise
+        return False
+    return True
+
+
+def _is_operator(request: Request) -> bool:
+    """True when ``require_operator`` would admit this caller. A 401 or 403 means
+    not an operator; this route stays open, so neither is raised here."""
+    try:
+        auth.require_operator(request)
+    except HTTPException as exc:
+        if exc.status_code not in (401, 403):
+            raise
+        return False
+    return True
+
+
+@router.get("/features", tags=["system"])
+def features(request: Request):
+    """Feature flags the frontend uses to hide disabled controls. Open route:
+    every flag is read per request and nothing per user is returned beyond
+    whether the caller passes ``require_operator``."""
+    from scripts.api.routers.generative import _generative_enabled
+    from scripts.api.routers.stems import _stem_split_enabled
+    from scripts.core.spectral_matching import _learning_enabled
+
+    return {
+        "auth": auth.auth_enabled(),
+        "stem_split": _gate_open(_stem_split_enabled),
+        "generative": _gate_open(_generative_enabled),
+        "license_enforce": license_enforce_enabled(),
+        "spectral_learning": _learning_enabled(),
+        "operator": _is_operator(request),
+    }

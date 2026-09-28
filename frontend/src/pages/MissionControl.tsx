@@ -21,6 +21,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useAppStore, selectActiveJobs, selectRecentJobs } from '@/stores/appStore'
 import { healthApi, jobsApi, libraryApi } from '@/lib/api'
+import { useFeatures } from '@/hooks/useFeatures'
 import type { Job } from '@/types'
 import './MissionControl.css'
 
@@ -234,6 +235,7 @@ export default function MissionControl() {
   const activeJobs      = useAppStore(useShallow(selectActiveJobs))
   const recentJobs      = useAppStore(useShallow(selectRecentJobs))
   const completionLog   = useAppStore((s) => s.completionLog)
+  const { data: features } = useFeatures()
 
   const { data: health, isLoading: healthLoading } = useQuery({
     queryKey: ['health'],
@@ -343,7 +345,7 @@ export default function MissionControl() {
             <div className="mc-jobs-list">
               {recentJobs.length === 0 ? (
                 <div className="mc-empty">
-                  <span className="text-muted">No jobs yet — start a mix or download</span>
+                  <span className="text-muted">No jobs yet — start a mix</span>
                 </div>
               ) : (
                 recentJobs.slice(0, 8).map((job) => <JobRow key={job.job_id} job={job} />)
@@ -369,13 +371,15 @@ export default function MissionControl() {
                 accent="ice"
                 onClick={() => navigate('/library-atlas')}
               />
-              <QuickAction
-                label="AI Lab"
-                description="Style transfer, inpainting, generation"
-                icon={RefreshCw}
-                accent="green"
-                onClick={() => navigate('/ai-lab')}
-              />
+              {features?.generative === true && (
+                <QuickAction
+                  label="AI Lab"
+                  description="Style transfer, inpainting, generation"
+                  icon={RefreshCw}
+                  accent="green"
+                  onClick={() => navigate('/ai-lab')}
+                />
+              )}
               <QuickAction
                 label="Build a Set"
                 description="Sequence songs for a DJ set or playlist"

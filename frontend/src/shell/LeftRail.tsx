@@ -1,6 +1,6 @@
 /* ============================================================
    AI RemixMate — Left Navigation Rail
-   64px fixed-width column; icon + label; 8 destinations.
+   64px fixed-width column; icon + label; nine destinations.
    ============================================================ */
 
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -16,11 +16,13 @@ import {
   Radio,
   PictureInPicture2,
   LogOut,
+  UserRound,
   type LucideIcon,
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/stores/appStore'
 import { authConfigured } from '@/lib/supabase'
+import { useFeatures } from '@/hooks/useFeatures'
 import { useAuth } from './authContext'
 import type { NavDestination } from '@/types'
 import './LeftRail.css'
@@ -129,6 +131,8 @@ export function LeftRail() {
   const location = useLocation()
   const setActiveNav = useAppStore((s) => s.setActiveNav)
   const { session, signOut } = useAuth()
+  const { data: features } = useFeatures()
+  const navItems = NAV_ITEMS.filter((item) => item.id !== 'ai-lab' || features?.generative === true)
 
   function handleNav(item: NavItem) {
     setActiveNav(item.id)
@@ -148,7 +152,7 @@ export function LeftRail() {
 
       {/* Nav items */}
       <ul className="left-rail__nav" role="list">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const Icon = item.icon
           const isActive = currentPath.startsWith(item.path)
           return (
@@ -185,6 +189,16 @@ export function LeftRail() {
             AUP
           </button>
         </div>
+        <button
+          className={`left-rail__item ${currentPath.startsWith('/account') ? 'left-rail__item--active' : ''}`}
+          onClick={() => navigate('/account')}
+          title="Account"
+          aria-label="Account"
+          aria-current={currentPath.startsWith('/account') ? 'page' : undefined}
+        >
+          <UserRound size={18} strokeWidth={1.5} />
+          <span className="left-rail__item-label">Account</span>
+        </button>
         {authConfigured && session && (
           <button
             className="left-rail__item"

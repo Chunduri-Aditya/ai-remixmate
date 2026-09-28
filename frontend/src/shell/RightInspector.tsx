@@ -10,8 +10,8 @@ import { useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore, selectRecentJobs, type ActivityEntry } from '@/stores/appStore'
 import { useJobTimer } from '@/hooks/useJobTimer'
-import { remixApi, feedbackApi } from '@/lib/api'
-import type { Job } from '@/types'
+import { remixApi, feedbackApi, jobsApi } from '@/lib/api'
+import type { Job, DJRemixRequest, DJPreviewRequest } from '@/types'
 import './RightInspector.css'
 
 // Where clicking a job card should take you, based on job.type. Substring
@@ -70,8 +70,22 @@ function feedbackSongPair(job: Job): { songA?: string; songB?: string } {
 }
 
 function JobCard({ job }: { job: Job }) {
-  const cancelJob = useAppStore((s) => s.removeJob)
+  const removeJob = useAppStore((s) => s.removeJob)
   const navigate = useNavigate()
+
+  // The card goes only once the backend confirms; a failed DELETE leaves the
+  // job (still running server side) on screen and says so in the activity log.
+  async function handleCancel() {
+    try {
+      await jobsApi.cancel(job.job_id)
+      removeJob(job.job_id)
+    } catch (err) {
+      useAppStore.getState().pushActivity({
+        level: 'error', job_id: job.job_id,
+        message: `Cancel failed for ${job.type}: ${err instanceof Error ? err.message : String(err)}`,
+      })
+    }
+  }
   const [feedbackSent, setFeedbackSent] = useState<'up' | 'down' | null>(null)
 
   function handleThumbs(direction: 'up' | 'down') {
@@ -113,7 +127,18 @@ function JobCard({ job }: { job: Job }) {
     const upsertJob = useAppStore.getState().upsertJob
     try {
       let res: { job_id: string }
-      if (job.type === 'dj_remix' && meta.song_a && meta.song_b) {
+      const request = meta.request as Record<string, unknown> | undefined
+      // Replay the request the route stored at create time, verbatim; the
+      // song only branches below cover jobs created before meta.request.
+      // The backend tags chains as dj_remix too, so route on the request shape.
+      if (request && Array.isArray(request.songs)) {
+        const { songs, ...opts } = request
+        res = await remixApi.chain(songs as string[], opts)
+      } else if (request) {
+        res = meta.preview
+          ? await remixApi.preview(request as unknown as DJPreviewRequest)
+          : await remixApi.create(request as unknown as DJRemixRequest)
+      } else if (job.type === 'dj_remix' && meta.song_a && meta.song_b) {
         res = await remixApi.create({ song_a: meta.song_a as string, song_b: meta.song_b as string })
       } else if (job.type === 'dj_chain' && Array.isArray(meta.songs)) {
         res = await remixApi.chain(meta.songs as string[])
@@ -173,7 +198,7 @@ function JobCard({ job }: { job: Job }) {
       {(job.status === 'PENDING' || job.status === 'RUNNING') && (
         <button
           className="inspector-job-card__cancel"
-          onClick={() => cancelJob(job.job_id)}
+          onClick={handleCancel}
           title="Cancel job"
           aria-label="Cancel job"
         >

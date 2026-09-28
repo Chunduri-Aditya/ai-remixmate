@@ -91,7 +91,7 @@ function WidgetPanel({
     libraryApi
       .list()
       .then(setLibrary)
-      .catch(() => setError('Cannot reach the local API — is it running on port 8000?'))
+      .catch(() => setError('Cannot reach the API — is it running?'))
   }, [])
 
   // Fetch current track info for key display in CamelotWheel

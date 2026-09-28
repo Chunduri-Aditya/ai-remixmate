@@ -29,6 +29,11 @@ vi.mock('@/lib/api', () => ({
     live: async () => ({ status: 'ok' }),
     ready: async () => ({ status: 'ok' }),
   },
+  featuresApi: {
+    get: async () => ({
+      auth: false, stem_split: true, generative: true, license_enforce: false, spectral_learning: true, operator: true,
+    }),
+  },
   libraryApi: {
     list: async () => [],
     get: async () => ({
@@ -59,7 +64,7 @@ vi.mock('@/lib/api', () => ({
     get: async () => ({
       job_id: 'job-1',
       status: 'COMPLETED',
-      type: 'download',
+      type: 'dj_remix',
       progress: 100,
       message: '',
       created_at: new Date().toISOString(),

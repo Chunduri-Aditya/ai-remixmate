@@ -33,6 +33,7 @@ const SignalSearch   = lazy(() => import('@/pages/SignalSearch'))
 const AILab          = lazy(() => import('@/pages/AILab'))
 const MixVault       = lazy(() => import('@/pages/MixVault'))
 const Operations     = lazy(() => import('@/pages/Operations'))
+const AccountPage    = lazy(() => import('@/pages/AccountPage'))
 
 function PageFallback() {
   return (
@@ -103,6 +104,11 @@ export function AppShell() {
               <Route path="operations" element={
                 <PageErrorBoundary pageName="Operations">
                   <Suspense fallback={<PageFallback />}><Operations /></Suspense>
+                </PageErrorBoundary>
+              } />
+              <Route path="account" element={
+                <PageErrorBoundary pageName="Account">
+                  <Suspense fallback={<PageFallback />}><AccountPage /></Suspense>
                 </PageErrorBoundary>
               } />
               <Route path="*" element={<Navigate to="/mission-control" replace />} />

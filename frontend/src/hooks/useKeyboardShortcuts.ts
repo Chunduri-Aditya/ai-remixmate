@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/stores/appStore'
+import { useFeatures } from '@/hooks/useFeatures'
 import type { NavDestination } from '@/types'
 
 const NAV_MAP: Record<string, string> = {
@@ -41,6 +42,8 @@ export function useKeyboardShortcuts(
   const setActiveNav = useAppStore((s) => s.setActiveNav)
   const inspectorOpen = useAppStore((s) => s.inspectorOpen)
   const toggleInspector = useAppStore((s) => s.toggleInspector)
+  const { data: features } = useFeatures()
+  const generative = features?.generative === true
   const gPressed = useRef(false)
   const timer    = useRef<ReturnType<typeof setTimeout>>()
 
@@ -105,6 +108,7 @@ export function useKeyboardShortcuts(
 
       if (gPressed.current && NAV_MAP[e.key]) {
         gPressed.current = false
+        if (e.key === 'a' && !generative) return
         const destination = NUMBER_NAV.find((item) => item.path === NAV_MAP[e.key])
         if (destination) setActiveNav(destination.id)
         navigate(NAV_MAP[e.key])
@@ -113,5 +117,5 @@ export function useKeyboardShortcuts(
 
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [navigate, location.pathname, onShowHelp, onHideHelp, inspectorOpen, toggleInspector, setActiveNav])
+  }, [navigate, location.pathname, onShowHelp, onHideHelp, inspectorOpen, toggleInspector, setActiveNav, generative])
 }

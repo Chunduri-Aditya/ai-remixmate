@@ -258,6 +258,11 @@
   color: var(--color-text-secondary);
 }
 
+.mv-credits__link {
+  color: var(--color-ice-400);
+  text-decoration: underline;
+}
+
 /* ── WaveSurfer player ── */
 
 .mv-waveform-player {

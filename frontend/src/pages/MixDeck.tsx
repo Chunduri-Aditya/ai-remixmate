@@ -362,7 +362,6 @@ export default function MixDeck() {
   const [compatLoading, setCompatLoading] = useState(false)
   const [compatError, setCompatError]     = useState<string | null>(null)
   const [transitionDuration, setTransitionDuration] = useState(32)
-  const [targetBpm, setTargetBpm]   = useState('')
   const [remixOpts, setRemixOpts]       = useState<RemixOptions>(REMIX_DEFAULTS)
   const [previewJobId, setPreviewJobId] = useState<string | null>(null)
   const [remixJobId, setRemixJobId]     = useState<string | null>(null)
@@ -432,6 +431,8 @@ export default function MixDeck() {
     return names.filter((n) => n !== songA)
   }, [strictMatches, similarTracksA, songA])
   const canCompare = songA && songB && songA !== songB
+  // The "Crossfade bars" slider is the source of transition_bars; the API accepts 8..64.
+  const transitionBars = Math.min(64, Math.max(8, transitionDuration))
   const shortcutDeck: 'A' | 'B' | null = songA ? 'A' : songB ? 'B' : null
 
   // Audio URLs for waveform display.
@@ -466,7 +467,7 @@ export default function MixDeck() {
         song_a: songA,
         song_b: songB,
         transition_duration: transitionDuration,
-        transition_bars: remixOpts.transition_bars,
+        transition_bars: transitionBars,
         preset: remixOpts.preset,
       })
       setPreviewJobId(res.job_id)
@@ -486,8 +487,7 @@ export default function MixDeck() {
         song_a: songA,
         song_b: songB,
         transition_duration: transitionDuration,
-        target_bpm: targetBpm ? parseFloat(targetBpm) : undefined,
-        transition_bars: remixOpts.transition_bars,
+        transition_bars: transitionBars,
         preset: remixOpts.preset,
         transition_effect: remixOpts.transition_effect,
         bridge_beat_mode: remixOpts.bridge_beat_mode,
@@ -630,26 +630,14 @@ export default function MixDeck() {
                   <input
                     type="range"
                     min={8}
-                    max={128}
+                    max={64}
                     step={8}
                     value={transitionDuration}
                     onChange={(e) => setTransitionDuration(parseInt(e.target.value))}
                     className="md-slider"
                   />
-                  <span className="md-slider-val font-mono">{transitionDuration}</span>
+                  <span className="md-slider-val font-mono">{transitionBars}</span>
                 </div>
-              </div>
-              <div className="md-control">
-                <label className="md-control__label">Target BPM (optional)</label>
-                <input
-                  type="number"
-                  className="md-input"
-                  placeholder={songInfoA?.bpm?.toFixed(1) ?? 'auto'}
-                  value={targetBpm}
-                  onChange={(e) => setTargetBpm(e.target.value)}
-                  min={60}
-                  max={200}
-                />
               </div>
             </div>
 

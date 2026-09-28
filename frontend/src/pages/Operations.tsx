@@ -18,6 +18,7 @@ import {
   BarChart3,
 } from 'lucide-react'
 import { analysisApi, libraryApi, storageApi } from '@/lib/api'
+import { useFeatures } from '@/hooks/useFeatures'
 import type { ProcessingStatus, StorageStatus } from '@/types'
 import './PageBase.css'
 import './Operations.css'
@@ -193,8 +194,6 @@ function StoragePanel() {
         <p className="ops-note text-muted">
           Library lives at <code>{data.library_dir}</code>. To move it onto an external drive or NAS,
           set <code>library.library_dir</code> in <code>config.local.yaml</code> to an absolute path and restart the API.
-          {' '}Auto-eviction on download is currently <strong>{data.auto_evict_on_download ? 'ON' : 'off'}</strong>
-          {data.auto_evict_on_download && ' — downloading while over cap can silently remove other old songs.'}
         </p>
 
         {notice && <div className="ops-storage__notice">{notice}</div>}
@@ -298,6 +297,9 @@ function MaintenancePanel() {
 // --- Main page ---
 
 export default function Operations() {
+  const { data: features } = useFeatures()
+  const operator = features?.operator === true
+
   return (
     <div className="page-base">
       <header className="page-base__header">
@@ -321,8 +323,8 @@ export default function Operations() {
         </section>
 
         <ProcessingQueuePanel />
-        <StoragePanel />
-        <MaintenancePanel />
+        {operator && <StoragePanel />}
+        {operator && <MaintenancePanel />}
       </div>
     </div>
   )

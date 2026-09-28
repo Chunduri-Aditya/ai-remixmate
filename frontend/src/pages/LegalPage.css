@@ -60,3 +60,56 @@
 .legal-page__error {
   color: var(--color-crimson-500, #ef4444);
 }
+
+.legal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--color-border-subtle, #27272a);
+}
+
+.legal-form__title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.legal-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #a1a1aa);
+}
+
+.legal-form__field input,
+.legal-form__field textarea {
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--color-border-default, #3f3f46);
+  border-radius: 0.375rem;
+  background: var(--color-bg-base, #111113);
+  color: var(--color-text-primary, #f5f5f4);
+  font: inherit;
+}
+
+.legal-form__submit {
+  align-self: flex-start;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--color-amber-500, #f59e0b);
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--color-amber-500, #f59e0b);
+  font: inherit;
+  cursor: pointer;
+}
+
+.legal-form__submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.legal-form__ok {
+  color: var(--color-green-500, #22c55e);
+}

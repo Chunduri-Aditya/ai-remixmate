@@ -10,6 +10,17 @@ import { useAuth } from './authContext'
 
 type Mode = 'signin' | 'signup'
 
+// Plain anchors, not <Link>: RequireAuth renders this screen and is also
+// mounted without a Router (auth.test.tsx). BASE_URL is the router basename.
+const LEGAL_BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
+
+const LEGAL_LINKS = [
+  { slug: 'terms', label: 'Terms' },
+  { slug: 'privacy', label: 'Privacy' },
+  { slug: 'dmca', label: 'DMCA' },
+  { slug: 'acceptable-use', label: 'Acceptable Use' },
+] as const
+
 export function LoginPage() {
   const { signIn, signUp } = useAuth()
   const [mode, setMode] = useState<Mode>('signin')
@@ -92,6 +103,17 @@ export function LoginPage() {
             ? "Don't have an account? Create one"
             : 'Already have an account? Sign in'}
         </button>
+
+        <nav
+          aria-label="Legal"
+          style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', justifyContent: 'center', fontSize: '0.75rem' }}
+        >
+          {LEGAL_LINKS.map((l) => (
+            <a key={l.slug} href={`${LEGAL_BASE}/legal/${l.slug}`} style={{ color: 'inherit', opacity: 0.7 }}>
+              {l.label}
+            </a>
+          ))}
+        </nav>
       </form>
     </div>
   )

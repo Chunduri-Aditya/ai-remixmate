@@ -7,16 +7,13 @@
 import type {
   Job,
   SongInfo,
-  LibraryStats,
   ProcessingStatus,
   StorageStatus,
   StoragePruneResult,
   StorageEvictResult,
   CompatibilityResult,
   CompatMatchesResponse,
-  StructureV1Response,
   FeedbackEventType,
-  FeedbackSummaryResponse,
   Recommendation,
   SimilarTrack,
   CrateSearchResult,
@@ -24,6 +21,7 @@ import type {
   DJPreviewRequest,
   Crate,
   HealthStatus,
+  Features,
 } from '@/types'
 
 // In dev the Vite proxy rewrites /api/* → http://localhost:8000/*.
@@ -33,7 +31,7 @@ import { getAccessToken } from './supabase'
 
 const BASE = import.meta.env.VITE_API_BASE || '/api'
 
-export const EVENTS_URL = import.meta.env.VITE_EVENTS_URL || '/events/stream'
+export const EVENTS_URL = import.meta.env.VITE_EVENTS_URL || `${BASE}/events/stream`
 
 const DEFAULT_TIMEOUT_MS = 30_000
 
@@ -146,7 +144,12 @@ export function normalizeJob(raw: RawJob): Job {
 
 export const healthApi = {
   live:  () => get<HealthStatus>('/health/live'),
-  ready: () => get<HealthStatus>('/health/ready'),
+}
+
+// --- Features ---
+
+export const featuresApi = {
+  get: () => get<Features>('/features'),
 }
 
 // --- Library ---
@@ -157,10 +160,6 @@ export const libraryApi = {
     get<{ songs: SongInfo[] }>('/library?per_page=5000').then((r) => r.songs ?? []),
   get:     (name: string) => get<SongInfo>(`/library/${encodeURIComponent(name)}`),
   delete:  (name: string) => del<void>(`/library/${encodeURIComponent(name)}`),
-  // GET /library returns { stats, songs } — grab the stats without paging songs.
-  stats:   ()           =>
-    get<{ stats: LibraryStats }>('/library?per_page=1').then((r) => r.stats),
-  initRun: (opts: Record<string, unknown>) => post<{ job_id: string }>('/library/initialize', opts),
   // Segregates the library into fully-processed / stems-only / analysis-only /
   // unprocessed buckets. Cheap file-existence scan — safe to poll every ~1s.
   processingStatus: () => get<ProcessingStatus>('/library/processing-status'),
@@ -210,12 +209,6 @@ export const audioApi = {
 export const stemsApi = {
   split:         (song: string, opts?: Record<string, unknown>) =>
     post<{ job_id: string }>('/stems/split', { song, ...opts }),
-  splitBatch:    (songs: string[]) =>
-    post<{ job_id: string }>('/stems/split-batch', { songs }),
-  compress:      (song: string) =>
-    post<{ job_id: string }>('/stems/compress', { song }),
-  compressBatch: (songs: string[]) =>
-    post<{ job_id: string }>('/stems/compress-batch', { songs }),
   stemUrl: (name: string, stem: string) =>
     `${BASE}/library/${encodeURIComponent(name)}/stems/${encodeURIComponent(stem)}`,
 }
@@ -241,18 +234,6 @@ export const analysisApi = {
     get<CompatMatchesResponse>(
       `/compatibility/matches/${encodeURIComponent(name)}?min_score=${minScore}&limit=${limit}`,
     ),
-  // Versioned bars/beats/segments/per-phrase-key structure — recomputed from
-  // the full track on every call (not cached), so this can be slower than
-  // the other GETs here. Set includeBeats=false for a lighter payload on
-  // long tracks; bars/sections/key_segments are unaffected either way.
-  structure: (name: string, opts?: { keyProfile?: string; includeBeats?: boolean }) =>
-    get<StructureV1Response>(
-      `/analysis/v1/${encodeURIComponent(name)}/structure` +
-        `?key_profile=${opts?.keyProfile ?? 'auto'}` +
-        `&include_beats=${opts?.includeBeats ?? true}`,
-    ),
-  rebuildIndex:  () =>
-    post<{ job_id: string }>('/index/rebuild', {}),
   // CLAP 512-D semantic search (falls back to 35-D index server-side when
   // laion_clap isn't installed). Provide q (free text) and/or name (song).
   crateSearch: (opts: {
@@ -329,7 +310,6 @@ export const jobsApi = {
     const suffix = qs.toString() ? `?${qs}` : ''
     return get<RawJob[]>(`/jobs${suffix}`).then((js) => js.map(normalizeJob))
   },
-  get:    (id: string) => get<RawJob>(`/jobs/${id}`).then(normalizeJob),
   cancel: (id: string) => del<void>(`/jobs/${id}`),
 }
 
@@ -342,7 +322,6 @@ export const cratesApi = {
   // allCrates.map() inside CratesSection on an object with no .map().
   list:    ()                           => get<{ crates: Crate[] }>('/crates').then((r) => r.crates ?? []),
   create:  (name: string)               => post<Crate>('/crates', { name }),
-  rename:  (id: number, name: string)   => patch<Crate>(`/crates/${id}`, { name }),
   delete:  (id: number)                 => del<void>(`/crates/${id}`),
   songs:   (id: number)                 => get<string[]>(`/crates/${id}/songs`),
   // Backend POST /crates/{id}/songs reads `song_name`, not `name` — sending
@@ -351,18 +330,14 @@ export const cratesApi = {
   addSong: (id: number, name: string)   => post<void>(`/crates/${id}/songs`, { song_name: name }),
   removeSong: (id: number, name: string) =>
     del<void>(`/crates/${id}/songs/${encodeURIComponent(name)}`),
+  // PATCH /crates/{id} exists on the backend (routers/crates.py rename_crate) and
+  // src/__tests__/api-contract.test.ts pins its wire shape, so it stays.
+  rename:  (id: number, name: string)   => patch<Crate>(`/crates/${id}`, { name }),
 }
 
 // --- Tags ---
 
-export const tagsApi = {
-  list:      ()                             => get<string[]>('/tags'),
-  songTags:  (name: string)                 => get<string[]>(`/library/${encodeURIComponent(name)}/tags`),
-  addTag:    (name: string, tag: string)    =>
-    post<void>(`/library/${encodeURIComponent(name)}/tags`, { tag }),
-  removeTag: (name: string, tag: string)    =>
-    del<void>(`/library/${encodeURIComponent(name)}/tags/${encodeURIComponent(tag)}`),
-}
+export const tagsApi = {}
 
 // --- Favorites ---
 
@@ -415,13 +390,26 @@ export const feedbackApi = {
       position_sec: opts.positionSec,
       context: opts.context,
     }),
-  summary: () => get<FeedbackSummaryResponse>('/feedback/summary'),
 }
 
 // --- AI / Generative ---
 
+/** GET /ai/models body (scripts/api/schemas.py ModelStatusResponse). */
+export interface AiModelStatus {
+  device: string
+  mps_allocated_gb: number
+  max_vram_gb: number
+  models: Array<{
+    name: string
+    loaded: boolean
+    vram_estimate_gb: number
+    description: string
+    last_used: number
+  }>
+}
+
 export const aiApi = {
-  models: () => get<string[]>('/ai/models'),
+  models: () => get<AiModelStatus>('/ai/models'),
   // Backend StyleTransferRequest requires song_name + description (free-text
   // MusicGen style prompt) — NOT a second track name. See schemas.py.
   styleTransfer: (songName: string, description: string, opts?: Record<string, unknown>) =>

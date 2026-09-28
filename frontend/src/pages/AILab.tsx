@@ -18,7 +18,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react'
-import { libraryApi, aiApi } from '@/lib/api'
+import { libraryApi, aiApi, type AiModelStatus } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
 import type { SongInfo } from '@/types'
 import './PageBase.css'
@@ -91,11 +91,9 @@ function JobResultBanner({ jobId }: JobResultBannerProps) {
   if (!job) return null
   const BASE = import.meta.env.VITE_API_BASE || '/api'
 
-  const result = job.result as { stream_url?: string; output_url?: string } | undefined
+  const result = job.result as { stream_url?: string } | undefined
   const url    = result?.stream_url
     ? `${BASE}${result.stream_url}`
-    : result?.output_url
-    ? `${BASE}${result.output_url}`
     : null
 
   if (job.status === 'RUNNING' || job.status === 'PENDING') {
@@ -150,11 +148,12 @@ export default function AILab() {
     staleTime: 60_000,
   })
 
-  const { data: models = [] } = useQuery<string[]>({
+  const { data: modelStatus } = useQuery<AiModelStatus>({
     queryKey: ['ai-models'],
     queryFn:  aiApi.models,
     staleTime: 300_000,
   })
+  const models = modelStatus?.models ?? []
 
   const songNames = useMemo(() => songs.map((s) => s.name).sort(), [songs])
 
@@ -288,7 +287,7 @@ export default function AILab() {
                   onChange={(e) => setModel(e.target.value)}
                 >
                   <option value="">— default —</option>
-                  {models.map((m) => <option key={m} value={m}>{m}</option>)}
+                  {models.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
                 </select>
               </div>
             )}

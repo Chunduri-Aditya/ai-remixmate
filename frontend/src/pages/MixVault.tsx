@@ -10,6 +10,7 @@ import {
   Play,
   Pause,
   Download,
+  FileText,
   GitMerge,
   GitBranch,
   Volume2,
@@ -143,7 +144,6 @@ function MixCard({ job }: MixCardProps) {
   const [open, setOpen]    = useState(false)
   const result = job.result as {
     stream_url?: string
-    output_url?: string
     bpm_a?: number
     bpm_b?: number
     camelot_a?: string
@@ -157,6 +157,7 @@ function MixCard({ job }: MixCardProps) {
     credits?: Array<{
       song?: string
       license?: string
+      license_url?: string
       attribution?: string
       attribution_required?: boolean
       artist?: string
@@ -164,10 +165,11 @@ function MixCard({ job }: MixCardProps) {
     }>
   } | undefined
 
-  const streamUrl = result?.stream_url
-    ? `${BASE}${result.stream_url}`
-    : result?.output_url
-    ? `${BASE}${result.output_url}`
+  const streamUrl = result?.stream_url ? `${BASE}${result.stream_url}` : null
+  // CREDITS.txt sits beside the mix file, so take the stream_url's directory
+  // (`/outputs/dj_<sid>/mix.wav` -> `/outputs/dj_<sid>`), not the bare session id.
+  const creditsUrl = result?.stream_url
+    ? `${BASE}${result.stream_url.replace(/\/[^/]*$/, '')}/CREDITS.txt`
     : null
 
   // Song-pair context for feedback telemetry (SELF_IMPROVING_DJ_RESEARCH.md
@@ -242,6 +244,11 @@ function MixCard({ job }: MixCardProps) {
               <Download size={14} />
             </a>
           )}
+          {creditsUrl && (
+            <a className="mv-icon-btn" href={creditsUrl} download title="Credits (txt)" aria-label="Credits (txt)">
+              <FileText size={14} />
+            </a>
+          )}
           <button
             className="mv-icon-btn"
             onClick={() => setOpen((v) => !v)}
@@ -277,7 +284,20 @@ function MixCard({ job }: MixCardProps) {
                 {result.credits.map((c, i) => (
                   <li key={`${c.song ?? 'credit'}-${i}`}>
                     <span className="font-mono">{c.song ?? 'Unknown'}</span>
-                    {c.license ? <span className="text-muted"> — {c.license}</span> : null}
+                    {c.artist ? <> <span className="text-muted">by</span> <span>{c.artist}</span></> : null}
+                    {c.license ? (
+                      <span className="text-muted">
+                        {' — '}
+                        {c.license_url ? (
+                          <a className="mv-credits__link" href={c.license_url} target="_blank" rel="noreferrer">
+                            {c.license}
+                          </a>
+                        ) : (
+                          c.license
+                        )}
+                      </span>
+                    ) : null}
+                    {c.source ? <> <span className="text-muted">·</span> <span>{c.source}</span></> : null}
                     {c.attribution ? <span className="text-muted"> · {c.attribution}</span> : null}
                   </li>
                 ))}
@@ -318,6 +338,7 @@ export default function MixVault() {
           (j) =>
             (j.type === 'dj_remix' || j.type === 'dj_chain') &&
             j.status === 'COMPLETED' &&
+            j.result?.expired !== true &&
             (!j.meta?.preview || showPreviews),
         )
         .sort((a, b) => (b.created_at > a.created_at ? 1 : -1)),

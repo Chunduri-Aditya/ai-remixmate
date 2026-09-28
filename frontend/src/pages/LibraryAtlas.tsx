@@ -30,6 +30,7 @@ import {
 } from 'lucide-react'
 import { libraryApi, analysisApi, stemsApi, favoritesApi, cratesApi, audioApi } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
+import { useFeatures } from '@/hooks/useFeatures'
 import { usePlayerStore } from '@/stores/playerStore'
 import type { SongInfo, Recommendation, SimilarTrack, BrokenSong } from '@/types'
 import { StemsPlayerRow } from '@/components/StemsPlayerRow'
@@ -83,6 +84,7 @@ interface SongRowProps {
   isFav: boolean
   expandedStems: string | null
   selected: boolean
+  stemSplit: boolean
   onFav: (name: string, add: boolean) => void
   onPlay: (name: string) => void
   onAnalyze: (name: string) => void
@@ -93,7 +95,7 @@ interface SongRowProps {
   onToggleSelect: (name: string) => void
 }
 
-function SongRow({ song, isFav, expandedStems, selected, onFav, onPlay, onAnalyze, onStems, onDelete, onSelect, onExpandStems, onToggleSelect }: SongRowProps) {
+function SongRow({ song, isFav, expandedStems, selected, stemSplit, onFav, onPlay, onAnalyze, onStems, onDelete, onSelect, onExpandStems, onToggleSelect }: SongRowProps) {
   const stemsExpanded = expandedStems === song.name
   return (
     <tr className="la-row la-row--clickable" onClick={() => onSelect(song)}>
@@ -155,14 +157,16 @@ function SongRow({ song, isFav, expandedStems, selected, onFav, onPlay, onAnalyz
           >
             <Cpu size={12} />
           </button>
-          <button
-            className="la-action-btn"
-            onClick={() => onStems(song.name)}
-            title={song.has_stems ? 'Stems already split' : 'Split stems'}
-            disabled={song.has_stems}
-          >
-            <Scissors size={12} />
-          </button>
+          {stemSplit && (
+            <button
+              className="la-action-btn"
+              onClick={() => onStems(song.name)}
+              title={song.has_stems ? 'Stems already split' : 'Split stems'}
+              disabled={song.has_stems}
+            >
+              <Scissors size={12} />
+            </button>
+          )}
           <a
             className={`la-action-btn ${!song.has_analysis ? 'la-action-btn--disabled' : ''}`}
             href={song.has_analysis ? audioApi.exportCuesUrl(song.name, 'rekordbox') : undefined}
@@ -284,10 +288,12 @@ function CratesSection({ song }: { song: SongInfo }) {
 
 function SongDrawer({
   song,
+  stemSplit,
   onClose,
   onLoadDeck,
 }: {
   song: SongInfo | null
+  stemSplit: boolean
   onClose: () => void
   onLoadDeck: (name: string, deck: 'a' | 'b') => void
 }) {
@@ -348,6 +354,11 @@ function SongDrawer({
                     licence
                   </a>
                 )}
+              </p>
+            )}
+            {!stemSplit && (
+              <p className="la-muted" style={{ marginTop: 'var(--space-2)', fontSize: '0.8em' }}>
+                Stem splitting is disabled on this deployment.
               </p>
             )}
           </div>
@@ -559,6 +570,8 @@ export default function LibraryAtlas() {
   const jobs          = useAppStore((s) => s.jobs)
   const queryClient   = useQueryClient()
   const navigate      = useNavigate()
+  const { data: features } = useFeatures()
+  const stemSplit     = features?.stem_split === true
 
   // --- Broken-song scan + delete ---
   const [scanningBroken, setScanningBroken] = useState(false)
@@ -1003,10 +1016,9 @@ export default function LibraryAtlas() {
           ) : songs.length === 0 ? (
             <div className="la-state">
               <Library size={32} strokeWidth={1} style={{ color: 'var(--color-text-faint)' }} />
-              <span className="text-muted">Library is empty — add songs in Operations</span>
-              <button className="la-empty-action" onClick={() => navigate('/operations')}>
-                Add songs in Operations <ArrowRight size={13} />
-              </button>
+              <span className="text-muted">
+                Library is empty — the operator ingests the catalogue with <code>python -m scripts.download</code>
+              </span>
             </div>
           ) : filtered.length === 0 ? (
             <div className="la-state">
@@ -1069,6 +1081,7 @@ export default function LibraryAtlas() {
                         isFav={favSet.has(song.name)}
                         expandedStems={expandedStems}
                         selected={selected.has(song.name)}
+                        stemSplit={stemSplit}
                         onFav={handleFav}
                         onPlay={handlePlay}
                         onAnalyze={handleAnalyze}
@@ -1105,6 +1118,7 @@ export default function LibraryAtlas() {
                         isFav={favSet.has(song.name)}
                         expandedStems={expandedStems}
                         selected={selected.has(song.name)}
+                        stemSplit={stemSplit}
                         onFav={handleFav}
                         onPlay={handlePlay}
                         onAnalyze={handleAnalyze}
@@ -1137,6 +1151,7 @@ export default function LibraryAtlas() {
 
         <SongDrawer
           song={selectedSong}
+          stemSplit={stemSplit}
           onClose={() => setSelectedSong(null)}
           onLoadDeck={handleLoadDeck}
         />
@@ -1151,9 +1166,11 @@ export default function LibraryAtlas() {
           <button className="la-bulk-btn" onClick={handleBulkAnalyze}>
             <BarChart2 size={12} /> Analyze
           </button>
-          <button className="la-bulk-btn" onClick={handleBulkStems}>
-            <Layers size={12} /> Split Stems
-          </button>
+          {stemSplit && (
+            <button className="la-bulk-btn" onClick={handleBulkStems}>
+              <Layers size={12} /> Split Stems
+            </button>
+          )}
           <button className="la-bulk-btn la-bulk-btn--ghost" onClick={() => setSelected(new Set())}>
             Clear
           </button>

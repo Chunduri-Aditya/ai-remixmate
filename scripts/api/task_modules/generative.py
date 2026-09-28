@@ -6,11 +6,37 @@ task_inpaint_transition    — VampNet masked acoustic token inpainting
 task_tokenize_stems        — Tokenize stems with EnCodec or DAC
 """
 
+import shutil
 from pathlib import Path
+from typing import Optional
 
 from scripts.api.jobs import update_job
 from scripts.core.audit import log_audit
-from scripts.core.paths import OUTPUTS_DIR
+from scripts.core.paths import user_outputs_dir
+
+
+def _publish_output(job_id: str, output_path: Optional[str]) -> Optional[Path]:
+    """Move a generated file into ``user_outputs_dir()/gen_<job_id>/``.
+
+    The core generators write into a shared legacy dir under OUTPUTS_DIR; the
+    acting user's own dir is what ``GET /outputs/{session}/{file}`` serves.
+    Returns the new path, or None when the generator produced no file.
+    """
+    src = Path(output_path) if output_path else None
+    if not src or not src.exists():
+        return None
+    dest_dir = user_outputs_dir() / f"gen_{job_id}"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / src.name
+    shutil.move(str(src), str(dest))
+    return dest
+
+
+def _stream_url(path: Optional[Path]) -> Optional[str]:
+    """``/outputs/<session>/<file>`` for a file under the user's output dir."""
+    if path is None:
+        return None
+    return f"/outputs/{path.parent.name}/{path.name}"
 
 
 def task_style_transfer(
@@ -59,26 +85,17 @@ def task_style_transfer(
     if not result.success:
         raise RuntimeError(result.error or "Style transfer failed")
 
-    # Build audio URL for frontend
-    output_path = Path(result.output_path) if result.output_path else None
-    audio_url = None
-    if output_path and output_path.exists():
-        # Relative to OUTPUTS_DIR for the /files/ endpoint
-        try:
-            rel = output_path.relative_to(OUTPUTS_DIR)
-            audio_url = f"/files/{rel}"
-        except ValueError:
-            audio_url = None
+    published = _publish_output(job_id, result.output_path)
 
     log_audit("style_transfer_complete", resource=song_name, job_id=job_id,
-              metadata={"output_path": result.output_path, "lufs": result.lufs,
+              metadata={"output_path": str(published) if published else None,
+                        "lufs": result.lufs,
                         "generation_time_sec": result.generation_time_sec})
 
     return {
         "song_name": song_name,
         "description": description,
-        "output_path": result.output_path,
-        "audio_url": audio_url,
+        "stream_url": _stream_url(published),
         "duration_sec": result.duration_sec,
         "lufs": result.lufs,
         "source_key": result.source_key,
@@ -135,23 +152,16 @@ def task_inpaint_transition(
     if not result.success:
         raise RuntimeError(result.error or "Inpainting failed")
 
-    output_path = Path(result.output_path) if result.output_path else None
-    audio_url = None
-    if output_path and output_path.exists():
-        try:
-            rel = output_path.relative_to(OUTPUTS_DIR)
-            audio_url = f"/files/{rel}"
-        except ValueError:
-            audio_url = None
+    published = _publish_output(job_id, result.output_path)
 
     log_audit("inpainting_complete", resource=f"{song_a} → {song_b}", job_id=job_id,
-              metadata={"output_path": result.output_path, "method": result.method})
+              metadata={"output_path": str(published) if published else None,
+                        "method": result.method})
 
     return {
         "song_a": song_a,
         "song_b": song_b,
-        "output_path": result.output_path,
-        "audio_url": audio_url,
+        "stream_url": _stream_url(published),
         "method": result.method,
         "duration_sec": result.duration_sec,
         "lufs": result.lufs,
