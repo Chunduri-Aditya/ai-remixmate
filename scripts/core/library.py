@@ -243,7 +243,10 @@ class LibraryManager:
         """Scan a single song directory and return a SongEntry."""
         size = sum(f.stat().st_size for f in song_path.rglob("*") if f.is_file())
         has_full = (song_path / "full.wav").exists()
-        stems = [s for s in self.STEM_NAMES if (song_path / f"{s}.wav").exists()]
+        stems = [
+            s for s in self.STEM_NAMES
+            if (song_path / f"{s}.flac").exists() or (song_path / f"{s}.wav").exists()
+        ]
 
         # Try to load existing license info
         source = None

@@ -167,15 +167,18 @@ def _build_vector(data: Dict[str, Any]) -> Optional[np.ndarray]:
         return None
 
 
-def _quick_features(wav_path: Path, sr: int = 22050, duration: float = 30.0) -> Dict[str, Any]:
+def _quick_features(song_name: str, sr: int = 22050, duration: float = 30.0) -> Dict[str, Any]:
     """
     Quick 30-second audio analysis to populate index fields for un-analysed songs.
-    Returns a partial metadata dict.  Falls back gracefully on any error.
+    Audio is resolved through audio_source.  Returns a partial metadata dict.
+    Falls back gracefully on any error.
     """
     data: Dict[str, Any] = {}
     try:
         import librosa
-        audio, _ = librosa.load(str(wav_path), sr=sr, mono=True, duration=duration)
+
+        from scripts.core.audio_source import load_source_audio
+        audio, _ = load_source_audio(song_name, sr=sr, mono=True, duration=duration)
 
         # BPM — same octave-correction as the real analysis pipeline
         # (beat_tracker.py) so this quick-index pass can't silently disagree
@@ -252,7 +255,7 @@ def _quick_features(wav_path: Path, sr: int = 22050, duration: float = 30.0) -> 
         data["chroma_vector"] = chroma.mean(axis=1).tolist()
 
     except Exception as exc:
-        log.debug("_quick_features failed for %s: %s", wav_path, exc)
+        log.debug("_quick_features failed for %s: %s", song_name, exc)
 
     return data
 
@@ -343,12 +346,19 @@ class MusicIndex:
 
         Data sources (in priority order):
           1. meta.json in the song directory (written by task_analyze / recommend)
-          2. Quick 30-second audio analysis from full.wav
-          3. Quick analysis from vocals.wav (if full.wav absent)
+          2. Quick 30-second audio analysis from the audio_source resolution
+             (full.wav, full_enhanced.wav, then FLAC or WAV stems)
 
-        Returns True on success, False if no audio was found.
+        Returns True on success, False if no audio was found or the folder is
+        a playlist artifact (same guard as ``rebuild``).
         """
         song_dir = LIBRARY_DIR / song_name
+
+        # ── Skip playlist artifacts (concatenated downloads are not one song) ──
+        from scripts.core.library import is_playlist_artifact
+        if is_playlist_artifact(song_dir):
+            log.warning("upsert_song: skipping playlist artifact %s", song_name)
+            return False
 
         # ── Load any existing cached metadata ─────────────────────────────
         meta: Dict[str, Any] = {}
@@ -364,14 +374,12 @@ class MusicIndex:
 
         # ── If vector is None or partial, do quick audio analysis ─────────
         if vec is None:
-            wav = song_dir / "full.wav"
-            if not wav.exists():
-                wav = song_dir / "vocals.wav"
-            if not wav.exists():
+            from scripts.core.audio_source import has_source_audio
+            if not has_source_audio(song_name):
                 log.debug("upsert_song: no audio for %s", song_name)
                 return False
 
-            fresh = _quick_features(wav)
+            fresh = _quick_features(song_name)
             meta.update(fresh)
 
             # Persist enriched meta back to meta.json

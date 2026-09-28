@@ -221,7 +221,8 @@ class CrateDigger:
         """
         Build the CLAP embedding index for all songs in the library.
 
-        Reads ``library/<song>/full.wav`` (or any FLAC/MP3 via librosa).
+        Resolves each song's audio through audio_source (full.wav,
+        full_enhanced.wav, then FLAC or WAV stems).
         Songs already indexed (same name) are skipped unless force=True.
 
         Parameters
@@ -271,29 +272,16 @@ class CrateDigger:
             if not force and name in existing:
                 continue
 
-            # Find audio file
-            audio_path = None
-            for ext in ("full.wav", "full.flac", "full.mp3"):
-                p = song_dir / ext
-                if p.exists():
-                    audio_path = p
-                    break
-            if audio_path is None:
-                # No full audio — try individual stems
-                for stem in ("vocals.flac", "vocals.wav", "other.flac", "other.wav"):
-                    p = song_dir / stem
-                    if p.exists():
-                        audio_path = p
-                        break
-            if audio_path is None:
+            # Find audio via audio_source (full.wav, full_enhanced.wav, stems)
+            from scripts.core.audio_source import has_source_audio, load_source_audio
+            if not has_source_audio(name):
                 log.debug("[crate_digger] Skipping %s — no audio file found", name)
                 continue
 
             try:
-                import librosa
-                audio, sr = librosa.load(str(audio_path), sr=None, mono=True, duration=90.0)
+                audio, sr = load_source_audio(name, sr=None, mono=True, duration=90.0)
             except Exception as exc:
-                log.warning("[crate_digger] Cannot load %s: %s", audio_path, exc)
+                log.warning("[crate_digger] Cannot load %s: %s", name, exc)
                 continue
 
             try:

@@ -36,6 +36,8 @@ from typing import Any, Dict, List, Optional
 import librosa
 import numpy as np
 
+from scripts.core.audio_source import has_source_audio, load_source_audio
+
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -57,18 +59,18 @@ EARLY_EXIT_THRESHOLD = 10
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _quick_bpm(wav_path: Path, duration: float = 10.0, sr: int = 22050) -> Optional[float]:
+def _quick_bpm(song_name: str, duration: float = 10.0, sr: int = 22050) -> Optional[float]:
     """
-    Load a short clip and estimate BPM.  Returns None on any failure.
+    Load a short clip (via audio_source) and estimate BPM.  Returns None on any failure.
     Using 10 s is enough for a reliable tempo estimate and loads in < 0.2 s.
     """
     try:
-        audio, _ = librosa.load(str(wav_path), sr=sr, mono=True, duration=duration)
+        audio, _ = load_source_audio(song_name, sr=sr, mono=True, duration=duration)
         tempo, _ = librosa.beat.beat_track(y=audio, sr=sr)
         bpm = float(np.atleast_1d(tempo)[0])
         return bpm if bpm > 0 else None
     except Exception as exc:
-        log.debug("_quick_bpm failed for %s: %s", wav_path, exc)
+        log.debug("_quick_bpm failed for %s: %s", song_name, exc)
         return None
 
 
@@ -100,11 +102,10 @@ def get_or_cache_bpm(song_dir: Path) -> Optional[float]:
     if "bpm" in data:
         return float(data["bpm"])
 
-    wav = song_dir / "full.wav"
-    if not wav.exists():
+    if not has_source_audio(song_dir.name):
         return None
 
-    bpm = _quick_bpm(wav)
+    bpm = _quick_bpm(song_dir.name)
     if bpm is not None:
         data["bpm"] = round(bpm, 1)
         _save_cache(song_dir, data)
@@ -340,12 +341,12 @@ def get_recommendations(
         log.warning("Could not determine BPM for source song: %s", source_dir.name)
         return []
 
-    # Collect candidate directories (exclude source, require full.wav)
+    # Collect candidate directories (exclude source, require source audio)
     all_dirs = [
         d for d in library_dir.iterdir()
         if d.is_dir()
         and d.name != source_dir.name
-        and (d / "full.wav").exists()
+        and has_source_audio(d.name)
     ]
 
     # Partition into cached vs uncached

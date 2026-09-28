@@ -160,6 +160,18 @@ def run_song_analysis(
         _meta = {}
         if _meta_path.exists():
             _meta = _json.loads(_meta_path.read_text())
+        # SongStructure has no beat_strength / tempo_stability / chroma_vector
+        # fields; take them from the structure when set, else from its
+        # music_vector (whose chroma_vector is the mean chroma_cqt). A chroma
+        # that is not 12 bins or is all zeros (the failure fallback) is omitted.
+        _mv = getattr(struct, "music_vector", None)
+        _bs = getattr(struct, "beat_strength", getattr(_mv, "beat_strength", None))
+        _ts = getattr(struct, "tempo_stability", getattr(_mv, "tempo_stability", None))
+        _chroma = getattr(struct, "chroma_vector", getattr(_mv, "chroma_vector", None))
+        if _chroma is not None:
+            _chroma = [float(x) for x in _chroma]
+        if _chroma is not None and (len(_chroma) != 12 or not any(_chroma)):
+            _chroma = None
         _meta.update({
             "bpm":                   round(struct.bpm, 1),
             "genre":                 genre.genre,
@@ -169,13 +181,13 @@ def run_song_analysis(
             "energy_mean":           round(struct.energy_mean, 4)     if hasattr(struct, "energy_mean") else None,
             "energy_std":            round(struct.energy_std,  4)     if hasattr(struct, "energy_std")  else None,
             "danceability":          round(struct.danceability, 4)    if hasattr(struct, "danceability") else None,
-            "beat_strength":         round(struct.beat_strength, 4)   if hasattr(struct, "beat_strength") else None,
-            "tempo_stability":       round(struct.tempo_stability, 4) if hasattr(struct, "tempo_stability") else None,
+            "beat_strength":         round(float(_bs), 4)             if _bs is not None else None,
+            "tempo_stability":       round(float(_ts), 4)             if _ts is not None else None,
             "vocal_density":         round(struct.vocal_density, 4)   if hasattr(struct, "vocal_density") else None,
             "vocal_mean_pitch_hz":   round(struct.vocal_mean_pitch_hz, 2)   if getattr(struct, "vocal_mean_pitch_hz", 0.0) else None,
             "vocal_voiced_fraction": round(struct.vocal_voiced_fraction, 4) if getattr(struct, "vocal_voiced_fraction", 0.0) else None,
             "spectral_centroid_hz":  round(struct.spectral_centroid_hz, 1) if hasattr(struct, "spectral_centroid_hz") else None,
-            "chroma_vector":         struct.chord_sequence if hasattr(struct, "chroma_vector") else None,
+            "chroma_vector":         _chroma,
         })
         _meta = {k: v for k, v in _meta.items() if v is not None}
         _meta_path.write_text(_json.dumps(_meta))

@@ -433,7 +433,7 @@ def compute_track_vector(
         audio:     Mono float32 audio array
         sr:        Sample rate
         bpm:       Pre-detected BPM (0.0 = auto-detect inside this function)
-        stems_dir: Directory containing Demucs stems (vocals.wav etc.)
+        stems_dir: Directory containing Demucs stems (vocals.flac or vocals.wav etc.)
                    — used for more accurate vocal density estimation.
 
     Returns:
@@ -489,6 +489,12 @@ def compute_track_vector(
     # ── Vocal density ─────────────────────────────────────────────────────────
     vocals_path: Optional[Path] = None
     if stems_dir:
+        # audio_source resolves the vocals stem as .flac or .wav.
+        from scripts.core.audio_source import stem_files
+        vocals_path = next(
+            (p for p in stem_files(Path(stems_dir).name) if p.stem == 'vocals'), None
+        )
+    if stems_dir and vocals_path is None:
         for fname in ('vocals.wav', 'vocal.wav', 'Vocals.wav'):
             p = Path(stems_dir) / fname
             if p.exists():
