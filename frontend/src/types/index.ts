@@ -272,7 +272,7 @@ export interface DJPreviewRequest {
 // --- Crates ---
 
 export interface Crate {
-  id: number
+  crate_id: string
   name: string
   song_count: number
   created_at: string

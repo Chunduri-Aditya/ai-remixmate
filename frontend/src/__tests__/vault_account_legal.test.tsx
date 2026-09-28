@@ -74,7 +74,8 @@ vi.mock('wavesurfer.js', () => ({
         destroy: () => undefined,
         getDuration: () => 0,
         getCurrentTime: () => 0,
-        load: () => undefined,
+        // wavesurfer's load() returns a Promise; WaveformDeck attaches .catch to it.
+        load: () => Promise.resolve(),
         on: () => undefined,
         playPause: () => undefined,
         setVolume: () => undefined,

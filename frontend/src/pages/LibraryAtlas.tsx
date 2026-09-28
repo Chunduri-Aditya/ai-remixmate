@@ -217,7 +217,7 @@ function CratesSection({ song }: { song: SongInfo }) {
     queryFn: async () => {
       const results = await Promise.all(
         allCrates.map((c) =>
-          cratesApi.songs(c.id).then((names) => ({ id: c.id, has: names.includes(song.name) }))
+          cratesApi.songs(c.crate_id).then((names) => ({ id: c.crate_id, has: names.includes(song.name) }))
         ),
       )
       return results.filter((r) => r.has).map((r) => r.id)
@@ -228,7 +228,7 @@ function CratesSection({ song }: { song: SongInfo }) {
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
 
-  async function toggleCrate(crateId: number, currently: boolean) {
+  async function toggleCrate(crateId: string, currently: boolean) {
     if (currently) {
       await cratesApi.removeSong(crateId, song.name)
     } else {
@@ -254,12 +254,12 @@ function CratesSection({ song }: { song: SongInfo }) {
       <span className="la-drawer__section-title">Crates</span>
       <div className="la-crates-list">
         {allCrates.map((c) => (
-          <label key={c.id} className="la-crate-item">
+          <label key={c.crate_id} className="la-crate-item">
             <input
               type="checkbox"
               className="la-checkbox"
-              checked={songCrates.includes(c.id)}
-              onChange={() => toggleCrate(c.id, songCrates.includes(c.id))}
+              checked={songCrates.includes(c.crate_id)}
+              onChange={() => toggleCrate(c.crate_id, songCrates.includes(c.crate_id))}
             />
             <span>{c.name}</span>
             <span className="text-muted font-mono la-crate-count">{c.song_count ?? ''}</span>

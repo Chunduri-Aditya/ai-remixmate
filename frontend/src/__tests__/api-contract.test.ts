@@ -37,7 +37,7 @@ afterEach(() => {
 
 describe('cratesApi wire contract', () => {
   it('addSong sends song_name, the key add_to_crate actually reads', async () => {
-    await cratesApi.addSong(7, 'Some Track')
+    await cratesApi.addSong('7', 'Some Track')
     expect(calls).toHaveLength(1)
     expect(calls[0].url).toContain('/crates/7/songs')
     expect(calls[0].method).toBe('POST')
@@ -51,7 +51,7 @@ describe('cratesApi wire contract', () => {
   })
 
   it('rename sends name, the key rename_crate reads', async () => {
-    await cratesApi.rename(3, 'Renamed')
+    await cratesApi.rename('3', 'Renamed')
     expect(calls[0].method).toBe('PATCH')
     expect(calls[0].body).toEqual({ name: 'Renamed' })
   })

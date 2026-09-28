@@ -22,6 +22,12 @@ interface WaveformDeckProps {
 
 const MIX_DECK_TOGGLE_EVENT = 'remixmate:mixdeck-toggle-playback'
 
+// destroy() aborts wavesurfer's in flight fetch; that AbortError is re-emitted
+// as 'error' and rethrown from load(), so it is teardown, not a load failure.
+function isAbortError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'AbortError'
+}
+
 export function WaveformDeck({ src, color, cueStart, cueEnd, shortcutTarget = false }: WaveformDeckProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const wsRef        = useRef<WaveSurfer | null>(null)
@@ -62,9 +68,15 @@ export function WaveformDeck({ src, color, cueStart, cueEnd, shortcutTarget = fa
     ws.on('play',   () => setPlaying(true))
     ws.on('pause',  () => setPlaying(false))
     ws.on('finish', () => setPlaying(false))
-    ws.on('error',  () => { setLoading(false); setErrored(true) })
+    ws.on('error',  (err) => {
+      if (isAbortError(err)) return
+      setLoading(false)
+      setErrored(true)
+    })
 
-    ws.load(src)
+    ws.load(src).catch((err: unknown) => {
+      if (!isAbortError(err)) throw err
+    })
 
     return () => {
       ws.destroy()

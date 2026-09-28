@@ -8,8 +8,9 @@
  *    component below consults it itself (LeftRail, useKeyboardShortcuts,
  *    MissionControl, LibraryAtlas, Operations), so each renders standalone
  *    under a QueryClientProvider + MemoryRouter and hides its own controls.
- *  - `generative: false` -> LeftRail has no "AI Lab" button, the `g a`
- *    shortcut does not navigate, MissionControl has no "AI Lab" quick action.
+ *  - `generative: false` -> LeftRail has no "AI Lab" button, neither the `g a`
+ *    chord nor Cmd/Ctrl+6 navigates, MissionControl has no "AI Lab" quick
+ *    action (the /ai-lab route itself is covered in shell/__tests__/AppShell.test.tsx).
  *  - `stem_split: false` -> LibraryAtlas renders no per row "Split stems"
  *    button and no bulk "Split Stems" button, and the song drawer shows one
  *    note matching /stem split\w*\b.*\b(off|disabled|unavailable|not available)/i.
@@ -211,6 +212,26 @@ describe('useKeyboardShortcuts', () => {
     const { qc } = mount(<ShortcutHarness />)
     await waitForFeatures(qc)
     pressChord('g', 'a')
+    expect(screen.getByTestId('path').textContent).toBe('/ai-lab')
+  })
+
+  it('ignores Cmd/Ctrl+6 when generative is off, while Cmd/Ctrl+2 still navigates', async () => {
+    installFetch(ALL_OFF)
+    const { qc } = mount(<ShortcutHarness />)
+    await waitForFeatures(qc)
+    fireEvent.keyDown(window, { key: '6', metaKey: true })
+    expect(screen.getByTestId('path').textContent).toBe('/mission-control')
+    fireEvent.keyDown(window, { key: '6', ctrlKey: true })
+    expect(screen.getByTestId('path').textContent).toBe('/mission-control')
+    fireEvent.keyDown(window, { key: '2', metaKey: true })
+    expect(screen.getByTestId('path').textContent).toBe('/library-atlas')
+  })
+
+  it('navigates to /ai-lab on Cmd/Ctrl+6 when generative is on', async () => {
+    installFetch(ALL_ON)
+    const { qc } = mount(<ShortcutHarness />)
+    await waitForFeatures(qc)
+    fireEvent.keyDown(window, { key: '6', metaKey: true })
     expect(screen.getByTestId('path').textContent).toBe('/ai-lab')
   })
 })

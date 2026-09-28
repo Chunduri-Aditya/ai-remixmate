@@ -4,7 +4,7 @@
    The canvas is router-controlled; the two side zones are persistent.
    ============================================================ */
 
-import { Suspense, lazy, useState } from 'react'
+import { Suspense, lazy, useState, type ReactNode } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { LeftRail } from './LeftRail'
 import { RightInspector } from './RightInspector'
@@ -15,6 +15,7 @@ import { ToastProvider } from '@/components/Toast'
 import { useJobToasts } from '@/hooks/useJobToasts'
 import { ShortcutsModal } from '@/components/ShortcutsModal'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+import { useFeatures } from '@/hooks/useFeatures'
 import { PageErrorBoundary } from '@/components/PageErrorBoundary'
 import { PlayerBar } from '@/components/PlayerBar'
 import './AppShell.css'
@@ -41,6 +42,16 @@ function PageFallback() {
       <div className="page-fallback__spinner" />
     </div>
   )
+}
+
+// B5.9: /ai-lab is not a page while `generative` is off. The flag counts as
+// off until it is known on (useFeatures), so the page never renders before
+// the answer; a loaded false redirects, matching the rail and the shortcuts.
+function RequireGenerative({ children }: { children: ReactNode }) {
+  const { data: features, isPending } = useFeatures()
+  if (features?.generative === true) return <>{children}</>
+  if (isPending) return <PageFallback />
+  return <Navigate to="/mission-control" replace />
 }
 
 export function AppShell() {
@@ -92,9 +103,11 @@ export function AppShell() {
                 </PageErrorBoundary>
               } />
               <Route path="ai-lab" element={
-                <PageErrorBoundary pageName="AI Lab">
-                  <Suspense fallback={<PageFallback />}><AILab /></Suspense>
-                </PageErrorBoundary>
+                <RequireGenerative>
+                  <PageErrorBoundary pageName="AI Lab">
+                    <Suspense fallback={<PageFallback />}><AILab /></Suspense>
+                  </PageErrorBoundary>
+                </RequireGenerative>
               } />
               <Route path="mix-vault" element={
                 <PageErrorBoundary pageName="Mix Vault">

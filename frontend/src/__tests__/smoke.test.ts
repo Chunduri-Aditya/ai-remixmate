@@ -14,7 +14,8 @@ vi.mock('wavesurfer.js', () => ({
     create: () => ({
       destroy: () => undefined,
       getDuration: () => 0,
-      load: () => undefined,
+      // wavesurfer's load() returns a Promise; WaveformDeck attaches .catch to it.
+      load: () => Promise.resolve(),
       on: () => undefined,
       playPause: () => undefined,
       setVolume: () => undefined,
@@ -106,8 +107,8 @@ vi.mock('@/lib/api', () => ({
   },
   cratesApi: {
     list: async () => [],
-    create: async () => ({ id: 1, name: 'Mock Crate', song_count: 0, created_at: new Date().toISOString() }),
-    rename: async () => ({ id: 1, name: 'Mock Crate', song_count: 0, created_at: new Date().toISOString() }),
+    create: async () => ({ crate_id: 'crate-1', name: 'Mock Crate', song_count: 0, created_at: new Date().toISOString() }),
+    rename: async () => ({ crate_id: 'crate-1', name: 'Mock Crate', song_count: 0, created_at: new Date().toISOString() }),
     delete: async () => undefined,
     songs: async () => [],
     addSong: async () => undefined,

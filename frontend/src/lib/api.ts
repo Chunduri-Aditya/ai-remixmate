@@ -322,17 +322,17 @@ export const cratesApi = {
   // allCrates.map() inside CratesSection on an object with no .map().
   list:    ()                           => get<{ crates: Crate[] }>('/crates').then((r) => r.crates ?? []),
   create:  (name: string)               => post<Crate>('/crates', { name }),
-  delete:  (id: number)                 => del<void>(`/crates/${id}`),
-  songs:   (id: number)                 => get<string[]>(`/crates/${id}/songs`),
+  delete:  (id: string)                 => del<void>(`/crates/${id}`),
+  songs:   (id: string)                 => get<string[]>(`/crates/${id}/songs`),
   // Backend POST /crates/{id}/songs reads `song_name`, not `name` — sending
   // `name` made every add-to-crate from Library Atlas 400 with
   // "'song_name' is required". Same shape-mismatch class as favoritesApi.list.
-  addSong: (id: number, name: string)   => post<void>(`/crates/${id}/songs`, { song_name: name }),
-  removeSong: (id: number, name: string) =>
+  addSong: (id: string, name: string)   => post<void>(`/crates/${id}/songs`, { song_name: name }),
+  removeSong: (id: string, name: string) =>
     del<void>(`/crates/${id}/songs/${encodeURIComponent(name)}`),
   // PATCH /crates/{id} exists on the backend (routers/crates.py rename_crate) and
   // src/__tests__/api-contract.test.ts pins its wire shape, so it stays.
-  rename:  (id: number, name: string)   => patch<Crate>(`/crates/${id}`, { name }),
+  rename:  (id: string, name: string)   => patch<Crate>(`/crates/${id}`, { name }),
 }
 
 // --- Tags ---

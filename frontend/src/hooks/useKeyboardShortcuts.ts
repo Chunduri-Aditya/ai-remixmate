@@ -78,6 +78,7 @@ export function useKeyboardShortcuts(
         e.preventDefault()
         const destination = NUMBER_NAV[Number(e.key) - 1]
         if (destination) {
+          if (destination.id === 'ai-lab' && !generative) return
           setActiveNav(destination.id)
           navigate(destination.path)
         }
