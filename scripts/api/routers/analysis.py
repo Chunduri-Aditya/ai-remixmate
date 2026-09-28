@@ -14,12 +14,12 @@ POST /library/build-clap-index         — build / update CLAP embedding index (
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from scripts.api import jobs as job_store
-from scripts.api.routers._helpers import _require_song, _check_job_cap
+from scripts.api.routers._helpers import _check_job_cap, _require_song
 from scripts.api.schemas import (
     AnalyzeRequest,
     BeatInfo,
@@ -62,8 +62,8 @@ def check_compatibility(req: CompatibilityRequest):
     computed from two of those looks like a real result (e.g. "57/100")
     while actually being a comparison of two empty objects.
     """
-    from scripts.core.track_metadata import TrackMetadata, MetadataClient
     from scripts.core.analysis_pipeline import has_analysis, run_song_analysis
+    from scripts.core.track_metadata import MetadataClient, TrackMetadata
 
     # Shape-only validation. Unlike every other song-taking endpoint this one
     # accepts songs that aren't in the library (step 3 below is a deliberate

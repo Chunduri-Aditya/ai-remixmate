@@ -40,8 +40,7 @@ Config integration
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -282,8 +281,11 @@ class BeatThisTracker:
             return LibrosaBeatTracker().track(audio, sr)
 
         try:
-            import tempfile, soundfile as _sf, librosa as _librosa
             import os
+            import tempfile
+
+            import librosa as _librosa
+            import soundfile as _sf
 
             # Beat This! works on file paths, not raw arrays.
             # Write to a temp WAV, run inference, clean up.

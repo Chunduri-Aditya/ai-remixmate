@@ -11,20 +11,6 @@ serves one operator-curated CC library, ingested via `python -m scripts.download
 """
 
 # Stem tasks
-from scripts.api.task_modules.stems import (
-    task_batch_compress_stems,
-    task_batch_stem_split,
-    task_compress_stems,
-    task_stem_split,
-)
-
-# Remix tasks
-from scripts.api.task_modules.remix import (
-    task_dj_chain,
-    task_dj_remix,
-    task_remix_preview,
-)
-
 # Analysis tasks
 from scripts.api.task_modules.analysis import (
     task_analyze,
@@ -44,6 +30,19 @@ from scripts.api.task_modules.generative import (
 # Lab tasks
 from scripts.api.task_modules.lab import (
     task_instrument_lab,
+)
+
+# Remix tasks
+from scripts.api.task_modules.remix import (
+    task_dj_chain,
+    task_dj_remix,
+    task_remix_preview,
+)
+from scripts.api.task_modules.stems import (
+    task_batch_compress_stems,
+    task_batch_stem_split,
+    task_compress_stems,
+    task_stem_split,
 )
 
 __all__ = [

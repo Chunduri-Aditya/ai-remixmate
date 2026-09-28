@@ -11,21 +11,18 @@ Covers:
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import pytest
 
-from scripts.core.dj_engine import (
-    _safe_ratio,
-    _safe_bpm,
-    _time_stretch,
-    DJEngine,
-    _MIN_STRETCH,
-    _MAX_STRETCH,
-)
 from scripts.core.dj_analysis import EQPlan, TransitionPlan
-
+from scripts.core.dj_engine import (
+    _MAX_STRETCH,
+    _MIN_STRETCH,
+    DJEngine,
+    _safe_bpm,
+    _safe_ratio,
+    _time_stretch,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

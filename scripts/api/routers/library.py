@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 
 from scripts.api import jobs as job_store
-from scripts.api.routers._helpers import _require_song, _song_info, _stem_file, _check_job_cap
+from scripts.api.routers._helpers import _check_job_cap, _require_song, _song_info, _stem_file
 from scripts.api.schemas import (
     DeleteBatchRequest,
     InitializeLibraryRequest,
@@ -125,6 +125,7 @@ def processing_status():
     every ~1s). Cheap — just file-existence checks, no audio decoding.
     """
     import time
+
     from scripts.api.routers._helpers import _stem_file
     from scripts.core.analysis_pipeline import has_analysis as _has_analysis
 
@@ -195,8 +196,8 @@ def storage_status():
     Storage overview backed by scripts/core/library.py:LibraryManager — pruning
     and LRU eviction logic that already existed but was never exposed via the API.
     """
-    from scripts.core.library import get_library_manager
     from scripts.core.config import cfg
+    from scripts.core.library import get_library_manager
 
     mgr = get_library_manager()
     songs = mgr.list_songs()
@@ -344,6 +345,7 @@ def get_song(name: str):
 @router.delete("/library/{name}", tags=["library"])
 def delete_song(name: str):
     import shutil
+
     from scripts.core.library import get_library_manager
 
     d = _require_song(name)
@@ -365,6 +367,7 @@ def delete_songs_batch(req: DeleteBatchRequest):
     frontend. Best-effort: one song failing to delete doesn't abort the rest.
     """
     import shutil
+
     from scripts.core.library import get_library_manager
 
     mgr = get_library_manager()
@@ -412,7 +415,7 @@ def scan_broken():
 @router.get("/library/{name}/audio", tags=["library"])
 def stream_audio(name: str):
     _require_song(name)
-    from scripts.core.audio_source import resolve_source_file, load_source_audio
+    from scripts.core.audio_source import load_source_audio, resolve_source_file
 
     # Prefer streaming an existing file (full.wav → full_enhanced.wav) directly.
     src = resolve_source_file(name)
@@ -423,6 +426,7 @@ def stream_audio(name: str):
     # stream the summed mix from memory (no library mutation).
     try:
         import io
+
         import soundfile as sf
         audio, sr = load_source_audio(name, sr=44100, mono=True)
         buf = io.BytesIO()
@@ -538,7 +542,10 @@ def export_cues(
     The first phrase boundary is used as Cue 1, each subsequent boundary as further cues.
     If no analysis exists, only Cue 1 at 0.0 s is exported and BPM is 0.
     """
-    import json, tempfile, shutil
+    import json
+    import shutil
+    import tempfile
+
     from fastapi.responses import FileResponse as _FileResponse
 
     song_dir = _require_song(name)

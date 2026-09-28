@@ -14,10 +14,9 @@ Coverage:
 
 from __future__ import annotations
 
-import threading
 import time
 import uuid
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -124,6 +123,7 @@ class TestRenderBSilence:
         with patch.dict(sys.modules, {"scipy": None, "scipy.signal": None}):
             # Re-import DJEngine with scipy blocked so it hits the fallback path
             import importlib
+
             import scripts.core.dj_engine as _mod
             importlib.reload(_mod)
             engine = _mod.DJEngine(sr=SR)
@@ -205,7 +205,9 @@ class TestCamelotSemitoneTable:
     def test_agrees_with_camelot_and_note_names(self):
         """Cross-check every (src, tgt) pair against manual derivation from CAMELOT."""
         from scripts.core.key_detection import (
-            pitch_shift_for_camelot, CAMELOT, NOTE_NAMES,
+            CAMELOT,
+            NOTE_NAMES,
+            pitch_shift_for_camelot,
         )
         # Build ground-truth reverse map
         camelot_to_semitone: dict[str, int] = {}
@@ -267,7 +269,7 @@ class TestJobsLifecycle:
         assert job["job_id"] == job_id
 
     def test_update_job_progress(self):
-        from scripts.api.jobs import create_job, update_job, get_job
+        from scripts.api.jobs import create_job, get_job, update_job
         from scripts.api.schemas import JobType
         with self._upsert_patch, self._conn_patch:
             job_id = create_job(JobType.SEPARATE)
@@ -278,7 +280,7 @@ class TestJobsLifecycle:
 
     def test_eta_guard_no_division_by_zero(self):
         """Elapsed = 0 must not crash — was: rate = progress / 0."""
-        from scripts.api.jobs import create_job, update_job, get_job
+        from scripts.api.jobs import create_job, get_job, update_job
         from scripts.api.schemas import JobType
         with self._upsert_patch, self._conn_patch:
             job_id = create_job(JobType.DJ_REMIX)
@@ -291,7 +293,7 @@ class TestJobsLifecycle:
         assert job["eta_sec"] >= 0
 
     def test_cancel_marks_cancelled(self):
-        from scripts.api.jobs import create_job, cancel_job, get_job
+        from scripts.api.jobs import cancel_job, create_job, get_job
         from scripts.api.schemas import JobType
         with self._upsert_patch, self._conn_patch:
             job_id = create_job(JobType.DOWNLOAD)
@@ -304,8 +306,8 @@ class TestJobsLifecycle:
 
     def test_job_to_response_status_is_completed_not_done(self):
         """REST serializer must return COMPLETED (uppercase) not 'done'."""
-        from scripts.api.jobs import create_job, job_to_response, get_job
-        from scripts.api.schemas import JobType, JobStatus
+        from scripts.api.jobs import create_job, get_job, job_to_response
+        from scripts.api.schemas import JobStatus, JobType
         with self._upsert_patch, self._conn_patch:
             job_id = create_job(JobType.DJ_REMIX)
             import scripts.api.jobs as _jobs_mod
@@ -333,7 +335,7 @@ class TestClashPathBassSwap:
 
     @pytest.mark.dj_analysis
     def test_bass_swap_bar_at_midpoint_after_clash_shortening(self):
-        from scripts.core.dj_analysis import plan_transition, SongStructure
+        from scripts.core.dj_analysis import SongStructure, plan_transition
 
         def _song(key="C", mode="major", bpm=128.0, camelot="8B"):
             # Real constructor (not __new__) so every defaulted field exists —
@@ -418,7 +420,7 @@ class TestMaskingAwareMultibandEQ:
     def test_collision_reduced_in_high_mid_band(self):
         """Masker (A)'s energy in the collision band (index 3) should drop
         measurably after unmask_stem_pair; the maskee (B) should not."""
-        from scripts.core.spectral_mixing import unmask_stem_pair, compute_band_energies
+        from scripts.core.spectral_mixing import compute_band_energies, unmask_stem_pair
 
         a = self._busy_track_a()
         b = self._sparse_track_b()
@@ -451,7 +453,7 @@ class TestMaskingAwareMultibandEQ:
         """protect_bands=[0] must leave the bass band untouched even though
         it's A's loudest band and would otherwise be a candidate for gain
         changes in a naive implementation."""
-        from scripts.core.spectral_mixing import unmask_stem_pair, compute_band_energies
+        from scripts.core.spectral_mixing import compute_band_energies, unmask_stem_pair
 
         a = self._busy_track_a()
         b = self._sparse_track_b()
@@ -496,7 +498,7 @@ class TestMaskingAwareMultibandEQ:
     def test_strength_monotonicity(self):
         """Higher `strength` should never produce less attenuation than a
         lower strength, in the collision band, up to max_atten_db."""
-        from scripts.core.spectral_mixing import unmask_stem_pair, compute_band_energies
+        from scripts.core.spectral_mixing import compute_band_energies, unmask_stem_pair
 
         a = self._busy_track_a()
         b = self._sparse_track_b()

@@ -10,8 +10,6 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -32,7 +30,7 @@ def _digger_with_songs(n: int = 5) -> "CrateDigger":
     Return a fresh CrateDigger pre-loaded with n synthetic songs.
     Bypasses disk I/O completely.
     """
-    from scripts.core.crate_digger import CrateDigger, CLAP_DIM
+    from scripts.core.crate_digger import CrateDigger
     d = CrateDigger.__new__(CrateDigger)
     import threading
     d._lock = threading.RLock()
@@ -122,8 +120,9 @@ class TestFindSimilarByTextFallback:
 
     def test_text_matches_song_name(self):
         """Song_2 should surface when query contains '2'."""
-        from scripts.core.crate_digger import CrateDigger, CLAP_DIM
         import threading
+
+        from scripts.core.crate_digger import CrateDigger
 
         d = CrateDigger.__new__(CrateDigger)
         d._lock = threading.RLock()
@@ -197,8 +196,9 @@ class TestFilters:
 
 class TestEmptyIndex:
     def test_empty_index_returns_empty_list(self):
-        from scripts.core.crate_digger import CrateDigger
         import threading
+
+        from scripts.core.crate_digger import CrateDigger
         d = CrateDigger.__new__(CrateDigger)
         d._lock = threading.RLock()
         d._embeddings = None
@@ -210,8 +210,9 @@ class TestEmptyIndex:
         assert results == []
 
     def test_is_empty_when_no_embeddings(self):
-        from scripts.core.crate_digger import CrateDigger
         import threading
+
+        from scripts.core.crate_digger import CrateDigger
         d = CrateDigger.__new__(CrateDigger)
         d._lock = threading.RLock()
         d._embeddings = None
@@ -253,7 +254,7 @@ class TestGetStats:
 
 class TestModuleSingleton:
     def test_get_digger_returns_crate_digger(self):
-        from scripts.core.crate_digger import get_digger, CrateDigger
+        from scripts.core.crate_digger import CrateDigger, get_digger
         d = get_digger()
         assert isinstance(d, CrateDigger)
 
@@ -270,8 +271,9 @@ class TestModuleSingleton:
 
 class TestIndexLibraryEdgeCases:
     def test_empty_library_returns_zero(self):
-        from scripts.core.crate_digger import CrateDigger
         import threading
+
+        from scripts.core.crate_digger import CrateDigger
         d = CrateDigger.__new__(CrateDigger)
         d._lock = threading.RLock()
         d._embeddings = None

@@ -44,8 +44,8 @@ import logging
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional
 
 from scripts.core.gpu import get_device
 
@@ -319,8 +319,8 @@ def _register_default_models(mgr: ModelManager) -> None:
     # ── MusicGen melody (transformers, ~8 GB on MPS) ─────────────────────
     def _load_musicgen():
         from transformers import (
-            MusicgenMelodyForConditionalGeneration,
             AutoProcessor,
+            MusicgenMelodyForConditionalGeneration,
         )
         model_id = _get_cfg_value("generative", "musicgen_model",
                                    "facebook/musicgen-melody")
@@ -341,7 +341,7 @@ def _register_default_models(mgr: ModelManager) -> None:
 
     # ── EnCodec 24kHz (transformers, ~0.5 GB) ─────────────────────────────
     def _load_encodec():
-        from transformers import EncodecModel, AutoProcessor
+        from transformers import AutoProcessor, EncodecModel
         log.info("[model_manager] Loading EnCodec 24kHz…")
         processor = AutoProcessor.from_pretrained("facebook/encodec_24khz")
         model = EncodecModel.from_pretrained("facebook/encodec_24khz")

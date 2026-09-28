@@ -6,13 +6,14 @@ MFCC, and calculating similarities between audio files.
 """
 
 from __future__ import annotations
-import json
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
-import numpy as np
-import librosa
-from dataclasses import dataclass, asdict
 
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import librosa
+import numpy as np
 
 # Audio processing constants
 TARGET_SR = 22050  # Target sample rate for consistency
@@ -27,7 +28,7 @@ class FeatureVector:
     tempo: float
     chroma: np.ndarray  # (12,) - mean chroma features
     mfcc: np.ndarray    # (n_mfcc,) - mean MFCC features
-    
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -35,7 +36,7 @@ class FeatureVector:
             "chroma": self.chroma.tolist() if hasattr(self.chroma, 'tolist') else list(self.chroma),
             "mfcc": self.mfcc.tolist() if hasattr(self.mfcc, 'tolist') else list(self.mfcc),
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict) -> FeatureVector:
         """Create from dictionary (JSON deserialization)."""
@@ -90,11 +91,11 @@ def extract_features_from_wav(file_path: Path) -> FeatureVector:
         FeatureVector containing tempo, chroma, and MFCC features
     """
     y, sr = load_audio(file_path)
-    
+
     tempo = tempo_feature(y, sr)
     chroma = chroma_feature(y, sr)
     mfcc = mfcc_feature(y, sr)
-    
+
     return FeatureVector(tempo=tempo, chroma=chroma, mfcc=mfcc)
 
 
@@ -111,10 +112,10 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     # Normalize vectors
     norm_a = np.linalg.norm(a)
     norm_b = np.linalg.norm(b)
-    
+
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    
+
     return float(np.dot(a, b) / (norm_a * norm_b))
 
 
@@ -126,11 +127,11 @@ def load_embeddings() -> Dict[str, Dict]:
         Dictionary mapping song names to feature dictionaries
     """
     from .paths import embeddings_path
-    
+
     embeddings_file = embeddings_path()
     if not embeddings_file.exists():
         return {}
-    
+
     try:
         with embeddings_file.open('r', encoding='utf-8') as f:
             return json.load(f)
@@ -146,10 +147,10 @@ def save_embeddings(embeddings: Dict[str, Dict]) -> None:
         embeddings: Dictionary mapping song names to feature dictionaries
     """
     from .paths import embeddings_path, ensure_directories
-    
+
     ensure_directories()
     embeddings_file = embeddings_path()
-    
+
     with embeddings_file.open('w', encoding='utf-8') as f:
         json.dump(embeddings, f, indent=2, ensure_ascii=False)
 

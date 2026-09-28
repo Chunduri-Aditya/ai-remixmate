@@ -53,7 +53,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
@@ -64,7 +64,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 try:
-    from scripts.core.paths import LIBRARY_DIR, DATA_DIR
+    from scripts.core.paths import DATA_DIR, LIBRARY_DIR
 except Exception:
     _here = Path(__file__).parents[2]
     LIBRARY_DIR = _here / "library"

@@ -9,6 +9,10 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from scripts.api import jobs as job_store
+from scripts.api.schemas import SongInfo
+from scripts.core.paths import LIBRARY_DIR
+
 # Song names on disk are produced by scripts.core.paths.sanitize_song_name()
 # — the single shared source of truth for "what characters are allowed in a
 # song name", also used by scripts/download.py:_sanitize(). Both used to be
@@ -19,11 +23,6 @@ from fastapi import HTTPException
 # keep this file's existing CodeQL-recognized-sanitizer shape intact.
 # This pattern is used as an explicit CodeQL-recognized sanitizer in _require_song.
 from scripts.core.paths import SONG_NAME_RE as _SAFE_SONG_NAME_RE
-
-from scripts.api import jobs as job_store
-from scripts.api.schemas import SongInfo
-from scripts.core.paths import LIBRARY_DIR
-
 
 # ---------------------------------------------------------------------------
 # Helper functions

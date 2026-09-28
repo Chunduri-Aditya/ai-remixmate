@@ -18,7 +18,6 @@ Run:
 from __future__ import annotations
 
 import json
-import sys
 import time
 from pathlib import Path
 
@@ -66,8 +65,9 @@ def _make_audio(
 class TestConfig:
     def test_all_sections_are_dataclasses(self):
         """All config sections must resolve to typed dataclasses, not dicts."""
-        from scripts.core.config import cfg
         import dataclasses
+
+        from scripts.core.config import cfg
 
         for section_name in ("audio", "remix", "separation", "download",
                               "metadata", "dj", "library", "database",
@@ -109,14 +109,14 @@ class TestConfig:
 
 class TestLicense:
     def test_youtube_tos(self):
-        from scripts.core.license import classify_license, LicenseType
+        from scripts.core.license import LicenseType, classify_license
         lic = classify_license("youtube")
         assert lic.license_type == LicenseType.YOUTUBE_TOS
         assert lic.commercial_ok is False
         assert lic.derivatives_ok is False
 
     def test_jamendo_cc_by(self):
-        from scripts.core.license import classify_license, LicenseType
+        from scripts.core.license import LicenseType, classify_license
         lic = classify_license(
             "jamendo",
             license_url="https://creativecommons.org/licenses/by/4.0/"
@@ -126,7 +126,7 @@ class TestLicense:
         assert lic.attribution_required is True
 
     def test_jamendo_cc_by_nc(self):
-        from scripts.core.license import classify_license, LicenseType
+        from scripts.core.license import LicenseType, classify_license
         lic = classify_license(
             "jamendo",
             license_url="https://creativecommons.org/licenses/by-nc/4.0/"
@@ -135,7 +135,7 @@ class TestLicense:
         assert lic.commercial_ok is False
 
     def test_cc0_fully_free(self):
-        from scripts.core.license import classify_license, LicenseType
+        from scripts.core.license import LicenseType, classify_license
         lic = classify_license(
             "jamendo",
             license_url="https://creativecommons.org/publicdomain/zero/1.0/"
@@ -145,13 +145,13 @@ class TestLicense:
         assert lic.attribution_required is False
 
     def test_unknown_source_is_conservative(self):
-        from scripts.core.license import classify_license, LicenseType
+        from scripts.core.license import classify_license
         lic = classify_license("unknown_source")
         assert lic.commercial_ok is False
 
     def test_youtube_cc_video(self):
         """YouTube videos explicitly marked CC-BY should get CC_BY, not YOUTUBE_TOS."""
-        from scripts.core.license import classify_license, LicenseType
+        from scripts.core.license import LicenseType, classify_license
         lic = classify_license(
             "youtube",
             license_str="Creative Commons Attribution licence (reuse allowed)"
@@ -173,7 +173,7 @@ class TestLicense:
         assert "YouTube" in warn
 
     def test_parse_cc_url_variants(self):
-        from scripts.core.license import parse_cc_url, LicenseType
+        from scripts.core.license import LicenseType, parse_cc_url
         cases = [
             ("https://creativecommons.org/licenses/by/4.0/",       LicenseType.CC_BY),
             ("https://creativecommons.org/licenses/by-sa/3.0/",    LicenseType.CC_BY_SA),
@@ -221,7 +221,7 @@ class TestTrackMetadata:
         assert dist == 999
 
     def test_compatibility_perfect_match(self):
-        from scripts.core.track_metadata import TrackMetadata, MetadataClient
+        from scripts.core.track_metadata import MetadataClient, TrackMetadata
         client = MetadataClient()
         a = TrackMetadata(bpm=128.0, key="C", mode="major", camelot="8B", energy=0.8)
         b = TrackMetadata(bpm=128.0, key="C", mode="major", camelot="8B", energy=0.8)
@@ -231,7 +231,7 @@ class TestTrackMetadata:
         assert compat["compatible"] is True
 
     def test_compatibility_bpm_close(self):
-        from scripts.core.track_metadata import TrackMetadata, MetadataClient
+        from scripts.core.track_metadata import MetadataClient, TrackMetadata
         client = MetadataClient()
         a = TrackMetadata(bpm=128.0, camelot="8B", energy=0.8)
         b = TrackMetadata(bpm=130.0, camelot="8B", energy=0.8)
@@ -240,7 +240,7 @@ class TestTrackMetadata:
         assert compat["bpm_score"] >= 0.75
 
     def test_compatibility_bpm_mismatch(self):
-        from scripts.core.track_metadata import TrackMetadata, MetadataClient
+        from scripts.core.track_metadata import MetadataClient, TrackMetadata
         client = MetadataClient()
         a = TrackMetadata(bpm=128.0, camelot="8B", energy=0.8)
         b = TrackMetadata(bpm=175.0, camelot="8B", energy=0.8)
@@ -361,6 +361,7 @@ class TestLibraryManager:
         """prune_raw should delete full.wav when all four stems exist."""
         import numpy as np
         import soundfile as sf
+
         from scripts.core.library import LibraryManager
         lib = tmp_path / "lib"
         song = lib / "FullSong"
@@ -404,6 +405,7 @@ class TestLibraryManager:
         redundant once real stems are on disk."""
         import numpy as np
         import soundfile as sf
+
         from scripts.core.library import LibraryManager
         lib = tmp_path / "lib"
         song = lib / "DoneSong"
@@ -424,6 +426,7 @@ class TestLibraryManager:
         not treat a FLAC-compressed song as still missing stems."""
         import numpy as np
         import soundfile as sf
+
         from scripts.core.library import LibraryManager
         lib = tmp_path / "lib"
         song = lib / "FlacSong"
@@ -444,6 +447,7 @@ class TestLibraryManager:
         source get deleted out from under it."""
         import numpy as np
         import soundfile as sf
+
         from scripts.core.library import LibraryManager
         lib = tmp_path / "lib"
         song = lib / "CorruptStemSong"
@@ -483,6 +487,7 @@ class TestLibraryManager:
         isolating whether Pass 1 ever touches the zero-stem song's full.wav."""
         import numpy as np
         import soundfile as sf
+
         from scripts.core.library import LibraryManager
 
         lib = tmp_path / "lib"
@@ -533,6 +538,7 @@ class TestLibraryManager:
         have satisfied the budget."""
         import numpy as np
         import soundfile as sf
+
         from scripts.core.library import LibraryManager
 
         lib = tmp_path / "lib"
@@ -562,6 +568,7 @@ class TestLibraryManager:
         plain Lock would deadlock the moment a locked method called another
         locked method without releasing first."""
         import threading
+
         from scripts.core.library import LibraryManager
 
         lib = tmp_path / "lib"
@@ -587,6 +594,7 @@ class TestLibraryManager:
         register()/prune_raw() for its own song) must not lose entries to
         interleaved _load_index() -> mutate -> _save_index() cycles."""
         import threading
+
         from scripts.core.library import LibraryManager
 
         lib = tmp_path / "lib"
@@ -735,7 +743,7 @@ class TestPlaylistArtifactGuard:
 
 class TestGenreDetection:
     def test_returns_valid_genre(self):
-        from scripts.core.genre import detect_genre, GENRE_PRESETS
+        from scripts.core.genre import GENRE_PRESETS, detect_genre
         audio = _make_audio(duration=10.0, bpm=128.0)
         result = detect_genre(audio, SR)
         assert result.genre in GENRE_PRESETS
@@ -758,7 +766,7 @@ class TestGenreDetection:
         assert 0.0 <= preset.inst_sidechain_amount <= 1.0
 
     def test_get_preset_by_name(self):
-        from scripts.core.genre import get_preset, GENRE_PRESETS
+        from scripts.core.genre import GENRE_PRESETS, get_preset
         for name in GENRE_PRESETS:
             p = get_preset(name)
             assert p.genre == name
@@ -851,7 +859,7 @@ class TestDJStructureAnalysis:
 
 class TestDJTransitionPlanner:
     def _make_structure(self, bpm: float, total_bars: int = 64):
-        from scripts.core.dj_engine import SongStructure, Section
+        from scripts.core.dj_engine import Section, SongStructure
         bar_sec = 60.0 / bpm * 4
         bars = [(i * bar_sec, (i + 1) * bar_sec) for i in range(total_bars)]
         sections = [
@@ -992,7 +1000,7 @@ class TestDJTransitionPlanner:
 @pytest.mark.dj_analysis
 class TestDJRenderer:
     def _make_structure(self, bpm: float, total_bars: int = 32):
-        from scripts.core.dj_engine import SongStructure, Section
+        from scripts.core.dj_engine import Section, SongStructure
         bar_sec = 60.0 / bpm * 4
         bars = [(i * bar_sec, (i + 1) * bar_sec) for i in range(total_bars)]
         sections = [
@@ -1080,7 +1088,7 @@ def _make_structure_for_render(bpm: float, total_bars: int = 10):
     exit point within the actual audio (not past the end like the old
     hardcoded 32-bar / 64-second structure did).
     """
-    from scripts.core.dj_engine import SongStructure, Section
+    from scripts.core.dj_engine import Section, SongStructure
     bar_sec = 60.0 / bpm * 4
     bars = [(i * bar_sec, (i + 1) * bar_sec) for i in range(total_bars)]
     q = max(1, total_bars // 4)          # quarter-length in bars
@@ -1140,8 +1148,8 @@ class TestStemLufsNormalization:
         four of them together. Without per-stem LUFS normalization the sum of
         four near-full-scale stems would clip hard.
         """
-        from scripts.core.dj_engine import DJEngine
         from scripts.core.dj_analysis import plan_transition
+        from scripts.core.dj_engine import DJEngine
 
         sr, bpm, dur = 22050, 120.0, 20.0
         dir_a, dir_b = self._make_stem_dirs(tmp_path, sr, bpm, dur,
@@ -1171,8 +1179,8 @@ class TestStemLufsNormalization:
         whose first and second halves are within 12 dB of each other —
         rather than the raw +20 dB jump that would happen without normalization.
         """
-        from scripts.core.dj_engine import DJEngine
         from scripts.core.dj_analysis import plan_transition
+        from scripts.core.dj_engine import DJEngine
 
         sr, bpm, dur = 22050, 120.0, 20.0
         dir_a, dir_b = self._make_stem_dirs(tmp_path, sr, bpm, dur,
@@ -1220,8 +1228,8 @@ class TestBassSwap:
         contribution should be near-zero in the second half of the transition
         window, confirming that the swap envelope cuts A's bass early.
         """
-        from scripts.core.dj_engine import DJEngine
         from scripts.core.dj_analysis import plan_transition
+        from scripts.core.dj_engine import DJEngine
 
         sr, bpm, dur = 22050, 120.0, 20.0
         dir_a = tmp_path / "stems_a"
@@ -1390,7 +1398,7 @@ class TestSSMBoundaries:
         When phrase_boundaries are present, plan.exit_time_a must be a valid
         positive float — confirming the SSM refinement branch executed without error.
         """
-        from scripts.core.dj_analysis import plan_transition, SongStructure, Section
+        from scripts.core.dj_analysis import Section, SongStructure, plan_transition
 
         bpm = 120.0
         total_bars = 32

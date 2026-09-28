@@ -13,9 +13,9 @@ processing is fast).  For very large libraries, wrap in a background job.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/setlist", tags=["setlist"])
@@ -207,7 +207,8 @@ def _build_wordplay_bonus(
     SetlistPlanner doesn't know about wordplay — we patch ``transition_cost``
     results post-hoc via a monkey-patched override map.
     """
-    from scripts.core.wordplay import TrackInput as WPTrackInput, find_wordplay_pairs
+    from scripts.core.wordplay import TrackInput as WPTrackInput
+    from scripts.core.wordplay import find_wordplay_pairs
 
     token = genius_token or os.getenv("GENIUS_TOKEN")
     if not token or wordplay_weight <= 0:
@@ -392,7 +393,8 @@ def find_wordplay(req: WordplayRequest):
 
     Tip: get a free token at https://genius.com/api-clients
     """
-    from scripts.core.wordplay import TrackInput as WPTrackInput, find_wordplay_pairs
+    from scripts.core.wordplay import TrackInput as WPTrackInput
+    from scripts.core.wordplay import find_wordplay_pairs
 
     token = req.genius_token or os.getenv("GENIUS_TOKEN")
     if not token:

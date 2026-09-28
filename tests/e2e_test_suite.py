@@ -10,27 +10,26 @@ This test suite validates the complete pipeline with quality thresholds:
 """
 
 from __future__ import annotations
-import sys
+
 import json
+import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
-import numpy as np
-import librosa
+from typing import Dict, Tuple
 
+import librosa
+import numpy as np
 
 from scripts.core.database import RemixMateDatabase
-from scripts.core.musical_analysis import MusicalAnalyzer
-from scripts.core.real_optimizer import RealOptimizer
-from scripts.core.pro_audio_chain import ProfessionalAudioChain
 from scripts.core.metrics import AudioMetrics
-from scripts.core.features import extract_features_from_wav
-from scripts.core.paths import vocals_path, other_path, OUTPUT_DIR, ensure_directories
+from scripts.core.musical_analysis import MusicalAnalyzer
+from scripts.core.pro_audio_chain import ProfessionalAudioChain
+from scripts.core.real_optimizer import RealOptimizer
 
 
 class E2ETestSuite:
     """End-to-end test suite for AI RemixMate."""
-    
+
     def __init__(self):
         self.db = RemixMateDatabase()
         self.musical_analyzer = MusicalAnalyzer()
@@ -38,7 +37,7 @@ class E2ETestSuite:
         self.audio_chain = ProfessionalAudioChain()
         self.metrics = AudioMetrics()
         self.results = []
-        
+
         # Quality thresholds
         self.thresholds = {
             'max_clipping_percent': 1.0,
@@ -49,7 +48,7 @@ class E2ETestSuite:
             'min_perceptual_quality': 0.5,
             'min_intelligibility': 0.4
         }
-    
+
     def create_test_audio(self, duration: float = 30.0, sr: int = 44100,
                           seed: int = 42) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -96,36 +95,36 @@ class E2ETestSuite:
         instrumentals += 0.005 * rng.standard_normal(len(instrumentals))
 
         return vocals, instrumentals
-    
+
     def test_easy_pair(self) -> Dict:
         """Test with easy pair (same key/BPM ±2)."""
         print("🧪 Testing easy pair (same key/BPM ±2)...")
-        
+
         # Create similar test audio
         vocals1, instrumentals1 = self.create_test_audio(duration=20.0)
         vocals2, instrumentals2 = self.create_test_audio(duration=20.0)
-        
+
         # Slightly adjust tempo (within ±2 BPM tolerance)
         vocals2 = librosa.effects.time_stretch(vocals2, rate=1.02)  # 2% faster
-        
+
         # Test musical analysis
         analysis = self.musical_analyzer.analyze_musical_compatibility(vocals1, vocals2)
-        
+
         # Test optimization
         optimization_result = self.optimizer.optimize(vocals1, vocals2, max_iterations=50)
-        
+
         # Test audio processing
         final_mix, processing_info = self.audio_chain.process_remix(vocals1, vocals2)
-        
+
         # Add final mix to processing info for validation
         processing_info['final_mix'] = final_mix
-        
+
         # Test quality metrics
         quality_results = self.metrics.calculate_quality_metrics(vocals1, vocals2, final_mix, 44100)
-        
+
         # Validate against thresholds
         validation = self._validate_quality(quality_results, analysis, processing_info)
-        
+
         result = {
             'test_name': 'easy_pair',
             'description': 'Same key/BPM ±2',
@@ -140,42 +139,42 @@ class E2ETestSuite:
             'validation': validation,
             'passed': validation['overall_pass']
         }
-        
+
         self.results.append(result)
         return result
-    
+
     def test_tough_pair(self) -> Dict:
         """Test with tough pair (different key, BPM ±8)."""
         print("🧪 Testing tough pair (different key, BPM ±8)...")
-        
+
         # Create different test audio
         vocals1, instrumentals1 = self.create_test_audio(duration=20.0)
         vocals2, instrumentals2 = self.create_test_audio(duration=20.0)
-        
+
         # Adjust tempo significantly (±8 BPM = ~6.7% change)
         vocals2 = librosa.effects.time_stretch(vocals2, rate=1.067)  # 6.7% faster
-        
+
         # Adjust pitch (different key)
         vocals2 = librosa.effects.pitch_shift(vocals2, sr=44100, n_steps=2)  # 2 semitones up
-        
+
         # Test musical analysis
         analysis = self.musical_analyzer.analyze_musical_compatibility(vocals1, vocals2)
-        
+
         # Test optimization
         optimization_result = self.optimizer.optimize(vocals1, vocals2, max_iterations=50)
-        
+
         # Test audio processing
         final_mix, processing_info = self.audio_chain.process_remix(vocals1, vocals2)
-        
+
         # Add final mix to processing info for validation
         processing_info['final_mix'] = final_mix
-        
+
         # Test quality metrics
         quality_results = self.metrics.calculate_quality_metrics(vocals1, vocals2, final_mix, 44100)
-        
+
         # Validate against thresholds
         validation = self._validate_quality(quality_results, analysis, processing_info)
-        
+
         result = {
             'test_name': 'tough_pair',
             'description': 'Different key, BPM ±8',
@@ -190,10 +189,10 @@ class E2ETestSuite:
             'validation': validation,
             'passed': validation['overall_pass']
         }
-        
+
         self.results.append(result)
         return result
-    
+
     def create_matched_key_audio(self, duration: float = 20.0, sr: int = 44100,
                                   seed: int = 99) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -246,22 +245,22 @@ class E2ETestSuite:
 
         # Make vocals very quiet (the actual focus of this test)
         vocals = vocals * 0.1  # −20 dB quieter
-        
+
         # Test musical analysis
         analysis = self.musical_analyzer.analyze_musical_compatibility(vocals, instrumentals)
-        
+
         # Test optimization
         optimization_result = self.optimizer.optimize(vocals, instrumentals, max_iterations=50)
-        
+
         # Test audio processing
         final_mix, processing_info = self.audio_chain.process_remix(vocals, instrumentals)
-        
+
         # Test quality metrics
         quality_results = self.metrics.calculate_quality_metrics(vocals, instrumentals, final_mix, 44100)
-        
+
         # Validate against thresholds
         validation = self._validate_quality(quality_results, analysis, processing_info)
-        
+
         result = {
             'test_name': 'vocals_light',
             'description': 'Vocals-light track',
@@ -276,10 +275,10 @@ class E2ETestSuite:
             'validation': validation,
             'passed': validation['overall_pass']
         }
-        
+
         self.results.append(result)
         return result
-    
+
     def _validate_quality(self, quality_results, analysis, processing_info) -> Dict:
         """Validate quality against thresholds."""
         # --- Audio metrics ---
@@ -323,25 +322,25 @@ class E2ETestSuite:
         validation['pass_rate'] = sum(validation.values()) / len(validation)
 
         return validation
-    
+
     def run_all_tests(self) -> Dict:
         """Run all end-to-end tests."""
         print("🚀 AI RemixMate - End-to-End Test Suite")
         print("=" * 60)
-        
+
         start_time = time.time()
-        
+
         # Run tests
         self.test_easy_pair()
         self.test_tough_pair()
         self.test_vocals_light_track()
-        
+
         total_time = time.time() - start_time
-        
+
         # Calculate summary
         passed_tests = sum(1 for result in self.results if result['passed'])
         total_tests = len(self.results)
-        
+
         summary = {
             'test_suite': {
                 'total_tests': total_tests,
@@ -353,9 +352,9 @@ class E2ETestSuite:
             'thresholds': self.thresholds,
             'results': self.results
         }
-        
+
         return summary
-    
+
     def save_test_report(self, summary: Dict, output_path: Path) -> None:
         """Save test report to JSON file."""
         # Convert numpy arrays and custom objects to JSON-serializable format
@@ -372,28 +371,28 @@ class E2ETestSuite:
                 return [convert_numpy(item) for item in obj]
             else:
                 return obj
-        
+
         summary_serializable = convert_numpy(summary)
-        
+
         with open(output_path, 'w') as f:
             json.dump(summary_serializable, f, indent=2)
         print(f"📊 Test report saved to: {output_path}")
-    
+
     def print_test_summary(self, summary: Dict) -> None:
         """Print test summary."""
         print("\n" + "="*60)
         print("🧪 END-TO-END TEST SUITE RESULTS")
         print("="*60)
-        
+
         suite_info = summary['test_suite']
-        print(f"\n📊 OVERALL RESULTS")
+        print("\n📊 OVERALL RESULTS")
         print(f"   Total tests: {suite_info['total_tests']}")
         print(f"   Passed: {suite_info['passed_tests']}")
         print(f"   Failed: {suite_info['failed_tests']}")
         print(f"   Pass rate: {suite_info['pass_rate']:.1%}")
         print(f"   Total time: {suite_info['total_time']:.2f}s")
-        
-        print(f"\n🎯 QUALITY THRESHOLDS")
+
+        print("\n🎯 QUALITY THRESHOLDS")
         thresholds = summary['thresholds']
         print(f"   Max clipping: {thresholds['max_clipping_percent']:.1f}%")
         print(f"   LUFS tolerance: ±{thresholds['lufs_tolerance']:.1f}")
@@ -402,12 +401,12 @@ class E2ETestSuite:
         print(f"   Min key compatibility: {thresholds['min_key_compatibility']:.1f}")
         print(f"   Min perceptual quality: {thresholds['min_perceptual_quality']:.1f}")
         print(f"   Min intelligibility: {thresholds['min_intelligibility']:.1f}")
-        
-        print(f"\n📋 INDIVIDUAL TEST RESULTS")
+
+        print("\n📋 INDIVIDUAL TEST RESULTS")
         for result in summary['results']:
             status = "✅ PASS" if result['passed'] else "❌ FAIL"
             print(f"   {result['test_name']:<15} | {status} | {result['description']}")
-            
+
             validation = result['validation']
             print(f"      Clipping: {'✅' if validation['clipping_check'] else '❌'}")
             print(f"      LUFS: {'✅' if validation['lufs_check'] else '❌'}")
@@ -415,9 +414,9 @@ class E2ETestSuite:
             print(f"      Key compatibility: {'✅' if validation['key_compatibility_check'] else '❌'}")
             print(f"      Perceptual quality: {'✅' if validation['perceptual_quality_check'] else '❌'}")
             print(f"      Intelligibility: {'✅' if validation['intelligibility_check'] else '❌'}")
-        
+
         print("\n" + "="*60)
-        
+
         if suite_info['pass_rate'] >= 0.8:
             print("🎉 Test suite PASSED! System is ready for production.")
         else:
@@ -427,28 +426,28 @@ class E2ETestSuite:
 def main():
     """Run the end-to-end test suite."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="AI RemixMate End-to-End Test Suite")
-    parser.add_argument('--output', default='tests/e2e_test_report.json', 
+    parser.add_argument('--output', default='tests/e2e_test_report.json',
                        help='Output report file path')
     parser.add_argument('--verbose', action='store_true', help='Verbose output')
-    
+
     args = parser.parse_args()
-    
+
     # Create test suite
     test_suite = E2ETestSuite()
-    
+
     # Run tests
     summary = test_suite.run_all_tests()
-    
+
     # Save report
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     test_suite.save_test_report(summary, output_path)
-    
+
     # Print summary
     test_suite.print_test_summary(summary)
-    
+
     # Exit with appropriate code
     if summary['test_suite']['pass_rate'] >= 0.8:
         return 0

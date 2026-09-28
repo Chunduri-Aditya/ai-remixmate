@@ -24,7 +24,6 @@ Covered:
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,7 +33,6 @@ pytest.importorskip("httpx",   reason="httpx not installed (required by TestClie
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Minimal app factory — no lifespan, no SSE, no background tasks

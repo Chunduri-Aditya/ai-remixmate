@@ -39,18 +39,16 @@ References
 
 from __future__ import annotations
 
-import logging
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
 from scripts.core.audit import log_audit
 from scripts.core.gpu import get_device
 from scripts.core.logging_utils import get_logger
-from scripts.core.paths import LIBRARY_DIR, OUTPUTS_DIR, song_dir
+from scripts.core.paths import OUTPUTS_DIR, song_dir
 
 log = get_logger(__name__)
 
@@ -340,8 +338,8 @@ def _inpaint_vampnet(
     mask_1d:        (n_frames,) bool — True = keep
     Returns filled_codes: (n_codebooks, n_frames)
     """
-    import vampnet
     import torch
+    import vampnet
 
     interface = vampnet.interface.Interface.default()
 
@@ -545,8 +543,9 @@ def run_inpainting(
     # ── 7. Master + save ───────────────────────────────────────────────────
     _prog(0.88, "Mastering and saving…")
     try:
-        from scripts.core.mastering import master_mix
         import soundfile as sf
+
+        from scripts.core.mastering import master_mix
 
         mastered, report = master_mix(audio_out, sr=_DAC_SR, target_lufs=-14.0)
 

@@ -24,7 +24,7 @@ class TestGiantStepsBenchmark:
         run_synthetic() must return a dict keyed by all four profiles,
         each containing a 'weighted' score in [0, 1].
         """
-        from scripts.benchmarks.giantsteps_eval import run_synthetic, PROFILES
+        from scripts.benchmarks.giantsteps_eval import PROFILES, run_synthetic
 
         results = run_synthetic(sr=22050, verbose=False)
 

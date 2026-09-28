@@ -21,17 +21,16 @@ import random
 import pytest
 
 from scripts.core.setlist_planner import (
+    _SPOTIFY_KEY_CAMELOT,
     EnergyArc,
     MarkovTransitionModel,
     SetlistPlanner,
     TrackNode,
     TransitionScore,
     _arc_target_energy,
-    _SPOTIFY_KEY_CAMELOT,
     parse_exportify_csv,
     transition_cost,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

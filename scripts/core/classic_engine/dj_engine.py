@@ -43,19 +43,14 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
 # Re-export data structures and analysis functions for backward compatibility
 from scripts.core.classic_engine.dj_analysis import (
-    Beat,
-    Section,
-    SongStructure,
-    EQPlan,
     TransitionPlan,
     analyze_structure,
-    plan_transition,
 )
 
 # _analyze_impl was renamed to analyze_structure during the dj_analysis module split.
@@ -110,7 +105,6 @@ def _apply_filter(audio: np.ndarray, b, a) -> np.ndarray:
     if b is None or a is None:
         return audio
     try:
-        from scipy.signal import sosfilt, butter
         from scipy.signal import lfilter
         return lfilter(b, a, audio).astype(audio.dtype)
     except Exception:
@@ -309,8 +303,9 @@ def _load_stem(stem_dir: "Path", stem: str, sr: int) -> "Optional[np.ndarray]":
     Returns mono float32 array, or None if not found.
     """
     try:
-        import soundfile as sf
         from pathlib import Path as _Path
+
+        import soundfile as sf
         d = _Path(stem_dir)
         for ext in (".flac", ".wav"):
             p = d / f"{stem}{ext}"

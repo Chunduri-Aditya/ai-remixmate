@@ -1,5 +1,6 @@
 """tests/test_mastering.py — Unit tests for the mastering engine."""
 from __future__ import annotations
+
 import numpy as np
 import pytest
 
@@ -48,7 +49,7 @@ class TestComputeLufs:
 
 class TestNormalizeToLufs:
     def test_target_lufs_within_tolerance(self):
-        from scripts.core.mastering import normalize_to_lufs, compute_lufs
+        from scripts.core.mastering import compute_lufs, normalize_to_lufs
         audio = _sine(amplitude=0.5)
         normed, _ = normalize_to_lufs(audio, SR, target_lufs=-14.0)
         measured = compute_lufs(normed, SR)
@@ -78,7 +79,7 @@ class TestMasterMix:
         assert isinstance(result, tuple) and len(result) == 2
 
     def test_output_lufs_within_tolerance(self):
-        from scripts.core.mastering import master_mix, compute_lufs
+        from scripts.core.mastering import compute_lufs, master_mix
         mastered, _report = master_mix(_sine(amplitude=0.5), SR, target_lufs=-14.0)
         measured = compute_lufs(mastered, SR)
         assert abs(measured - (-14.0)) < 1.5
@@ -130,7 +131,7 @@ _skip_no_sf = pytest.mark.skipif(not _HAS_SF, reason="soundfile not installed")
 @_skip_no_sf
 class TestAnalyzeLibraryStemTargets:
     def test_empty_library_returns_fallbacks(self, tmp_path):
-        from scripts.core.mastering import analyze_library_stem_targets, _STEM_FALLBACK_TARGETS
+        from scripts.core.mastering import _STEM_FALLBACK_TARGETS, analyze_library_stem_targets
         result = analyze_library_stem_targets(library_dir=tmp_path)
         assert result == _STEM_FALLBACK_TARGETS
 
@@ -157,7 +158,7 @@ class TestAnalyzeLibraryStemTargets:
 
     def test_min_songs_threshold_falls_back(self, tmp_path):
         """With only 1 song but min_songs=3, should use fallbacks."""
-        from scripts.core.mastering import analyze_library_stem_targets, _STEM_FALLBACK_TARGETS
+        from scripts.core.mastering import _STEM_FALLBACK_TARGETS, analyze_library_stem_targets
         d = tmp_path / "OneSong"
         d.mkdir()
         for stem in ("drums", "bass", "vocals", "other"):
@@ -169,7 +170,7 @@ class TestAnalyzeLibraryStemTargets:
 @_skip_no_sf
 class TestSaveLoadStemTargets:
     def test_roundtrip(self, tmp_path):
-        from scripts.core.mastering import save_stem_targets, load_stem_targets
+        from scripts.core.mastering import load_stem_targets, save_stem_targets
         targets = {"drums": -18.0, "bass": -22.0, "vocals": -19.0, "other": -21.0}
         cache = tmp_path / "targets.json"
         save_stem_targets(targets, cache_path=cache)
@@ -178,14 +179,15 @@ class TestSaveLoadStemTargets:
             assert abs(loaded[k] - targets[k]) < 0.001
 
     def test_missing_cache_returns_fallbacks(self, tmp_path):
-        from scripts.core.mastering import load_stem_targets, _STEM_FALLBACK_TARGETS
+        from scripts.core.mastering import _STEM_FALLBACK_TARGETS, load_stem_targets
         result = load_stem_targets(cache_path=tmp_path / "nonexistent.json")
         assert result == _STEM_FALLBACK_TARGETS
 
     def test_partial_cache_merged_with_fallbacks(self, tmp_path):
         """Cache with only 'drums' should merge — other stems use fallback."""
         import json
-        from scripts.core.mastering import load_stem_targets, _STEM_FALLBACK_TARGETS
+
+        from scripts.core.mastering import _STEM_FALLBACK_TARGETS, load_stem_targets
         cache = tmp_path / "partial.json"
         cache.write_text(json.dumps({"drums": -17.5}))
         result = load_stem_targets(cache_path=cache)
@@ -202,7 +204,11 @@ class TestNormalizeStemsToCorpusTargets:
 
     def test_stem_type_targets_differ(self):
         """Drums and bass should hit different LUFS targets — not one flat value."""
-        from scripts.core.mastering import normalize_stems_to_corpus_targets, compute_lufs, _STEM_FALLBACK_TARGETS
+        from scripts.core.mastering import (
+            _STEM_FALLBACK_TARGETS,
+            compute_lufs,
+            normalize_stems_to_corpus_targets,
+        )
         stems = _make_stem_dict()
         result = normalize_stems_to_corpus_targets(stems, targets=_STEM_FALLBACK_TARGETS)
         drums_lufs = compute_lufs(result["drums"], SR)
@@ -211,7 +217,7 @@ class TestNormalizeStemsToCorpusTargets:
         assert abs(drums_lufs - bass_lufs) > 1.0
 
     def test_normalization_within_1lu_of_target(self):
-        from scripts.core.mastering import normalize_stems_to_corpus_targets, compute_lufs
+        from scripts.core.mastering import compute_lufs, normalize_stems_to_corpus_targets
         targets = {"drums": -18.0, "bass": -22.0, "vocals": -19.5, "other": -21.5}
         stems = _make_stem_dict()
         result = normalize_stems_to_corpus_targets(stems, targets=targets)
@@ -248,7 +254,7 @@ class TestNormalizeStemsToCorpusTargets:
 
     def test_fallback_for_unknown_stem_type(self):
         """A stem type not in targets dict should fall back to fallback_lufs."""
-        from scripts.core.mastering import normalize_stems_to_corpus_targets, compute_lufs
+        from scripts.core.mastering import compute_lufs, normalize_stems_to_corpus_targets
         stems = {"unknown_stem": (_sine(), SR)}
         fallback = -20.0
         result = normalize_stems_to_corpus_targets(stems, targets={}, fallback_lufs=fallback)

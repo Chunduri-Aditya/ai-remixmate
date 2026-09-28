@@ -9,7 +9,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -163,31 +162,31 @@ class TestNumpyHelpers:
 
 class TestEnrichTrackNode:
     def test_enrich_sets_energy(self):
-        from scripts.core.setlist_planner import TrackNode
         from scripts.core.energy_profiler import enrich_track_node
+        from scripts.core.setlist_planner import TrackNode
         track = TrackNode(name="Test", energy=0.5)
         enrich_track_node(track, _sine(amp=0.9), sr=22050, backend="numpy")
         # Energy should now be set to the profiler's arousal
         assert track.energy != 0.5 or track.arousal_predicted is not None
 
     def test_arousal_predicted_populated(self):
-        from scripts.core.setlist_planner import TrackNode
         from scripts.core.energy_profiler import enrich_track_node
+        from scripts.core.setlist_planner import TrackNode
         track = TrackNode(name="Test", energy=0.5)
         enrich_track_node(track, _sine(), sr=22050, backend="numpy")
         assert track.arousal_predicted is not None
         assert 0.0 <= track.arousal_predicted <= 1.0
 
     def test_silence_gives_low_arousal(self):
-        from scripts.core.setlist_planner import TrackNode
         from scripts.core.energy_profiler import enrich_track_node
+        from scripts.core.setlist_planner import TrackNode
         track = TrackNode(name="Test", energy=0.5)
         enrich_track_node(track, _silence(), sr=22050, backend="numpy")
         assert track.arousal_predicted < 0.05
 
     def test_loud_signal_gives_high_arousal(self):
-        from scripts.core.setlist_planner import TrackNode
         from scripts.core.energy_profiler import enrich_track_node
+        from scripts.core.setlist_planner import TrackNode
         track = TrackNode(name="Test", energy=0.5)
         enrich_track_node(track, _noise(amp=0.9), sr=22050, backend="numpy")
         assert track.arousal_predicted > 0.3
@@ -214,7 +213,7 @@ class TestTransitionCostArousal:
         At arc_position=0.0 (low ideal energy), B1 should have LOWER energy cost
         because its arousal_predicted (0.1) is close to ideal (≈0.3).
         """
-        from scripts.core.setlist_planner import transition_cost, EnergyArc
+        from scripts.core.setlist_planner import EnergyArc, transition_cost
 
         a  = self._node("8B", 128, 0.5, arousal=0.5)
         b1 = self._node("9B", 128, 0.9, arousal=0.1)   # energy says high, arousal says calm
@@ -228,7 +227,7 @@ class TestTransitionCostArousal:
 
     def test_fallback_to_energy_when_arousal_is_none(self):
         """When arousal_predicted is None, transition_cost falls back to .energy."""
-        from scripts.core.setlist_planner import transition_cost, EnergyArc
+        from scripts.core.setlist_planner import EnergyArc, transition_cost
 
         a = self._node("8B", 128, 0.5, arousal=None)
         b = self._node("9B", 128, 0.9, arousal=None)
@@ -238,7 +237,7 @@ class TestTransitionCostArousal:
 
     def test_arousal_none_and_arousal_zero_differ(self):
         """arousal_predicted=None (use .energy=0.9) vs arousal_predicted=0.0 (calm)."""
-        from scripts.core.setlist_planner import transition_cost, EnergyArc
+        from scripts.core.setlist_planner import EnergyArc, transition_cost
 
         a = self._node("8B", 128, 0.5, arousal=0.5)
         b_none = self._node("9B", 128, 0.9, arousal=None)    # uses energy=0.9

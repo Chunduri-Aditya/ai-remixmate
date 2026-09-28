@@ -20,11 +20,16 @@ from scipy import signal as ss
 
 pyln = pytest.importorskip("pyloudnorm")
 
-from scripts.core.mastering import (          # noqa: E402
-    apply_limiter, compute_lufs, master_mix, _kweight_coefficients,
+from scripts.core.dj_engine import (  # noqa: E402
+    _seam_blend,
+    _stem_bass_ramp,
+    _stem_crossfade_curves,
 )
-from scripts.core.dj_engine import (          # noqa: E402
-    _stem_bass_ramp, _stem_crossfade_curves, _seam_blend,
+from scripts.core.mastering import (  # noqa: E402
+    _kweight_coefficients,
+    apply_limiter,
+    compute_lufs,
+    master_mix,
 )
 
 SR = 44100
@@ -94,8 +99,8 @@ def test_master_mix_true_loudness_is_spectrum_independent():
 # ===========================================================================
 
 def test_render_entry_past_end_of_b_is_not_silent():
+    from scripts.core.dj_analysis import EQPlan, TransitionPlan
     from scripts.core.dj_engine import DJEngine
-    from scripts.core.dj_analysis import TransitionPlan, EQPlan
     eng = DJEngine(sr=SR)
     A = (0.3 * np.sin(2 * np.pi * 220 * np.arange(SR * 10) / SR)).astype(np.float32)
     B = (0.3 * np.sin(2 * np.pi * 330 * np.arange(SR * 10) / SR)).astype(np.float32)
@@ -119,8 +124,8 @@ def test_render_late_entry_backs_up_instead_of_going_silent():
     The sibling test above covers the other branch (B shorter than the whole
     transition); without this one that branch is the only path exercised.
     """
+    from scripts.core.dj_analysis import EQPlan, TransitionPlan
     from scripts.core.dj_engine import DJEngine
-    from scripts.core.dj_analysis import TransitionPlan, EQPlan
     eng = DJEngine(sr=SR)
     # A must run out before the second half of the transition, otherwise its
     # own tail keeps RMS above the threshold and the assertion measures A
@@ -202,7 +207,7 @@ def test_stems_enter_at_identical_sample_under_equal_similarity():
 
 
 def test_tiv_score_within_documented_floor_on_key_templates():
-    from scripts.core.tiv_scoring import tiv_harmonic_score, _key_chroma
+    from scripts.core.tiv_scoring import _key_chroma, tiv_harmonic_score
     tpl = [_key_chroma(r, m) for r in range(12) for m in ("major", "minor")]
     lo = min(tiv_harmonic_score(a, b) for a in tpl for b in tpl)
     hi = max(tiv_harmonic_score(a, b) for a in tpl for b in tpl)
@@ -210,7 +215,7 @@ def test_tiv_score_within_documented_floor_on_key_templates():
 
 
 def test_pitch_shift_for_camelot_roundtrip_and_range():
-    from scripts.core.key_detection import pitch_shift_for_camelot, CAMELOT
+    from scripts.core.key_detection import CAMELOT, pitch_shift_for_camelot
     codes = sorted(set(CAMELOT.values()))
     for a in codes:
         for b in codes:

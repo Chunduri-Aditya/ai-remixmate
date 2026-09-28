@@ -48,7 +48,6 @@ def _load_song_audio(song: str, sr: int, duration: float):
     Raises FileNotFoundError if neither full.wav nor any stem exists.
     """
     import librosa
-    import numpy as np
 
     d = song_dir(song)
     full_wav = d / "full.wav"
@@ -129,8 +128,8 @@ def run_song_analysis(
     (i.e. it isn't really in the library — call this after a download/stem
     job has completed).
     """
-    from scripts.core.genre import detect_genre
     from scripts.core.dj_analysis import analyze_structure
+    from scripts.core.genre import detect_genre
 
     def _progress(frac: float, msg: str) -> None:
         if progress_cb:

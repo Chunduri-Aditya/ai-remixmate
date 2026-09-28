@@ -9,16 +9,18 @@ This module implements a practical optimizer that:
 """
 
 from __future__ import annotations
-import numpy as np
-import random
-from pathlib import Path
-from typing import Dict, List, Tuple, Optional, NamedTuple
-from dataclasses import dataclass, field
-import time
-import json
 
-from .musical_analysis import MusicalAnalyzer
+import json
+import random
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+
 from .metrics import AudioMetrics
+from .musical_analysis import MusicalAnalyzer
 
 try:
     from scripts.core.config import cfg as _cfg
@@ -82,13 +84,13 @@ class OptimizationResult:
 
 class RealOptimizer:
     """Practical optimizer with random search and repair layer."""
-    
+
     def __init__(self, constraints: Optional[OptimizationConstraints] = None):
         self.constraints = constraints or OptimizationConstraints()
         self.musical_analyzer = MusicalAnalyzer()
         self.metrics = AudioMetrics()
         self.random_seed = 42
-    
+
     def repair_parameters(self, params: MixParameters) -> Tuple[MixParameters, List[str]]:
         """
         Repair layer: enforce constraints and fix invalid parameters.
@@ -101,65 +103,65 @@ class RealOptimizer:
         """
         violations_fixed = []
         repaired = MixParameters()
-        
+
         # Vocal gain constraints
-        repaired.vocal_gain = np.clip(params.vocal_gain, 
-                                    self.constraints.min_vocal_gain, 
+        repaired.vocal_gain = np.clip(params.vocal_gain,
+                                    self.constraints.min_vocal_gain,
                                     self.constraints.max_vocal_gain)
         if params.vocal_gain != repaired.vocal_gain:
             violations_fixed.append("vocal_gain_clipped")
-        
+
         # Instrumental gain constraints
         repaired.instrumental_gain = np.clip(params.instrumental_gain,
                                            self.constraints.min_instrumental_gain,
                                            self.constraints.max_instrumental_gain)
         if params.instrumental_gain != repaired.instrumental_gain:
             violations_fixed.append("instrumental_gain_clipped")
-        
+
         # Crossfade curve constraints
         repaired.crossfade_curve = np.clip(params.crossfade_curve,
                                           self.constraints.min_crossfade_curve,
                                           self.constraints.max_crossfade_curve)
         if params.crossfade_curve != repaired.crossfade_curve:
             violations_fixed.append("crossfade_curve_clipped")
-        
+
         # Sidechain amount constraints
         repaired.sidechain_amount = np.clip(params.sidechain_amount,
                                            self.constraints.min_sidechain_amount,
                                            self.constraints.max_sidechain_amount)
         if params.sidechain_amount != repaired.sidechain_amount:
             violations_fixed.append("sidechain_amount_clipped")
-        
+
         # EQ low cut constraints
         repaired.eq_low_cut_freq = np.clip(params.eq_low_cut_freq,
                                           self.constraints.min_eq_low_cut,
                                           self.constraints.max_eq_low_cut)
         if params.eq_low_cut_freq != repaired.eq_low_cut_freq:
             violations_fixed.append("eq_low_cut_clipped")
-        
+
         # Reverb send constraints
         repaired.reverb_send = np.clip(params.reverb_send,
                                       self.constraints.min_reverb_send,
                                       self.constraints.max_reverb_send)
         if params.reverb_send != repaired.reverb_send:
             violations_fixed.append("reverb_send_clipped")
-        
+
         # Time stretch constraints
         repaired.time_stretch_ratio = np.clip(params.time_stretch_ratio,
                                              self.constraints.min_time_stretch,
                                              self.constraints.max_time_stretch)
         if params.time_stretch_ratio != repaired.time_stretch_ratio:
             violations_fixed.append("time_stretch_clipped")
-        
+
         # Compression ratio constraints
         repaired.compression_ratio = np.clip(params.compression_ratio,
                                             self.constraints.min_compression_ratio,
                                             self.constraints.max_compression_ratio)
         if params.compression_ratio != repaired.compression_ratio:
             violations_fixed.append("compression_ratio_clipped")
-        
+
         return repaired, violations_fixed
-    
+
     def generate_random_parameters(self) -> MixParameters:
         """Generate random parameters within constraints."""
         return MixParameters(
@@ -172,8 +174,8 @@ class RealOptimizer:
             time_stretch_ratio=random.uniform(self.constraints.min_time_stretch, self.constraints.max_time_stretch),
             compression_ratio=random.uniform(self.constraints.min_compression_ratio, self.constraints.max_compression_ratio)
         )
-    
-    def apply_mix_parameters(self, vocals: np.ndarray, instrumentals: np.ndarray, 
+
+    def apply_mix_parameters(self, vocals: np.ndarray, instrumentals: np.ndarray,
                            params: MixParameters) -> np.ndarray:
         """
         Apply mix parameters to create a remix.
@@ -189,10 +191,10 @@ class RealOptimizer:
         # Apply gains
         vocal_gain_linear = 10**(params.vocal_gain / 20.0)
         instrumental_gain_linear = 10**(params.instrumental_gain / 20.0)
-        
+
         vocals_gained = vocals * vocal_gain_linear
         instrumentals_gained = instrumentals * instrumental_gain_linear
-        
+
         # Apply time stretch
         if abs(params.time_stretch_ratio - 1.0) > 0.01:
             try:
@@ -207,12 +209,12 @@ class RealOptimizer:
                 )
         else:
             instrumentals_stretched = instrumentals_gained
-        
+
         # Align lengths
         min_length = min(len(vocals_gained), len(instrumentals_stretched))
         vocals_aligned = vocals_gained[:min_length]
         instrumentals_aligned = instrumentals_stretched[:min_length]
-        
+
         # Apply sidechain compression (simplified)
         if params.sidechain_amount > 0:
             # Simple sidechain: reduce instrumental volume when vocals are present
@@ -220,14 +222,14 @@ class RealOptimizer:
             sidechain_factor = 1.0 - params.sidechain_amount * vocal_envelope
             sidechain_factor = np.clip(sidechain_factor, 0.1, 1.0)
             instrumentals_aligned = instrumentals_aligned * sidechain_factor
-        
+
         # Apply EQ (simplified high-pass filter)
         if params.eq_low_cut_freq > 20:
             # Simple high-pass filter approximation
             cutoff_ratio = params.eq_low_cut_freq / 22050  # Assuming 44.1kHz
             # This is a very simplified EQ - in practice you'd use proper filtering
             pass
-        
+
         # Mix with crossfade curve
         if params.crossfade_curve < 0.5:
             # More vocals
@@ -235,9 +237,9 @@ class RealOptimizer:
         else:
             # More instrumentals
             mix_ratio = 0.5 - (params.crossfade_curve - 0.5)
-        
+
         mixed = vocals_aligned * mix_ratio + instrumentals_aligned * (1 - mix_ratio)
-        
+
         # Apply compression (simplified)
         if params.compression_ratio > 1.0:
             # Simple compression approximation
@@ -249,7 +251,7 @@ class RealOptimizer:
                 mixed
             )
             mixed = compressed
-        
+
         # Apply reverb (simplified)
         if params.reverb_send > 0:
             # Simple reverb approximation using delay and feedback
@@ -258,10 +260,10 @@ class RealOptimizer:
                 reverb = np.zeros_like(mixed)
                 reverb[delay_samples:] = mixed[:-delay_samples] * 0.3 * params.reverb_send
                 mixed = mixed + reverb
-        
+
         return mixed
-    
-    def score_remix(self, vocals: np.ndarray, instrumentals: np.ndarray, 
+
+    def score_remix(self, vocals: np.ndarray, instrumentals: np.ndarray,
                    mixed: np.ndarray) -> float:
         """
         Score a remix using objective metrics.
@@ -281,7 +283,7 @@ class RealOptimizer:
             loudness_metrics = self.metrics.calculate_loudness_metrics(mixed, 44100)
             balance_metrics = self.metrics.calculate_balance_metrics(vocals, instrumentals, 44100)
             quality_metrics = self.metrics.calculate_quality_metrics(vocals, instrumentals, mixed, 44100)
-            
+
             # Score components
             tempo_score = max(0, 1 - tempo_metrics.tempo_error_bpm / 20.0)  # Penalize tempo mismatch
             key_score = key_metrics.key_compatibility
@@ -290,7 +292,7 @@ class RealOptimizer:
             balance_score = max(0, 1 - abs(balance_metrics.rms_balance_ratio - 1.0))  # Prefer balanced mix
             intelligibility_score = quality_metrics.intelligibility_score
             technical_score = quality_metrics.technical_quality
-            
+
             # Weighted combination
             total_score = (
                 tempo_score * 0.15 +
@@ -301,14 +303,14 @@ class RealOptimizer:
                 intelligibility_score * 0.15 +
                 technical_score * 0.05
             )
-            
+
             return float(total_score)
-            
+
         except Exception as e:
             print(f"⚠️ Scoring failed: {e}")
             return 0.0
-    
-    def optimize(self, vocals: np.ndarray, instrumentals: np.ndarray, 
+
+    def optimize(self, vocals: np.ndarray, instrumentals: np.ndarray,
                 max_iterations: int = 100, seed: Optional[int] = None) -> OptimizationResult:
         """
         Optimize mix parameters using random search.
@@ -325,44 +327,44 @@ class RealOptimizer:
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)
-        
+
         print(f"🔍 Starting optimization with {max_iterations} iterations...")
         start_time = time.time()
-        
+
         best_score = -1.0
         best_parameters = None
         constraint_violations = 0
         convergence_history = []
-        
+
         for iteration in range(max_iterations):
             # Generate random parameters
             params = self.generate_random_parameters()
-            
+
             # Apply repair layer
             repaired_params, violations = self.repair_parameters(params)
             constraint_violations += len(violations)
-            
+
             # Apply parameters and create mix
             try:
                 mixed = self.apply_mix_parameters(vocals, instrumentals, repaired_params)
-                
+
                 # Score the mix
                 score = self.score_remix(vocals, instrumentals, mixed)
-                
+
                 # Update best if improved
                 if score > best_score:
                     best_score = score
                     best_parameters = repaired_params
                     print(f"   Iteration {iteration+1}: New best score = {score:.4f}")
-                
+
                 convergence_history.append(score)
-                
+
             except Exception as e:
                 print(f"   Iteration {iteration+1}: Failed - {e}")
                 convergence_history.append(0.0)
-        
+
         optimization_time = time.time() - start_time
-        
+
         # Calculate convergence info
         convergence_info = {
             'final_score': best_score,
@@ -370,11 +372,11 @@ class RealOptimizer:
             'improvement_rate': len([s for s in convergence_history if s > 0]) / len(convergence_history),
             'constraint_violation_rate': constraint_violations / max_iterations
         }
-        
+
         print(f"✅ Optimization completed in {optimization_time:.2f}s")
         print(f"   Best score: {best_score:.4f}")
         print(f"   Constraint violations: {constraint_violations}")
-        
+
         return OptimizationResult(
             best_parameters=best_parameters or MixParameters(),
             best_score=best_score,
@@ -383,7 +385,7 @@ class RealOptimizer:
             constraint_violations=constraint_violations,
             convergence_info=convergence_info
         )
-    
+
     def save_optimization_report(self, result: OptimizationResult, output_path: Path) -> None:
         """Save optimization results to JSON file."""
         report = {
@@ -415,26 +417,26 @@ class RealOptimizer:
                 'max_tempo_error_bpm': self.constraints.max_tempo_error_bpm
             }
         }
-        
+
         with open(output_path, 'w') as f:
             json.dump(report, f, indent=2)
-        
+
         print(f"📊 Optimization report saved to: {output_path}")
-    
+
     def print_optimization_summary(self, result: OptimizationResult) -> None:
         """Print human-readable optimization summary."""
         print("\n" + "="*60)
         print("🎛️ OPTIMIZATION SUMMARY")
         print("="*60)
-        
-        print(f"\n📊 PERFORMANCE")
+
+        print("\n📊 PERFORMANCE")
         print(f"   Best score: {result.best_score:.4f}")
         print(f"   Optimization time: {result.optimization_time:.2f}s")
         print(f"   Iterations: {result.iterations}")
         print(f"   Constraint violations: {result.constraint_violations}")
         print(f"   Improvement rate: {result.convergence_info['improvement_rate']:.2%}")
-        
-        print(f"\n🎛️ BEST PARAMETERS")
+
+        print("\n🎛️ BEST PARAMETERS")
         params = result.best_parameters
         print(f"   Vocal gain: {params.vocal_gain:.1f} dB")
         print(f"   Instrumental gain: {params.instrumental_gain:.1f} dB")
@@ -444,5 +446,5 @@ class RealOptimizer:
         print(f"   Reverb send: {params.reverb_send:.2f}")
         print(f"   Time stretch: {params.time_stretch_ratio:.3f}")
         print(f"   Compression ratio: {params.compression_ratio:.1f}")
-        
+
         print("\n" + "="*60)

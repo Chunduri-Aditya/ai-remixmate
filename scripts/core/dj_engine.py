@@ -44,18 +44,25 @@ import numpy as np
 
 # Re-export data structures and analysis functions for backward compatibility
 from scripts.core.dj_analysis import (
-    Beat,
-    Section,
-    SongStructure,
-    EQPlan,
+    Section as Section,
+)
+from scripts.core.dj_analysis import (
+    SongStructure as SongStructure,
+)
+from scripts.core.dj_analysis import (
     TransitionPlan,
     analyze_structure,
-    plan_transition,
 )
+from scripts.core.dj_analysis import (
+    plan_transition as plan_transition,
+)
+from scripts.core.key_detection import pitch_shift_audio
 
 # Mastering utilities — used for per-stem LUFS normalization in render_stem_blend()
-from scripts.core.mastering import normalize_stems_to_target, normalize_stems_to_corpus_targets, load_stem_targets
-from scripts.core.key_detection import pitch_shift_audio
+from scripts.core.mastering import (
+    load_stem_targets,
+    normalize_stems_to_corpus_targets,
+)
 
 # Masking-aware multiband EQ (mids/highs only) — see render_stem_blend()'s use
 # of unmask_stem_pair(). Imported defensively: this is an additive feature on
@@ -129,7 +136,6 @@ def _apply_filter(audio: np.ndarray, b, a) -> np.ndarray:
     if b is None or a is None:
         return audio
     try:
-        from scipy.signal import sosfilt, butter
         from scipy.signal import lfilter
         return lfilter(b, a, audio).astype(audio.dtype)
     except Exception:
@@ -462,8 +468,9 @@ def _load_stem(stem_dir: "Path", stem: str, sr: int) -> "Optional[np.ndarray]":
     Returns mono float32 array, or None if not found.
     """
     try:
-        import soundfile as sf
         from pathlib import Path as _Path
+
+        import soundfile as sf
         d = _Path(stem_dir)
         for ext in (".flac", ".wav"):
             p = d / f"{stem}{ext}"

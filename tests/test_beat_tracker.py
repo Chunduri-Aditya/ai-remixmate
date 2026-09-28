@@ -12,7 +12,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helper: build a synthetic BeatResult (no librosa needed)
 # ---------------------------------------------------------------------------
@@ -102,15 +101,15 @@ class TestBeatResult:
 
 class TestGetTracker:
     def test_librosa_backend_returns_librosa_tracker(self):
-        from scripts.core.beat_tracker import get_tracker, LibrosaBeatTracker
+        from scripts.core.beat_tracker import LibrosaBeatTracker, get_tracker
         assert isinstance(get_tracker("librosa"), LibrosaBeatTracker)
 
     def test_beat_this_backend_returns_beat_this_tracker(self):
-        from scripts.core.beat_tracker import get_tracker, BeatThisTracker
+        from scripts.core.beat_tracker import BeatThisTracker, get_tracker
         assert isinstance(get_tracker("beat_this"), BeatThisTracker)
 
     def test_auto_backend_returns_a_tracker(self):
-        from scripts.core.beat_tracker import get_tracker, LibrosaBeatTracker, BeatThisTracker
+        from scripts.core.beat_tracker import BeatThisTracker, LibrosaBeatTracker, get_tracker
         tracker = get_tracker("auto")
         assert isinstance(tracker, (LibrosaBeatTracker, BeatThisTracker))
 
@@ -120,7 +119,11 @@ class TestGetTracker:
             get_tracker("nonexistent")
 
     def test_get_configured_tracker_returns_tracker(self):
-        from scripts.core.beat_tracker import get_configured_tracker, LibrosaBeatTracker, BeatThisTracker
+        from scripts.core.beat_tracker import (
+            BeatThisTracker,
+            LibrosaBeatTracker,
+            get_configured_tracker,
+        )
         tracker = get_configured_tracker()
         assert isinstance(tracker, (LibrosaBeatTracker, BeatThisTracker))
 
@@ -155,7 +158,7 @@ class TestLibrosaBeatTracker:
         return audio, sr, bpm
 
     def test_track_returns_beat_result(self, metronome_120bpm):
-        from scripts.core.beat_tracker import LibrosaBeatTracker, BeatResult
+        from scripts.core.beat_tracker import BeatResult, LibrosaBeatTracker
         audio, sr, _ = metronome_120bpm
         result = LibrosaBeatTracker().track(audio, sr)
         assert isinstance(result, BeatResult)
@@ -186,8 +189,9 @@ class TestLibrosaBeatTracker:
         assert abs(result.bpm - 120.0) < 5.0, f"BPM {result.bpm:.1f} too far from 120"
 
     def test_beat_frames_match_beat_times(self, metronome_120bpm):
-        from scripts.core.beat_tracker import LibrosaBeatTracker
         import librosa
+
+        from scripts.core.beat_tracker import LibrosaBeatTracker
         audio, sr, _ = metronome_120bpm
         result = LibrosaBeatTracker().track(audio, sr)
         reconstructed = librosa.frames_to_time(result.beat_frames, sr=sr, hop_length=512)
@@ -282,7 +286,7 @@ class TestBeatThisTrackerFallback:
         if beat_this_available:
             pytest.skip("beat-this is installed — fallback not triggered")
 
-        from scripts.core.beat_tracker import BeatThisTracker, BeatResult
+        from scripts.core.beat_tracker import BeatResult, BeatThisTracker
         # Need librosa for fallback
         librosa_available = importlib.util.find_spec("librosa") is not None
         if not librosa_available:

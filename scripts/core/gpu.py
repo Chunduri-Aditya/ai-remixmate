@@ -27,7 +27,7 @@ import logging
 import os
 import platform
 from functools import lru_cache
-from typing import Optional, Tuple, Union
+from typing import Optional
 
 import numpy as np
 

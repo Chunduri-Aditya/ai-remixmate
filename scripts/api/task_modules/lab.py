@@ -26,7 +26,7 @@ def task_instrument_lab(
     For each combo, swaps stems between songs (e.g. vocals from A + drums from B),
     time-stretches to a common BPM, mixes, and saves the result.
     """
-    from scripts.core.instrument_lab import render_all_combos, get_songs_with_stems
+    from scripts.core.instrument_lab import get_songs_with_stems, render_all_combos
 
     log_audit("instrument_lab_start", resource=f"{len(songs)} songs", job_id=job_id,
               metadata={"songs": songs, "mode": mode})

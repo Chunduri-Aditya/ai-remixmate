@@ -39,7 +39,7 @@ import itertools
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -202,6 +202,7 @@ def _get_song_bpm(song_name: str) -> float:
     # Fallback: try to estimate from the full.wav
     try:
         import librosa
+
         from scripts.core.paths import song_dir
         wav = song_dir(song_name) / "full.wav"
         if wav.exists():

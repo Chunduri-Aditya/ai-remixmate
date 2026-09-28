@@ -36,8 +36,8 @@ def _app_with(router) -> FastAPI:
 class TestFeedbackEventEndpoint:
     @pytest.fixture(autouse=True)
     def client(self, tmp_path, monkeypatch):
-        from scripts.core import feedback_store as fs
         from scripts.api.routers import feedback as feedback_mod
+        from scripts.core import feedback_store as fs
 
         monkeypatch.setattr(fs, "_DB_PATH", tmp_path / "feedback.db")
         fs._events.clear()
@@ -111,8 +111,8 @@ class TestFeedbackEventEndpoint:
 class TestFeedbackSummaryEndpoint:
     @pytest.fixture(autouse=True)
     def client(self, tmp_path, monkeypatch):
-        from scripts.core import feedback_store as fs
         from scripts.api.routers import feedback as feedback_mod
+        from scripts.core import feedback_store as fs
 
         monkeypatch.setattr(fs, "_DB_PATH", tmp_path / "feedback.db")
         fs._events.clear()

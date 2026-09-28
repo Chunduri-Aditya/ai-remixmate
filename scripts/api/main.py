@@ -48,9 +48,10 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     ensure_directories()
 
     # Wire SSE broadcaster into job store + start heartbeat background task
-    from scripts.api.routers.events import start_heartbeat, broadcaster  # noqa: PLC0415
-    from scripts.api.jobs import register_sse_hook                       # noqa: PLC0415
-    import asyncio as _asyncio                                           # noqa: PLC0415
+    import asyncio as _asyncio  # noqa: PLC0415
+
+    from scripts.api.jobs import register_sse_hook  # noqa: PLC0415
+    from scripts.api.routers.events import broadcaster, start_heartbeat  # noqa: PLC0415
 
     # Capture the running event loop here (async context) so worker threads
     # can schedule coroutines safely via call_soon_threadsafe.

@@ -38,7 +38,6 @@ import sys
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 
-
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
@@ -169,7 +168,7 @@ def _gpu_info() -> tuple[str, Optional[str], Optional[float], Optional[str]]:
     """
     try:
         # Prefer existing gpu.py — single source of truth
-        from scripts.core.gpu import get_device, _import_torch  # type: ignore[import]
+        from scripts.core.gpu import _import_torch, get_device  # type: ignore[import]
         backend = get_device()
         torch = _import_torch()
 

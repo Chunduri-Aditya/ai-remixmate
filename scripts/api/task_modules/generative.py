@@ -7,7 +7,6 @@ task_tokenize_stems        — Tokenize stems with EnCodec or DAC
 """
 
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 from scripts.api.jobs import update_job
 from scripts.core.audit import log_audit

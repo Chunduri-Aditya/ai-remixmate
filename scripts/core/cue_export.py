@@ -281,9 +281,10 @@ def export_serato_markers(
         If ``audio_path`` does not exist.
     """
     try:
-        from mutagen.id3 import ID3, GEOB, Encoding
-        from mutagen.mp3 import MP3
         import shutil
+
+        from mutagen.id3 import GEOB, ID3, Encoding
+        from mutagen.mp3 import MP3
     except ImportError as e:
         raise ImportError(
             "mutagen is required for Serato export.  Install with: pip install mutagen"

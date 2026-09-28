@@ -46,7 +46,7 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from typing import Optional
 
 import numpy as np
 

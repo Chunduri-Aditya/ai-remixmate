@@ -22,7 +22,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -287,6 +286,7 @@ class TestSeratoExport:
 
     def test_writes_geob_tag(self):
         from mutagen.id3 import ID3
+
         from scripts.core.cue_export import export_serato_markers
         with tempfile.TemporaryDirectory() as td:
             src = self._make_mp3(Path(td))
@@ -310,6 +310,7 @@ class TestSeratoExport:
 
     def test_in_place_write_when_no_output_path(self):
         from mutagen.id3 import ID3
+
         from scripts.core.cue_export import export_serato_markers
         with tempfile.TemporaryDirectory() as td:
             src = self._make_mp3(Path(td))

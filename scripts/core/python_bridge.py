@@ -7,33 +7,37 @@ without any external DAW dependencies.
 """
 
 from __future__ import annotations
+
 import json
 import time
-from pathlib import Path
-from typing import Dict, Any, Optional
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-
-from scripts.core.python_mixer import PythonMixer, MixParameters, MixResult
-from scripts.core.musical_analysis import MusicalAnalyzer
-from scripts.core.real_optimizer import RealOptimizer
-from scripts.core.metrics import AudioMetrics
-from scripts.core.features import extract_features_from_wav
-from scripts.core.paths import vocals_path, other_path, OUTPUT_DIR, AUDIO_IN, ensure_directories
-from scripts.core.genre import auto_preset, detect_genre, get_preset, GenrePreset, GenreResult
-from scripts.core.license import load_license, license_warning, LicenseInfo
-from scripts.core.library import get_library_manager
-from scripts.core.track_metadata import MetadataClient, TrackMetadata, quick_lookup
-from scripts.core.dj_engine import (
-    DJEngine, SongStructure, TransitionPlan,
-    _analyze_impl as _dj_analyze, plan_transition as _dj_plan,
-)
 from scripts.core.config import cfg
+from scripts.core.dj_engine import (
+    DJEngine,
+)
+from scripts.core.dj_engine import (
+    _analyze_impl as _dj_analyze,
+)
+from scripts.core.dj_engine import (
+    plan_transition as _dj_plan,
+)
+from scripts.core.genre import GenrePreset, GenreResult, detect_genre, get_preset
+from scripts.core.library import get_library_manager
+from scripts.core.license import license_warning, load_license
+from scripts.core.metrics import AudioMetrics
+from scripts.core.musical_analysis import MusicalAnalyzer
+from scripts.core.paths import AUDIO_IN, ensure_directories, other_path, vocals_path
+from scripts.core.python_mixer import MixParameters, PythonMixer
+from scripts.core.real_optimizer import RealOptimizer
+from scripts.core.track_metadata import MetadataClient
 
 
 class PythonBridge:
     """Python-only bridge for remix generation."""
-    
+
     def __init__(self, sample_rate: int | None = None, bit_depth: int | None = None):
         self.sr         = sample_rate or cfg.audio.sample_rate
         self.bit_depth  = bit_depth   or cfg.audio.bit_depth
@@ -45,7 +49,7 @@ class PythonBridge:
         self.metrics          = AudioMetrics()
         self.metadata_client  = MetadataClient()
         self.dj_engine        = DJEngine(self.sr)
-    
+
     def create_remix(self, base_song: str, match_song: str,
                     output_dir: str, preset: str = "auto",
                     optimize: bool = False, online: bool = True) -> Dict[str, Any]:
@@ -67,18 +71,18 @@ class PythonBridge:
         """
         print(f"🎵 Creating Python-only remix: {base_song} + {match_song}")
         print(f"   Preset: {preset}, Optimization: {optimize}")
-        
+
         start_time = time.time()
-        
+
         try:
             # Ensure output directory exists
             output_path = Path(output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
-            
+
             # Get file paths
             vocals_file = vocals_path(base_song)
             instrumentals_file = other_path(match_song)
-            
+
             # Fallbacks when stems are missing: use AUDIO_IN WAV if present
             if not vocals_file.exists():
                 alt_vocals = AUDIO_IN / f"{base_song}.wav"
@@ -88,7 +92,7 @@ class PythonBridge:
                 alt_inst = AUDIO_IN / f"{match_song}.wav"
                 if alt_inst.exists():
                     instrumentals_file = alt_inst
-            
+
             # Online auto-fetch of missing tracks was removed with the catalogue
             # teardown (deployment plan, Phase 1). `online` is kept in the
             # signature for callers but no longer downloads anything; tracks must
@@ -99,7 +103,7 @@ class PythonBridge:
                     "Required audio files not found in the library — ingest the "
                     "tracks first via `python -m scripts.download`."
                 )
-            
+
             # Load and analyze audio
             print("📊 Loading and analyzing audio...")
             vocals, _ = self.mixer.load_audio(vocals_file)
@@ -150,39 +154,39 @@ class PythonBridge:
 
             # Build mix parameters from genre preset
             mix_params = self._genre_to_mix_params(genre_preset)
-            
+
             # Optimize parameters if requested
             if optimize:
                 print("🔄 Optimizing mix parameters...")
                 optimization_result = self.optimizer.optimize(
                     vocals_corrected, instrumentals_corrected, max_iterations=50
                 )
-                
+
                 # Update mix parameters with optimized values
                 mix_params.vocal_gain_db = optimization_result.best_parameters.vocal_gain
                 mix_params.instrumental_gain_db = optimization_result.best_parameters.instrumental_gain
                 mix_params.sidechain_amount = optimization_result.best_parameters.sidechain_amount
                 mix_params.hp_filter_freq = optimization_result.best_parameters.eq_low_cut_freq
                 mix_params.reverb_send = optimization_result.best_parameters.reverb_send
-            
+
             # Mix the audio
             print("🎛️ Mixing audio...")
             mix_result = self.mixer.mix_audio(vocals_corrected, instrumentals_corrected, mix_params)
-            
+
             if not mix_result.success:
                 raise RuntimeError(f"Mixing failed: {mix_result.error_message}")
-            
+
             # Save the mix
             mix_output_path = output_path / f"{base_song}_x_{match_song}_{preset}.wav"
             if not self.mixer.save_mix(mix_result, mix_output_path):
                 raise RuntimeError("Failed to save mix")
-            
+
             # Calculate comprehensive metrics
             print("📊 Calculating quality metrics...")
             quality_metrics = self.metrics.evaluate_remix(
                 vocals_file, instrumentals_file, mix_output_path
             )
-            
+
             # Create session report
             session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             report = {
@@ -220,19 +224,19 @@ class PythonBridge:
                 },
                 "success": True
             }
-            
+
             # Save report
             report_path = output_path / f"remix_report_{session_id}.json"
             with open(report_path, 'w') as f:
                 json.dump(report, f, indent=2)
-            
-            print(f"✅ Remix completed successfully!")
+
+            print("✅ Remix completed successfully!")
             print(f"   Output: {mix_output_path}")
             print(f"   Report: {report_path}")
             print(f"   Processing time: {report['processing_time']:.2f}s")
-            
+
             return report
-            
+
         except Exception as e:
             error_report = {
                 "session_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
@@ -244,16 +248,16 @@ class PythonBridge:
                 "success": False,
                 "error": str(e)
             }
-            
+
             # Save error report
             error_path = Path(output_dir) / f"error_report_{error_report['session_id']}.json"
             error_path.parent.mkdir(parents=True, exist_ok=True)
             with open(error_path, 'w') as f:
                 json.dump(error_report, f, indent=2)
-            
+
             print(f"❌ Remix failed: {e}")
             return error_report
-    
+
     def _genre_to_mix_params(self, genre_preset: GenrePreset) -> MixParameters:
         """
         Convert a GenrePreset into MixParameters for the audio mixer.
@@ -515,23 +519,23 @@ class PythonBridge:
             Dictionary with batch results
         """
         print(f"🎵 Starting batch remix: {len(remix_pairs)} pairs")
-        
+
         results = []
         successful = 0
         failed = 0
-        
+
         for i, (base_song, match_song) in enumerate(remix_pairs, 1):
             print(f"\n📊 Processing {i}/{len(remix_pairs)}: {base_song} + {match_song}")
-            
+
             try:
                 result = self.create_remix(base_song, match_song, output_dir, preset, optimize)
                 results.append(result)
-                
+
                 if result["success"]:
                     successful += 1
                 else:
                     failed += 1
-                    
+
             except Exception as e:
                 print(f"❌ Failed: {e}")
                 failed += 1
@@ -541,7 +545,7 @@ class PythonBridge:
                     "success": False,
                     "error": str(e)
                 })
-        
+
         # Create batch summary
         batch_summary = {
             "total_pairs": len(remix_pairs),
@@ -552,25 +556,25 @@ class PythonBridge:
             "optimization_used": optimize,
             "results": results
         }
-        
+
         # Save batch report
         batch_report_path = Path(output_dir) / f"batch_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(batch_report_path, 'w') as f:
             json.dump(batch_summary, f, indent=2)
-        
-        print(f"\n✅ Batch remix completed!")
+
+        print("\n✅ Batch remix completed!")
         print(f"   Successful: {successful}/{len(remix_pairs)}")
         print(f"   Failed: {failed}")
         print(f"   Success rate: {batch_summary['success_rate']:.1%}")
         print(f"   Batch report: {batch_report_path}")
-        
+
         return batch_summary
 
 
 def main():
     """Command-line interface for Python bridge."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Python-Only AI RemixMate Bridge")
     parser.add_argument("--base", required=True, help="Base song name (vocals source)")
     parser.add_argument("--match", required=True, help="Match song name (instrumentals source)")
@@ -578,12 +582,12 @@ def main():
     parser.add_argument("--preset", choices=["radio", "club", "ambient"], default="radio", help="Mix preset")
     parser.add_argument("--optimize", action="store_true", help="Use iterative optimization")
     parser.add_argument("--batch", help="Batch file with remix pairs (JSON)")
-    
+
     args = parser.parse_args()
-    
+
     # Create bridge
     bridge = PythonBridge()
-    
+
     if args.batch:
         # Batch processing
         with open(args.batch) as f:
@@ -593,7 +597,7 @@ def main():
     else:
         # Single remix
         result = bridge.create_remix(args.base, args.match, args.output_dir, args.preset, args.optimize)
-    
+
     return 0 if result.get("success", False) else 1
 
 

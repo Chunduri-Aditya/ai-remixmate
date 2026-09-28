@@ -40,7 +40,6 @@ Usage
 
 from __future__ import annotations
 
-import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,7 +50,7 @@ import numpy as np
 from scripts.core.audit import log_audit
 from scripts.core.gpu import get_device
 from scripts.core.logging_utils import get_logger
-from scripts.core.paths import LIBRARY_DIR, OUTPUTS_DIR, song_dir
+from scripts.core.paths import OUTPUTS_DIR, song_dir
 
 log = get_logger(__name__)
 
@@ -255,8 +254,9 @@ def _master_and_save(
     """
     Apply LUFS mastering, save to disk, return (path_str, lufs).
     """
-    from scripts.core.mastering import master_mix
     import soundfile as sf
+
+    from scripts.core.mastering import master_mix
 
     mastered, report = master_mix(audio, sr=sr, target_lufs=-14.0)
 

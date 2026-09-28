@@ -11,12 +11,11 @@ GET  /instrument-lab/songs     — list songs eligible for stem swap
 
 import re
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
 
 from scripts.api import jobs as job_store
-from scripts.api.routers._helpers import _require_song, _check_job_cap
+from scripts.api.routers._helpers import _check_job_cap, _require_song
 from scripts.api.schemas import (
     DJChainRequest,
     DJPreviewRequest,
@@ -33,7 +32,7 @@ from scripts.api.tasks import (
     task_instrument_lab,
     task_remix_preview,
 )
-from scripts.core.paths import LIBRARY_DIR, user_outputs_dir
+from scripts.core.paths import user_outputs_dir
 
 router = APIRouter()
 
@@ -180,6 +179,7 @@ def synthesize_beat(
     the user can open strudel.cc and customise the pattern manually.
     """
     import soundfile as sf
+
     from scripts.core.beat_synth import render_beat, strudel_code
 
     audio  = render_beat(bpm=bpm, genre=genre, bars=bars, intensity=intensity)

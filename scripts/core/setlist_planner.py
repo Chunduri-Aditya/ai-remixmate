@@ -23,7 +23,6 @@ import io
 import json
 import logging
 import math
-import random
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
@@ -32,7 +31,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from scripts.core.key_detection import camelot_distance, camelot_modulation, CAMELOT
+from scripts.core.key_detection import camelot_modulation
 
 log = logging.getLogger(__name__)
 

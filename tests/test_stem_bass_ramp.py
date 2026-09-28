@@ -15,8 +15,6 @@ The key behavioral properties:
 from __future__ import annotations
 
 import numpy as np
-import pytest
-
 
 SR = 44100
 TRANS_SAMPLES = SR * 8   # 8-second transition window (typical)

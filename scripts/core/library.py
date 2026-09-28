@@ -57,7 +57,8 @@ except Exception:
     _PRUNE_ON_DL = True
 
 try:
-    from scripts.core.paths import LIBRARY_DIR as _DEFAULT_LIBRARY_DIR, song_dir as _song_dir
+    from scripts.core.paths import LIBRARY_DIR as _DEFAULT_LIBRARY_DIR
+    from scripts.core.paths import song_dir as _song_dir
 except Exception:
     _DEFAULT_LIBRARY_DIR = Path("library")
     def _song_dir(name: str) -> Path:   # type: ignore[misc]
@@ -820,7 +821,7 @@ class LibraryManager:
         songs = self.list_songs()
         total_gb = self.get_size_gb()
         lines = [
-            f"📚 Library Summary",
+            "📚 Library Summary",
             f"   Songs: {len(songs)}",
             f"   Total size: {total_gb:.2f} GB / {self.max_size_gb:.0f} GB cap",
             f"   {'⚠️  Over cap — run evict_lru()' if total_gb > self.max_size_gb else '✅ Within cap'}",

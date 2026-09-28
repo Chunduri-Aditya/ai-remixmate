@@ -40,17 +40,15 @@ Usage
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
 from scripts.core.audit import log_audit
 from scripts.core.gpu import get_device
-from scripts.core.paths import LIBRARY_DIR, song_dir
+from scripts.core.paths import song_dir
 
 log = logging.getLogger(__name__)
 
@@ -142,7 +140,7 @@ def _load_encodec(device: str) -> Tuple[Any, Any]:
         return _encodec_model, _encodec_processor
 
     try:
-        from transformers import EncodecModel, AutoProcessor
+        from transformers import AutoProcessor, EncodecModel
 
         log.info("[codec] Loading EnCodec 24kHz from HuggingFace...")
         model = EncodecModel.from_pretrained("facebook/encodec_24khz")
@@ -269,7 +267,8 @@ def encode_audio(
 def _encode_encodec(audio: np.ndarray, config: CodecConfig) -> Dict[str, Any]:
     """Encode audio with EnCodec."""
     import torch
-    from scripts.core.gpu import to_tensor, to_numpy
+
+    from scripts.core.gpu import to_tensor
 
     model, processor = _load_encodec(config.device)
 
@@ -322,7 +321,8 @@ def _encode_encodec(audio: np.ndarray, config: CodecConfig) -> Dict[str, Any]:
 def _encode_dac(audio: np.ndarray, config: CodecConfig) -> Dict[str, Any]:
     """Encode audio with DAC."""
     import torch
-    from scripts.core.gpu import to_tensor, to_numpy
+
+    from scripts.core.gpu import to_numpy, to_tensor
 
     model = _load_dac(config.device)
 
@@ -403,7 +403,8 @@ def _decode_encodec(
 ) -> np.ndarray:
     """Decode EnCodec tokens."""
     import torch
-    from scripts.core.gpu import to_tensor, to_numpy
+
+    from scripts.core.gpu import to_numpy
 
     model, _ = _load_encodec(config.device)
 
@@ -442,7 +443,8 @@ def _decode_dac(
 ) -> np.ndarray:
     """Decode DAC tokens."""
     import torch
-    from scripts.core.gpu import to_tensor, to_numpy
+
+    from scripts.core.gpu import to_numpy, to_tensor
 
     model = _load_dac(config.device)
 

@@ -260,7 +260,7 @@ def separate_song_stems(
     elif enhance:
         _prog(0.08, "Enhancing audio (HP · compress · air EQ · LUFS −14)…")
         try:
-            from scripts.core.audio_enhance import enhance_audio, EnhanceOptions
+            from scripts.core.audio_enhance import EnhanceOptions, enhance_audio
             opts = EnhanceOptions(
                 hp_filter      = True,
                 lp_filter      = True,

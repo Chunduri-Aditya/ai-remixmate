@@ -23,11 +23,9 @@ from __future__ import annotations
 
 import json
 import sys
-import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -184,7 +182,7 @@ class TestLoggingUtils:
 
     def test_get_logger_returns_structured_logger(self):
         """get_logger should return a StructuredLogger instance."""
-        from scripts.core.logging_utils import get_logger, StructuredLogger
+        from scripts.core.logging_utils import StructuredLogger, get_logger
         logger = get_logger("test.module")
         assert isinstance(logger, StructuredLogger)
 
@@ -197,13 +195,13 @@ class TestLoggingUtils:
 
     def test_set_get_request_id(self):
         """set_request_id + get_request_id should round-trip correctly."""
-        from scripts.core.logging_utils import set_request_id, get_request_id
+        from scripts.core.logging_utils import get_request_id, set_request_id
         set_request_id("req-abc-123")
         assert get_request_id() == "req-abc-123"
 
     def test_set_get_job_id(self):
         """set_job_id + get_job_id should round-trip correctly."""
-        from scripts.core.logging_utils import set_job_id, get_job_id
+        from scripts.core.logging_utils import get_job_id, set_job_id
         set_job_id("job-xyz-999")
         assert get_job_id() == "job-xyz-999"
 
@@ -228,6 +226,7 @@ class TestLoggingUtils:
     def test_structured_json_formatter_produces_valid_json(self):
         """StructuredJsonFormatter output must be parseable JSON."""
         import logging as _stdlib_logging
+
         from scripts.core.logging_utils import StructuredJsonFormatter
         formatter = StructuredJsonFormatter()
         record = _stdlib_logging.LogRecord(
@@ -260,7 +259,7 @@ class TestJobStore:
     def test_create_job_initial_state(self):
         """Newly created job should have PENDING status and 0.0 progress."""
         from scripts.api.jobs import create_job, get_job
-        from scripts.api.schemas import JobType, JobStatus
+        from scripts.api.schemas import JobStatus, JobType
         job_id = create_job(JobType.ANALYZE)
         job = get_job(job_id)
         assert job is not None
@@ -271,7 +270,7 @@ class TestJobStore:
 
     def test_update_job_progress(self):
         """update_job should update progress, message, and compute ETA."""
-        from scripts.api.jobs import create_job, update_job, get_job
+        from scripts.api.jobs import create_job, get_job, update_job
         from scripts.api.schemas import JobType
         job_id = create_job(JobType.DJ_REMIX)
         # Simulate started_at being set
@@ -288,7 +287,7 @@ class TestJobStore:
 
     def test_update_job_eta_decreases(self):
         """ETA should decrease as progress increases."""
-        from scripts.api.jobs import create_job, update_job, get_job
+        from scripts.api.jobs import create_job, get_job, update_job
         from scripts.api.schemas import JobType
         job_id = create_job(JobType.DJ_REMIX)
         job = get_job(job_id)
@@ -302,7 +301,7 @@ class TestJobStore:
 
     def test_update_job_clamps_progress(self):
         """Progress should be clamped to [0, 1]."""
-        from scripts.api.jobs import create_job, update_job, get_job
+        from scripts.api.jobs import create_job, get_job, update_job
         from scripts.api.schemas import JobType
         job_id = create_job(JobType.ANALYZE)
         update_job(job_id, progress=1.5)  # Over 1.0
@@ -312,7 +311,7 @@ class TestJobStore:
 
     def test_list_jobs_returns_all(self):
         """list_jobs should include all created jobs."""
-        from scripts.api.jobs import create_job, list_jobs, _jobs
+        from scripts.api.jobs import _jobs, create_job, list_jobs
         from scripts.api.schemas import JobType
         # Query with a limit well above the store size so the count reflects
         # actual growth — the default limit=50 caps the result and would mask
@@ -326,7 +325,7 @@ class TestJobStore:
 
     def test_job_to_response_includes_eta_sec(self):
         """job_to_response should include eta_sec field (can be None or int)."""
-        from scripts.api.jobs import create_job, update_job, get_job, job_to_response
+        from scripts.api.jobs import create_job, get_job, job_to_response, update_job
         from scripts.api.schemas import JobType
         job_id = create_job(JobType.ANALYZE)
         job = get_job(job_id)
@@ -342,8 +341,8 @@ class TestJobStore:
         Integration: create → submit → poll until done.
         Task function runs in the thread pool and signals completion.
         """
-        from scripts.api.jobs import create_job, submit_job, get_job
-        from scripts.api.schemas import JobType, JobStatus
+        from scripts.api.jobs import create_job, get_job, submit_job
+        from scripts.api.schemas import JobStatus, JobType
 
         def _simple_task(job_id: str, **kwargs):
             from scripts.api.jobs import update_job
@@ -372,8 +371,8 @@ class TestJobStore:
         Integration: create → submit → poll until failed.
         Failed job should capture error message.
         """
-        from scripts.api.jobs import create_job, submit_job, get_job
-        from scripts.api.schemas import JobType, JobStatus
+        from scripts.api.jobs import create_job, get_job, submit_job
+        from scripts.api.schemas import JobStatus, JobType
 
         def _failing_task(job_id: str, **kwargs):
             raise RuntimeError("Deliberate test failure — do not alarm")
@@ -397,7 +396,7 @@ class TestJobStore:
         """Run a job to a terminal state with a capture hook installed;
         return the list of (event_type, payload) the store emitted."""
         import scripts.api.jobs as jobs_mod
-        from scripts.api.jobs import create_job, submit_job, get_job, register_sse_hook
+        from scripts.api.jobs import create_job, get_job, register_sse_hook, submit_job
         from scripts.api.schemas import JobStatus
 
         events: list = []
@@ -460,7 +459,7 @@ class TestDJEngineValidation:
     @pytest.fixture
     def minimal_plan(self):
         """Return a minimal valid TransitionPlan-like object."""
-        from scripts.core.dj_engine import plan_transition, _analyze_impl
+        from scripts.core.dj_engine import _analyze_impl, plan_transition
         audio = _make_sine(duration=5.0, bpm=120.0)
         struct = _analyze_impl(audio, SR)
         return plan_transition(struct, struct, transition_bars=8)
@@ -561,7 +560,7 @@ class TestRateLimiting:
         """At the job cap, _check_job_cap should raise HTTPException with 429."""
         from fastapi import HTTPException
         with patch("scripts.api.routers._helpers.job_store") as mock_store:
-            from scripts.api.routers._helpers import _check_job_cap, _MAX_ACTIVE_JOBS
+            from scripts.api.routers._helpers import _MAX_ACTIVE_JOBS, _check_job_cap
             mock_store.list_jobs.return_value = [
                 {"status": "running"} for _ in range(_MAX_ACTIVE_JOBS)
             ]
@@ -607,6 +606,7 @@ class TestHealthEndpoints:
         """Create a TestClient for the FastAPI app."""
         try:
             from fastapi.testclient import TestClient
+
             from scripts.api.main import app
             return TestClient(app)
         except Exception:
@@ -698,8 +698,8 @@ class TestJobSchemas:
 
     def test_job_response_has_eta_sec_field(self):
         """JobResponse schema must have eta_sec as an Optional[int] field."""
+
         from scripts.api.schemas import JobResponse
-        import inspect
         # Check it's a defined field, not just a dynamic attr
         fields = JobResponse.model_fields
         assert "eta_sec" in fields, "eta_sec must be a declared field in JobResponse"
@@ -707,6 +707,7 @@ class TestJobSchemas:
     def test_job_response_eta_sec_is_optional(self):
         """JobResponse should accept None for eta_sec without validation error."""
         import time
+
         from scripts.api.schemas import JobResponse, JobStatus, JobType
         # Should not raise
         resp = JobResponse(
@@ -723,6 +724,7 @@ class TestJobSchemas:
     def test_job_response_eta_sec_accepts_int(self):
         """JobResponse should accept an integer eta_sec."""
         import time
+
         from scripts.api.schemas import JobResponse, JobStatus, JobType
         resp = JobResponse(
             job_id="test-id-2",

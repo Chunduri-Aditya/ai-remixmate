@@ -6,7 +6,7 @@ task_rebuild_index   — rebuild RAG music index
 task_initialize_library — one-shot pipeline (stem split → compress → index)
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from scripts.api.jobs import update_job
 from scripts.core.audit import log_audit
@@ -186,8 +186,8 @@ def task_initialize_library(
       65–85 % →  FLAC compression
       85–100% →  index rebuild
     """
-    from scripts.core.stems import separate_song_stems
     from scripts.core.music_index import get_index
+    from scripts.core.stems import separate_song_stems
 
     STEMS = ("vocals", "drums", "bass", "other")
 
