@@ -450,7 +450,11 @@ def master_mix(
 
     # 3. Post-analysis
     report.lufs_integrated = compute_lufs(mastered, sr)
-    clipping, count, peak  = detect_clipping(mastered, threshold_db=ceiling_db)
+    _, _, peak             = detect_clipping(mastered, threshold_db=ceiling_db)
+    # Clipping is judged on the pre limiter mix: the limiter holds its output
+    # AT the ceiling by design, so a ">= ceiling" count after limiting flagged
+    # every render the limiter touched.
+    clipping, count, _     = detect_clipping(audio)
     report.has_clipping    = clipping
     report.clip_count      = count
     report.peak_dbfs       = peak
@@ -465,7 +469,7 @@ def master_mix(
     issues: List[str] = []
     if clipping:
         issues.append(
-            f'⚠️  {count} sample(s) above {ceiling_db:.1f} dBFS after limiting'
+            f'⚠️  {count} sample(s) at or near 0 dBFS before limiting'
         )
     lufs_err = abs(report.lufs_integrated - target_lufs)
     if lufs_err > 3.0:

@@ -37,7 +37,20 @@ def task_analyze(
     def _cb(frac: float, msg: str) -> None:
         update_job(job_id, progress=frac, message=msg)
 
-    result = run_song_analysis(song, key_profile=key_profile, progress_cb=_cb)
+    try:
+        result = run_song_analysis(song, key_profile=key_profile, progress_cb=_cb)
+    except ValueError as exc:
+        # Structure analysis needs at least one bar (4 beats); with fewer it
+        # fails deep inside with an opaque error. Confirm beatlessness on the
+        # failure path only, so a successful analysis never pays for it.
+        from scripts.core.analysis_pipeline import _load_song_audio
+        from scripts.core.beat_tracker import get_configured_tracker
+
+        sr = 44100
+        audio = _load_song_audio(song, sr=sr, duration=120.0)
+        if len(get_configured_tracker().track(audio, sr).beat_times) < 4:
+            raise ValueError(f"no beats detected in {song!r}") from exc
+        raise
 
     log_audit("analyze_complete", resource=song, job_id=job_id,
               metadata={"genre": result.get("genre"), "bpm": result.get("bpm"),
@@ -58,10 +71,15 @@ def task_analyze_missing(job_id: str, key_profile: str = "auto", force: bool = F
     this, filling gaps meant clicking Analyze per-row, one song at a time.
     """
     from scripts.core.analysis_pipeline import has_analysis, run_song_analysis
+    from scripts.core.audio_source import has_source_audio
+    from scripts.core.library import is_playlist_artifact
 
+    # Playlist artifacts and folders with no audio are not songs: skip them
+    # rather than analysing them or reporting them as failures.
     targets = [
         d.name for d in sorted(LIBRARY_DIR.iterdir())
         if d.is_dir() and (force or not has_analysis(d))
+        and not is_playlist_artifact(d) and has_source_audio(d.name)
     ]
     total = len(targets)
     done = 0

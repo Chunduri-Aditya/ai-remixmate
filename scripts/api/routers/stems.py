@@ -13,8 +13,10 @@ the two compress routes are FLAC encode only and stay open.
 """
 
 import os
+from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from scripts.api import jobs as job_store
 from scripts.api.auth import require_operator
@@ -34,6 +36,16 @@ from scripts.api.tasks import (
 from scripts.core.paths import LIBRARY_DIR
 
 router = APIRouter()
+
+
+class CompressStemsRequest(BaseModel):
+    """JSON body for POST /stems/compress (the frontend sends ``{song}``)."""
+    song: Optional[str] = None
+
+
+class BatchCompressStemsRequest(BaseModel):
+    """JSON body for POST /stems/compress-batch; ``songs=None`` means the whole library."""
+    songs: Optional[List[str]] = None
 
 
 def _stem_split_enabled() -> None:
@@ -138,7 +150,8 @@ def stem_split_batch(req: BatchStemSplitRequest, background_tasks: BackgroundTas
     dependencies=[Depends(require_operator)],
 )
 def compress_stems_single(
-    song: str = Query(..., description="Song name in library"),
+    req: Optional[CompressStemsRequest] = None,
+    song: Optional[str] = Query(None, description="Song name in library (or pass {song} as JSON)"),
     delete_wav: bool = Query(True, description="Delete WAV after FLAC encode"),
     background_tasks: BackgroundTasks = None,
 ):
@@ -146,6 +159,10 @@ def compress_stems_single(
     Compress WAV stems → lossless FLAC (~50% space, same quality).
     Runs as an async job.
     """
+    if req is not None and req.song:
+        song = req.song
+    if not song:
+        raise HTTPException(status_code=422, detail="song is required")
     _check_job_cap()
     _require_song(song)
     job_id = job_store.create_job(JobType.ANALYZE, {"song": song, "type": "compress_stems"})
@@ -161,6 +178,7 @@ def compress_stems_single(
     dependencies=[Depends(require_operator)],
 )
 def compress_stems_batch(
+    req: Optional[BatchCompressStemsRequest] = None,
     background_tasks: BackgroundTasks = None,
     delete_wav: bool = Query(True, description="Delete WAVs after FLAC encode"),
     skip_existing: bool = Query(True, description="Skip songs that already have FLAC stems"),
@@ -171,11 +189,28 @@ def compress_stems_batch(
     Poll /jobs/{job_id} for per-song progress.
     """
     _check_job_cap()
+    songs = req.songs if req is not None else None
+    if songs:
+        # Caller supplied names: confine each to LIBRARY_DIR the same way
+        # stem_split_batch does, dropping invalid or missing entries.
+        validated = []
+        for name in songs:
+            try:
+                _require_song(name)
+                validated.append(name)
+            except HTTPException:
+                continue
+        if not validated:
+            raise HTTPException(status_code=400, detail="No requested songs found in library")
+        songs = validated
+    else:
+        songs = None
     job_id = job_store.create_job(
         JobType.ANALYZE, {"type": "batch_compress_stems"}
     )
     job_store.submit_job(
         job_id, task_batch_compress_stems,
+        songs=songs,
         delete_wav=delete_wav,
         skip_existing=skip_existing,
     )

@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
 import sqlite3
 import time
@@ -775,7 +776,9 @@ class MetadataClient:
             log.debug("Last.fm lookup error: %s", e)
 
         # --- MusicBrainz (canonical IDs, ISRC) — slower, do last ---
-        if not any(r.mb_id for r in results):
+        # Opt in only: read per call so the flag flips without a restart.
+        mb_enabled = os.environ.get("REMIXMATE_MUSICBRAINZ_ENABLED", "").strip() == "1"
+        if mb_enabled and not any(r.mb_id for r in results):
             try:
                 mb_meta = self._musicbrainz.lookup(title, artist)
                 if mb_meta:

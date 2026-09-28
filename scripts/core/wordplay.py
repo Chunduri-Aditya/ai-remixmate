@@ -148,7 +148,10 @@ def _ensure_nltk_data() -> None:
                            else f"corpora/{pkg}" if pkg in ("stopwords", "wordnet", "omw-1.4")
                            else pkg)
         except LookupError:
-            nltk.download(pkg, quiet=True)
+            try:
+                nltk.download(pkg, quiet=True)
+            except Exception as exc:  # noqa: BLE001 — offline or blocked download must not crash scoring
+                log.warning("nltk.download(%r) failed: %s", pkg, exc)
     _STOP_WORDS = set(stopwords.words("english"))
     _ensure_nltk_data_done = True
 
@@ -275,7 +278,8 @@ def _fetch_lyrics_genius(
         lyrics = song.lyrics if song else None
     except Exception as exc:
         log.warning("Genius error for %s — %s: %s", artist, title, exc)
-        lyrics = None
+        # Not cached: a transient failure must not replay as "no lyrics" later
+        return None
 
     _save_to_cache(title, artist, lyrics or "")
     time.sleep(0.4)   # polite rate limiting (Genius allows ~25 req/s)

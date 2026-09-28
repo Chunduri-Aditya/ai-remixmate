@@ -537,8 +537,8 @@ def build_clap_index(
                 result=stats,
             )
         except Exception as exc:
-            job_store.update_job(job_id, status="failed",
-                                 message=f"CLAP index build failed: {exc}")
+            # Propagate so the job wrapper marks the job FAILED instead of DONE
+            raise RuntimeError(f"CLAP index build failed: {exc}") from exc
 
     job_id = job_store.create_job(JobType.ANALYZE, {"type": "build_clap_index", "force": force})
     job_store.submit_job(job_id, _task_build_clap)

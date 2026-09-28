@@ -363,7 +363,8 @@ def camelot_modulation(
 
     result = _mod(from_key.strip().upper(), to_key.strip().upper())
 
-    if result.get("type") == "invalid_input":
+    # key_detection.camelot_modulation reports unparseable codes as type "unknown"
+    if result.get("type") == "unknown":
         raise HTTPException(
             status_code=422,
             detail=(
@@ -397,8 +398,17 @@ def find_wordplay(req: WordplayRequest):
 
     Tip: get a free token at https://genius.com/api-clients
     """
+    import scripts.core.wordplay as _wp
     from scripts.core.wordplay import TrackInput as WPTrackInput
     from scripts.core.wordplay import find_wordplay_pairs
+
+    # Without lyricsgenius (the "wordplay" extra) no lyrics can be fetched and
+    # every request would come back as an empty 200; say so instead.
+    if not _wp._HAS_GENIUS:
+        raise HTTPException(
+            status_code=503,
+            detail="wordplay unavailable: install the 'wordplay' extra (lyricsgenius, nltk)",
+        )
 
     token = req.genius_token or os.getenv("GENIUS_TOKEN")
     if not token:

@@ -538,8 +538,8 @@ def calibrate_stem_lufs():
                                  message="Stem LUFS calibration complete",
                                  result=targets)
         except Exception as exc:
-            job_store.update_job(job_id, status="failed",
-                                 message=f"Calibration failed: {exc}")
+            # Propagate so the job wrapper marks the job FAILED instead of DONE
+            raise RuntimeError(f"Calibration failed: {exc}") from exc
 
     job_id = job_store.create_job(JobType.ANALYZE, {"type": "calibrate_lufs"})
     job_store.submit_job(job_id, _task_calibrate_lufs)
@@ -573,7 +573,6 @@ def export_cues(
     If no analysis exists, only Cue 1 at 0.0 s is exported and BPM is 0.
     """
     import json
-    import shutil
     import tempfile
 
     from fastapi.responses import FileResponse as _FileResponse
@@ -651,8 +650,9 @@ def export_cues(
     src_mp3 = mp3_candidates[0]
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
         tmp_path = Path(f.name)
-    shutil.copy2(src_mp3, tmp_path)
     try:
+        # Source and destination must differ: the exporter copies audio_path to
+        # output_path, and copying a file onto itself raises SameFileError.
         _export_cues(
             song_name=name,
             cue_points=cue_points,
@@ -660,7 +660,7 @@ def export_cues(
             bpm=bpm,
             fmt="serato",
             output_path=tmp_path,
-            audio_path=tmp_path,
+            audio_path=src_mp3,
         )
         return _FileResponse(
             str(tmp_path),
