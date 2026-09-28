@@ -106,7 +106,8 @@ def test_parse_cc_url_distinguishes_cc0_from_public_domain_mark() -> None:
         ("Attribution-NonCommercial-NoDerivatives", LicenseType.CC_BY_NC_ND),
         ("Public Domain", LicenseType.PUBLIC_DOMAIN),
         ("CC0 1.0", LicenseType.CC0),
-        ("all rights reserved", None),
+        # B7.1 (2026-09-27): the text fallback denies "all rights reserved" as PROPRIETARY.
+        ("all rights reserved", LicenseType.PROPRIETARY),
     ],
 )
 def test_cc_type_from_text(text: str, expected) -> None:

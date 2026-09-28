@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
@@ -128,40 +129,72 @@ def parse_cc_url(url: str) -> Optional[LicenseType]:
     return None
 
 
+# Whole-phrase, word-boundary patterns over the normalised label (lowercase,
+# "_" → " ", whitespace collapsed; hyphens kept).
+_ALL_RIGHTS_RESERVED = re.compile(r"\ball rights reserved\b")
+# CC slug with at least one modifier ("by-nc", "cc-by-nc-sa-3.0"); never "by" inside a word.
+_CC_SLUG = re.compile(r"\bby((?:[\s\-](?:nc|sa|nd))+)\b")
+_CC_CONTEXT = re.compile(r"\b(?:creative[\s\-]?commons|cc)\b")
+_ATTRIBUTION = re.compile(r"\battribution\b")
+# Bare attribution counts as CC BY only directly after "creative commons" / "cc".
+_CC_ATTRIBUTION = re.compile(r"\b(?:creative[\s\-]?commons|cc)[\s\-:]+(?:attribution|by)\b")
+# ccMixter's own CC BY label: the whole label is "Attribution", optionally versioned.
+_ATTRIBUTION_LABEL = re.compile(r"^attribution(?:[\s\-]*\(?\d+(?:\.\d+)?\)?)?$")
+_NONCOMMERCIAL = re.compile(r"\bnon[\s\-]?commercial\b")
+_SHAREALIKE = re.compile(r"\bshare[\s\-]?alike\b")
+_NODERIVS = re.compile(r"\bno[\s\-]?deriv(?:ative)?s?\b")
+_CC0 = re.compile(r"\bcc[\s\-]?(?:0|zero)\b")
+_PUBLIC_DOMAIN = re.compile(r"\bpublic[\s\-]?domain\b")
+
+
 def _cc_type_from_text(text: Optional[str]) -> Optional[LicenseType]:
     """
     Best-effort LicenseType from a free-text licence label.
 
     ccMixter / FMA / Internet Archive report licences as short strings
     ("Attribution-NonCommercial", "CC BY 3.0", "Public Domain") rather than a
-    clean CC URL. Normalise separators, then match longest slug first so
-    "by-nc-sa" wins over "by-nc" / "by".
+    clean CC URL. Matches whole canonical phrases on word boundaries and lets
+    the most restrictive match win: "all rights reserved" is PROPRIETARY, then
+    NC/ND/SA modifiers, then CC BY, then CC0 / public domain. Anything else is
+    UNKNOWN; an empty label is None.
     """
-    if not text:
+    if not text or not text.strip():
         return None
-    t = text.lower().replace(" ", "-").replace("_", "-").strip()
-    if "publicdomain" in t or "public-domain" in t or t in ("pdm", "pd"):
-        return LicenseType.PUBLIC_DOMAIN
-    if "cc0" in t or "-zero-" in t or t == "zero":
+    t = " ".join(text.lower().replace("_", " ").split())
+
+    if _ALL_RIGHTS_RESERVED.search(t):
+        return LicenseType.PROPRIETARY
+
+    anchored = bool(_ATTRIBUTION.search(t) or _CC_CONTEXT.search(t))
+    nc = bool(_NONCOMMERCIAL.search(t))
+    sa = bool(_SHAREALIKE.search(t))
+    nd = bool(_NODERIVS.search(t))
+    for m in _CC_SLUG.finditer(t):
+        mods = m.group(1).replace("-", " ").split()
+        anchored = True
+        nc = nc or "nc" in mods
+        sa = sa or "sa" in mods
+        nd = nd or "nd" in mods
+
+    if anchored:
+        if nc and nd:
+            return LicenseType.CC_BY_NC_ND
+        if nc and sa:
+            return LicenseType.CC_BY_NC_SA
+        if nc:
+            return LicenseType.CC_BY_NC
+        if nd:
+            return LicenseType.CC_BY_ND
+        if sa:
+            return LicenseType.CC_BY_SA
+        if _CC_ATTRIBUTION.search(t) or _ATTRIBUTION_LABEL.match(t):
+            return LicenseType.CC_BY
+
+    if _CC0.search(t):
         return LicenseType.CC0
-    # Slug form ("cc-by-nc-sa-3.0") — longest key first so "by-nc-sa" beats "by".
-    for slug, lt in sorted(_CC_URL_MAP.items(), key=lambda kv: len(kv[0]), reverse=True):
-        s = slug.strip("/")
-        if s and s in t:
-            return lt
-    # Word form ("Attribution-NonCommercial-NoDerivatives") — compound first.
-    for needle, lt in (
-        ("noncommercial-noderiv", LicenseType.CC_BY_NC_ND),
-        ("noncommercial-sharealike", LicenseType.CC_BY_NC_SA),
-        ("noncommercial", LicenseType.CC_BY_NC),
-        ("noderiv", LicenseType.CC_BY_ND),
-        ("sharealike", LicenseType.CC_BY_SA),
-    ):
-        if needle in t:
-            return lt
-    if "attribution" in t or "creativecommons" in t.replace("-", ""):
-        return LicenseType.CC_BY  # bare "Creative Commons" / "Attribution" → base licence
-    return None
+    if _PUBLIC_DOMAIN.search(t) or t in ("pdm", "pd"):
+        return LicenseType.PUBLIC_DOMAIN
+    return LicenseType.UNKNOWN
 
 
 # ---------------------------------------------------------------------------
