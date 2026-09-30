@@ -61,10 +61,13 @@ print(json.dumps({
 """
 
 
-def _resolve_in_child(var: str, value: Path, attr: str, tmp_path: Path) -> dict[str, bool]:
+def _resolve_in_child(
+    var: str, value: Path, attr: str, tmp_path: Path, extra: dict[str, str] | None = None
+) -> dict[str, bool]:
     env = {k: v for k, v in os.environ.items() if k not in _STORAGE_VARS}
     env["REMIXMATE_DATA_DIR"] = str(tmp_path / "data")  # keep the child off the real data/ tree
     env[var] = str(value)
+    env.update(extra or {})
     proc = subprocess.run(
         [sys.executable, "-c", _CHILD_SCRIPT, attr, str(value)],
         cwd=_REPO,
@@ -106,6 +109,21 @@ def test_remixmate_outputs_dir_alias_resolves(tmp_path: Path) -> None:
         "REMIXMATE_OUTPUTS_DIR is not honoured: paths.OUTPUTS_DIR did not follow it "
         f"(fell back to repo default: {result['is_repo_default']})"
     )
+
+
+@pytest.mark.parametrize(
+    ("generic", "alias", "attr"),
+    [
+        ("REMIXMATE_LIBRARY_LIBRARY_DIR", "REMIXMATE_LIBRARY_DIR", "LIBRARY_DIR"),
+        ("REMIXMATE_LIBRARY_OUTPUTS_DIR", "REMIXMATE_OUTPUTS_DIR", "OUTPUTS_DIR"),
+    ],
+)
+def test_generic_name_wins_over_its_alias(generic: str, alias: str, attr: str, tmp_path: Path) -> None:
+    # The documented precedence (paths.py, remixmate.env.example): the conftest
+    # shim sets only the generic name, so an exported alias must not outrank it.
+    target = tmp_path / "generic"
+    result = _resolve_in_child(generic, target, attr, tmp_path, {alias: str(tmp_path / "alias")})
+    assert result["matches_expected"], f"{alias} outranked {generic}: paths.{attr} followed the alias"
 
 
 def test_aliases_are_documented_in_paths_py() -> None:

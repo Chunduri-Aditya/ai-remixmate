@@ -242,6 +242,13 @@ class SystemdUnitTests(unittest.TestCase):
             "uvicorn has no --timeout-graceful-shutdown 30",
         )
 
+    def test_exec_start_ignores_proxy_headers(self):
+        # B6.3: uvicorn's proxy header default let X-Forwarded-For from loopback
+        # rekey the DMCA limiter; start.sh passes the flag, the unit must too.
+        exec_start = _unit_values(self.text, "ExecStart")
+        self.assertEqual(len(exec_start), 1, exec_start)
+        self.assertRegex(exec_start[0], r"--no-proxy-headers\b", "uvicorn trusts proxy headers")
+
     def test_after_network_online(self):
         after = " ".join(_unit_values(self.text, "After"))
         self.assertIn("network-online.target", after, f"After= is {after!r}")
