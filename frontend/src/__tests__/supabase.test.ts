@@ -118,3 +118,37 @@ describe('syncSseCookie with VITE_COOKIE_DOMAIN (B8.5)', () => {
     for (const w of writes) expect(w).not.toMatch(/Domain=/i)
   })
 })
+
+// --- security: the https cookie must not ride cross-site requests ----------
+// api.<domain> under Domain=<domain> is same-site with the frontend, so Lax
+// still reaches the SSE stream and media GETs; None let a cross-site form POST
+// carry the JWT to body-less mutating routes (CSRF).
+
+describe('syncSseCookie on https', () => {
+  const writes: string[] = []
+  let restore: () => void = () => {}
+  const dom = (globalThis as unknown as { jsdom: { reconfigure(o: { url: string }): void } }).jsdom
+  const originalUrl = window.location.href
+
+  afterEach(() => {
+    restore()
+    dom.reconfigure({ url: originalUrl })
+    vi.unstubAllEnvs()
+    vi.resetModules()
+    writes.length = 0
+  })
+
+  it('writes and clears the token cookie as SameSite=Lax; Secure, never SameSite=None', async () => {
+    vi.stubEnv('VITE_COOKIE_DOMAIN', COOKIE_DOMAIN)
+    dom.reconfigure({ url: `https://app.${COOKIE_DOMAIN}/` })
+    expect(window.location.protocol).toBe('https:')
+    const sync = await loadSync()
+    restore = captureCookieWrites(writes)
+    sync('jwt-abc-123')
+    sync(null)
+    expect(writes).toEqual([
+      `sb-access-token=jwt-abc-123; Path=/; Domain=${COOKIE_DOMAIN}; SameSite=Lax; Secure`,
+      `sb-access-token=; Path=/; Max-Age=0; Domain=${COOKIE_DOMAIN}; SameSite=Lax; Secure`,
+    ])
+  })
+})

@@ -61,6 +61,11 @@ def _build_app() -> FastAPI:
         # reaches a sibling sync endpoint (a dependency's would not).
         return {"uid": get_user_id()}
 
+    @gated.post("/mutate")
+    def mutate():
+        # body-less, like POST /library/storage/prune: a cross-site form can reach it
+        return {"uid": get_user_id()}
+
     app.include_router(gated, dependencies=[Depends(require_user)])
     return app
 
@@ -126,6 +131,23 @@ def test_valid_session_cookie_authenticates(signing_key):
     r = client.get("/whoami")
     assert r.status_code == 200
     assert r.json() == {"uid": "u-cookie"}
+
+
+def test_bearer_token_authenticates_a_post(signing_key):
+    client = TestClient(_build_app())
+    tok = _token(signing_key, sub="u-post")
+    r = client.post("/mutate", headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 200
+    assert r.json() == {"uid": "u-post"}
+
+
+def test_session_cookie_does_not_authenticate_a_post(signing_key):
+    """CSRF: a cross-site form POST carries the cookie but can never set a
+    Bearer header, so the cookie must not authenticate an unsafe method."""
+    client = TestClient(_build_app())
+    client.cookies.set("sb-access-token", _token(signing_key, sub="u-victim"))
+    r = client.post("/mutate", content=b"x=y", headers={"Content-Type": "text/plain"})
+    assert r.status_code == 401
 
 
 # ---------------------------------------------------------------------------

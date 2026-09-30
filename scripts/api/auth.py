@@ -49,6 +49,7 @@ _JWKS_URL_ENV = "SUPABASE_JWKS_URL"
 _AUDIENCE_ENV = "SUPABASE_JWT_AUD"          # Supabase default: "authenticated"
 _ISSUER_ENV = "SUPABASE_JWT_ISS"           # optional: https://<ref>.supabase.co/auth/v1
 _COOKIE_NAME_ENV = "SUPABASE_COOKIE_NAME"   # raw-JWT session cookie for EventSource
+_COOKIE_METHODS = frozenset({"GET", "HEAD"})  # safe methods the cookie may authenticate
 _ADMIN_EMAILS_ENV = "ADMIN_EMAILS"          # comma-separated; Phase 8 admin routes
 _ADMIN_ALLOW_UNVERIFIED_ENV = "ADMIN_ALLOW_UNVERIFIED"  # "1" skips the email_verified check
 _DEFAULT_AUDIENCE = "authenticated"
@@ -173,11 +174,17 @@ def _extract_token(request: Request) -> Optional[str]:
     """Bearer header first (XHR / fetch), then a raw-JWT session cookie
     (EventSource cannot send an Authorization header). The Supabase SSR
     chunked-cookie format is the frontend commit's concern; here the cookie is
-    expected to hold the access token verbatim."""
+    expected to hold the access token verbatim.
+
+    The cookie authenticates only GET and HEAD (EventSource and media elements).
+    An unsafe method needs the Bearer header, which a cross-site form cannot set,
+    so the cookie cannot carry a CSRF POST to a body-less mutating route."""
     header = request.headers.get("Authorization", "")
     if header.startswith("Bearer "):
         tok = header[len("Bearer "):].strip()
         return tok or None
+    if request.method not in _COOKIE_METHODS:
+        return None
     cookie_name = os.environ.get(_COOKIE_NAME_ENV, "").strip() or _DEFAULT_COOKIE_NAME
     return request.cookies.get(cookie_name) or None
 

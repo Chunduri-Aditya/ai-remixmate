@@ -42,18 +42,18 @@ const COOKIE_DOMAIN = import.meta.env.VITE_COOKIE_DOMAIN?.trim()
 
 /** Write (or clear) the readable cookie the SSE stream authenticates with.
  *
- * Prod topology is a Cloudflare-Pages frontend calling an API on another
- * domain, so the cookie must be `SameSite=None; Secure` to ride a cross-site
- * `EventSource(withCredentials)` request. On http localhost (same-origin via
- * the Vite proxy) `SameSite=None` is invalid without Secure, so fall back to
- * `Lax` there. When VITE_COOKIE_DOMAIN is set, `Domain=<value>` is added to
- * both the write and the clear so api.<domain> receives (and loses) it. */
+ * A page can only scope a cookie to its own host or a parent domain, so the
+ * API that receives it (api.<domain> under `Domain=<domain>`) is always
+ * same-site with the frontend and `SameSite=Lax` still rides the
+ * `EventSource(withCredentials)` stream and media GETs. Never `None`: that
+ * would attach the JWT to a cross-site form POST (CSRF). `Secure` on https.
+ * When VITE_COOKIE_DOMAIN is set, `Domain=<value>` is added to both the
+ * write and the clear so api.<domain> receives (and loses) it. */
 export function syncSseCookie(accessToken: string | null): void {
   if (typeof document === 'undefined') return
   const domain = COOKIE_DOMAIN ? `; Domain=${COOKIE_DOMAIN}` : ''
   const attrs =
-    domain +
-    (window.location.protocol === 'https:' ? '; SameSite=None; Secure' : '; SameSite=Lax')
+    domain + '; SameSite=Lax' + (window.location.protocol === 'https:' ? '; Secure' : '')
   if (accessToken) {
     // Session cookie (no Max-Age) — gone when the tab closes, like the SSE stream.
     document.cookie = `${COOKIE}=${accessToken}; Path=/${attrs}`
