@@ -1,4 +1,10 @@
 api.YOUR_DOMAIN {
 	encode gzip
+	request_body {
+		max_size 120MB
+	}
+	reverse_proxy /events/* 127.0.0.1:8000 {
+		flush_interval -1
+	}
 	reverse_proxy 127.0.0.1:8000
 }

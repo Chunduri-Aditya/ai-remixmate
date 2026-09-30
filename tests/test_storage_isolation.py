@@ -193,6 +193,18 @@ def test_preset_data_dir_is_redirected_too() -> None:
         assert not _inside_repo(Path(value)), f"{var}={value} points inside the repo"
 
 
+def test_exported_outputs_alias_does_not_opt_out_of_isolation() -> None:
+    # B8.1 added REMIXMATE_OUTPUTS_DIR as an alias of the generic form; a shell
+    # that sourced the deploy env file must not send the suite to real outputs/.
+    real_outputs = _REPO / "outputs"
+    result = _resolve_in_child({"REMIXMATE_OUTPUTS_DIR": str(real_outputs)})
+
+    assert not _inside_repo(Path(result["OUTPUTS_DIR"])), (
+        f"OUTPUTS_DIR={result['OUTPUTS_DIR']} is inside the repo: an exported "
+        "REMIXMATE_OUTPUTS_DIR alias opted the run out of the isolation shim"
+    )
+
+
 def test_real_data_opt_out_keeps_preset_outputs_dir() -> None:
     # The paired allow case: REMIXMATE_TESTS_USE_REAL_DATA=1 is the one way to
     # keep the real paths. Read only: importing paths creates nothing.

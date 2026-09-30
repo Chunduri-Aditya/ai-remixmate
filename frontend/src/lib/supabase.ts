@@ -38,6 +38,7 @@ export async function getAccessToken(): Promise<string | null> {
 // --- SSE cookie mirror ----------------------------------------------------
 
 const COOKIE = 'sb-access-token' // must match scripts/api/auth.py _DEFAULT_COOKIE_NAME
+const COOKIE_DOMAIN = import.meta.env.VITE_COOKIE_DOMAIN?.trim()
 
 /** Write (or clear) the readable cookie the SSE stream authenticates with.
  *
@@ -45,11 +46,14 @@ const COOKIE = 'sb-access-token' // must match scripts/api/auth.py _DEFAULT_COOK
  * domain, so the cookie must be `SameSite=None; Secure` to ride a cross-site
  * `EventSource(withCredentials)` request. On http localhost (same-origin via
  * the Vite proxy) `SameSite=None` is invalid without Secure, so fall back to
- * `Lax` there. */
+ * `Lax` there. When VITE_COOKIE_DOMAIN is set, `Domain=<value>` is added to
+ * both the write and the clear so api.<domain> receives (and loses) it. */
 export function syncSseCookie(accessToken: string | null): void {
   if (typeof document === 'undefined') return
+  const domain = COOKIE_DOMAIN ? `; Domain=${COOKIE_DOMAIN}` : ''
   const attrs =
-    window.location.protocol === 'https:' ? '; SameSite=None; Secure' : '; SameSite=Lax'
+    domain +
+    (window.location.protocol === 'https:' ? '; SameSite=None; Secure' : '; SameSite=Lax')
   if (accessToken) {
     // Session cookie (no Max-Age) — gone when the tab closes, like the SSE stream.
     document.cookie = `${COOKIE}=${accessToken}; Path=/${attrs}`

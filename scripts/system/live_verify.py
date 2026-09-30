@@ -17,6 +17,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -130,11 +131,47 @@ def check_health_ready(base_url: str) -> VerifyCheck:
     return VerifyCheck("health_ready", passed, detail)
 
 
+_FEATURE_KEYS = (
+    "auth",
+    "stem_split",
+    "generative",
+    "license_enforce",
+    "spectral_learning",
+    "operator",
+)
+_SSE_WINDOW_SEC = 10.0
+
+
+def check_features(base_url: str) -> Tuple[VerifyCheck, Optional[bool]]:
+    """GET /features; returns the check and the auth flag (None when unknown)."""
+    status, body = _make_request(f"{base_url.rstrip('/')}/features")
+    if status != 200:
+        detail = f"{status} {_scrub_detail(str(body.get('detail', '')))}"
+        return VerifyCheck("features", False, detail), None
+    missing = [k for k in _FEATURE_KEYS if k not in body]
+    if missing:
+        return VerifyCheck("features", False, f"missing keys: {', '.join(missing)}"), None
+    auth_on = body["auth"] is not False
+    return VerifyCheck("features", True, f"200 auth={'on' if auth_on else 'off'}"), auth_on
+
+
+def _job_list(body: Any) -> Optional[List[Any]]:
+    """GET /jobs answers a JSON array, which _make_request wraps as {"data": [...]}."""
+    if isinstance(body, list):
+        return body
+    if isinstance(body, dict):
+        for key in ("data", "jobs"):
+            if isinstance(body.get(key), list):
+                return body[key]
+    return None
+
+
 def check_auth_works(base_url: str, token: str, label: str) -> VerifyCheck:
     status, body = _make_request(f"{base_url.rstrip('/')}/jobs?limit=5", token=token)
     passed = status == 200
     if passed:
-        n = len(body) if isinstance(body, list) else len(body.get("jobs", body) or [])
+        jobs = _job_list(body)
+        n = len(jobs) if jobs is not None else 0
         detail = f"{label} auth ok ({n} jobs)"
     else:
         detail = f"{label} {status} {_scrub_detail(str(body.get('detail', '')))}"
@@ -224,6 +261,154 @@ def check_cross_tenant_isolation(
         )
     finally:
         _make_request(f"{base}/crates/{qid}", method="DELETE", token=token_a)
+
+
+def _create_job(base: str, token: str) -> Tuple[Optional[str], str]:
+    """POST /analyze on the first GET /library song. Returns (job_id, error)."""
+    status, body = _make_request(f"{base}/library?per_page=1", token=token)
+    songs = body.get("songs") if status == 200 and isinstance(body, dict) else None
+    name = next(
+        (s.get("name") for s in songs or [] if isinstance(s, dict) and s.get("name")),
+        None,
+    )
+    if not name:
+        return None, f"No library song to create a job: {status}"
+    status, body = _make_request(
+        f"{base}/analyze", method="POST", token=token, body={"song": name}
+    )
+    job_id = body.get("job_id") if isinstance(body, dict) else None
+    if status not in (200, 202) or not job_id:
+        return None, (
+            f"Failed to create job: {status} {_scrub_detail(str(body.get('detail', '')))}"
+        )
+    return str(job_id), ""
+
+
+def check_job_by_id_isolation(
+    base_url: str, token_a: str, token_b: str
+) -> VerifyCheck:
+    """A owns a job; require A reads it by id and B does not."""
+    name = "job_by_id_isolation"
+    base = base_url.rstrip("/")
+    status, body = _make_request(f"{base}/jobs?limit=5", token=token_a)
+    jobs = _job_list(body) if status == 200 else None
+    job_id = next(
+        (str(j["job_id"]) for j in jobs or [] if isinstance(j, dict) and j.get("job_id")),
+        None,
+    )
+    if not job_id:
+        job_id, err = _create_job(base, token_a)
+        if not job_id:
+            return VerifyCheck(name, False, err)
+
+    qid = urllib.parse.quote(job_id, safe="")
+    status_a, _ = _make_request(f"{base}/jobs/{qid}", token=token_a)
+    if status_a != 200:
+        return VerifyCheck(
+            name, False, f"Positive control failed: A cannot read its own job ({status_a})"
+        )
+    status_b, _ = _make_request(f"{base}/jobs/{qid}", token=token_b)
+    if status_b == 200:
+        return VerifyCheck(name, False, f"Token B read job {job_id[:8]} by id (LEAK)")
+    if status_b not in (403, 404):
+        return VerifyCheck(name, False, f"Unexpected status for Token B: {status_b}")
+    return VerifyCheck(name, True, f"Token B got {status_b} for job {job_id[:8]}")
+
+
+def _read_sse(
+    base: str,
+    token: str,
+    window: float,
+    connected: threading.Event,
+    out: Dict[str, Any],
+) -> None:
+    """Collect JSON data frames from /events/stream until EOF or the window ends."""
+    frames: List[Dict[str, Any]] = []
+    out["frames"] = frames
+    req = urllib.request.Request(
+        f"{base}/events/stream",
+        headers={"Accept": "text/event-stream", "Authorization": f"Bearer {token}"},
+    )
+    try:
+        resp = _OPENER.open(req, timeout=window)
+    except OSError as e:
+        out["error"] = _scrub_detail(str(e))
+        connected.set()
+        return
+    deadline = time.monotonic() + window
+    try:
+        with resp:
+            while time.monotonic() < deadline:
+                try:
+                    line = resp.readline()
+                except TimeoutError:
+                    break
+                connected.set()
+                if not line:
+                    break
+                text = line.decode("utf-8", errors="replace").strip()
+                if not text.startswith("data:"):
+                    continue
+                try:
+                    frame = json.loads(text[len("data:"):].strip())
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(frame, dict):
+                    frames.append(frame)
+    except OSError as e:
+        out["error"] = _scrub_detail(str(e))
+    finally:
+        connected.set()
+
+
+def _sse_job_ids(frames: List[Dict[str, Any]]) -> set:
+    return {
+        str(f["data"].get("job_id"))
+        for f in frames
+        if str(f.get("type", "")).startswith("job_") and isinstance(f.get("data"), dict)
+    }
+
+
+def check_sse_isolation(
+    base_url: str, token_a: str, token_b: str, window: float = _SSE_WINDOW_SEC
+) -> VerifyCheck:
+    """A and B hold /events/stream while A creates a job; B must not see its frames."""
+    name = "sse_isolation"
+    base = base_url.rstrip("/")
+    results: Dict[str, Dict[str, Any]] = {"A": {}, "B": {}}
+    events = {"A": threading.Event(), "B": threading.Event()}
+    threads = [
+        threading.Thread(
+            target=_read_sse,
+            args=(base, token, window, events[label], results[label]),
+            daemon=True,
+        )
+        for label, token in (("A", token_a), ("B", token_b))
+    ]
+    for t in threads:
+        t.start()
+    for ev in events.values():
+        ev.wait(window)
+    for label in ("A", "B"):
+        if "error" in results[label]:
+            return VerifyCheck(name, False, f"Token {label} stream: {results[label]['error']}")
+
+    job_id, err = _create_job(base, token_a)
+    for t in threads:
+        t.join(window + 5)
+    if not job_id:
+        return VerifyCheck(name, False, err)
+    for label in ("A", "B"):
+        if "error" in results[label]:
+            return VerifyCheck(name, False, f"Token {label} stream: {results[label]['error']}")
+
+    if job_id in _sse_job_ids(results["B"].get("frames", [])):
+        return VerifyCheck(name, False, f"Token B received job {job_id[:8]} events (LEAK)")
+    if job_id not in _sse_job_ids(results["A"].get("frames", [])):
+        return VerifyCheck(
+            name, False, "Positive control failed: A's stream carried no event for its job"
+        )
+    return VerifyCheck(name, True, f"Token B saw no events for job {job_id[:8]}")
 
 
 def check_render_job(
@@ -359,12 +544,23 @@ def main() -> int:
         print(f"Token B fp: {_token_fingerprint(token_b)}")
         print()
 
+    features_check, auth_on = check_features(args.base_url)
     checks: List[VerifyCheck] = [
         check_health_ready(args.base_url),
+        features_check,
         check_auth_works(args.base_url, token_a, "Token A"),
         check_auth_works(args.base_url, token_b, "Token B"),
-        check_cross_tenant_isolation(args.base_url, token_a, token_b),
     ]
+    if auth_on is False:
+        # Auth off resolves every token to one local user, so isolation would read as a leak.
+        if not args.as_json:
+            print("SKIP cross_tenant_isolation (auth disabled)")
+            print("SKIP job_by_id_isolation (auth disabled)")
+            print("SKIP sse_isolation (auth disabled)\n")
+    else:
+        checks.append(check_cross_tenant_isolation(args.base_url, token_a, token_b))
+        checks.append(check_job_by_id_isolation(args.base_url, token_a, token_b))
+        checks.append(check_sse_isolation(args.base_url, token_a, token_b))
 
     if not args.skip_render and args.song_a and args.song_b:
         checks.append(

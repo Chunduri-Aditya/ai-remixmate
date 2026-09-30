@@ -76,7 +76,11 @@ def sanitize_song_name(name: str) -> str:
 # library.library_dir / library.outputs_dir in config.yaml,
 # config.local.yaml, or REMIXMATE_LIBRARY_LIBRARY_DIR /
 # REMIXMATE_LIBRARY_OUTPUTS_DIR to move storage onto an external drive or
-# NAS mount. DATA_DIR (db + JSON state) has its own REMIXMATE_DATA_DIR
+# NAS mount. REMIXMATE_LIBRARY_DIR and REMIXMATE_OUTPUTS_DIR are documented
+# aliases of that generic env form (the names the deploy env file uses); when
+# set, an alias wins over the config file value, but the generic env form
+# wins over its alias, so tests/conftest.py's REMIXMATE_LIBRARY_OUTPUTS_DIR
+# isolation cannot be bypassed by an exported alias. DATA_DIR (db + JSON state) has its own REMIXMATE_DATA_DIR
 # override — it has no config.yaml section, and the test suite points it at
 # a throwaway dir (see tests/conftest.py) so a run never writes into the
 # real data/ tree. A relative value resolves against PROJECT_ROOT; an
@@ -99,6 +103,11 @@ try:
 except Exception:
     _LIBRARY_DIR_OVERRIDE = ""
     _OUTPUTS_DIR_OVERRIDE = ""
+
+if not os.environ.get("REMIXMATE_LIBRARY_LIBRARY_DIR"):
+    _LIBRARY_DIR_OVERRIDE = os.environ.get("REMIXMATE_LIBRARY_DIR", "") or _LIBRARY_DIR_OVERRIDE
+if not os.environ.get("REMIXMATE_LIBRARY_OUTPUTS_DIR"):
+    _OUTPUTS_DIR_OVERRIDE = os.environ.get("REMIXMATE_OUTPUTS_DIR", "") or _OUTPUTS_DIR_OVERRIDE
 
 # ---------------------------------------------------------------------------
 # New canonical directories (v0.3)

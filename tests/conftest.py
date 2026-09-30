@@ -77,6 +77,9 @@ if os.environ.get("REMIXMATE_TESTS_USE_REAL_DATA") != "1":
     _test_storage_root = Path(_TEST_STORAGE_TMP.name)
     _test_data_dir = _test_storage_root / "data"
     os.environ["REMIXMATE_LIBRARY_OUTPUTS_DIR"] = str(_test_storage_root / "outputs")
+    # The deploy env file's alias (scripts/core/paths.py); popped so the shim
+    # holds even if the alias ever outranks the generic name.
+    os.environ.pop("REMIXMATE_OUTPUTS_DIR", None)
     os.environ["REMIXMATE_DATA_DIR"] = str(_test_data_dir)
     os.environ["REMIXMATE_METADATA_CACHE_PATH"] = str(_test_data_dir / "metadata.db")
     os.environ["REMIXMATE_DATABASE_PATH"] = str(_test_data_dir / "remixmate.db")

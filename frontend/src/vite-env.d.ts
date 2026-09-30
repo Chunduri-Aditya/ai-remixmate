@@ -9,6 +9,8 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL?: string
   /** Supabase anon/publishable key. Required alongside VITE_SUPABASE_URL for auth. */
   readonly VITE_SUPABASE_ANON_KEY?: string
+  /** Parent domain for the SSE auth cookie (e.g. example.com) so api.<domain> receives it. Unset = host-only cookie. */
+  readonly VITE_COOKIE_DOMAIN?: string
 }
 
 interface ImportMeta {
