@@ -6,7 +6,7 @@ All notable changes to this project, newest first.
 
 ## [Unreleased] Hosted app branch (`hosted-app`)
 
-The `hosted-app` branch carries 53 commits beyond `main` (`git rev-list --count main..hosted-app`): 29 that build the hosted product in phases (`git rev-list --count 304da7e^..fb1a5f9`) and 24 from the hardening batches that followed (`git rev-list --count fb1a5f9..hosted-app`). Each line below is `git log --oneline main..hosted-app` output, grouped by area and listed oldest first within each group.
+At `2cc961d` the `hosted-app` branch carries 56 commits beyond `main` (`git rev-list --count main..2cc961d`): 29 that build the hosted product in phases (`git rev-list --count 304da7e^..fb1a5f9`) and 27 from the hardening batches that followed (`git rev-list --count fb1a5f9..2cc961d`). Each line below is `git log --oneline main..2cc961d` output, grouped by area and listed oldest first within each group.
 
 Entries further down this file describe earlier states of the project. Commit `8c4f204` removed the user download routes and the Spotify import routes (the Spotify router now serves read only metadata), and commit `f3aa1f3` dropped the download and Streamlit dependencies from the core install, so the download endpoints and the Streamlit interface named in those older entries are not current features.
 
@@ -62,9 +62,15 @@ Entries further down this file describe earlier states of the project. Commit `8
 
 - `a4e8b50 fix: deploy scripts that run, env names the code reads, drain on shutdown`
 
+#### Security and CI
+
+- `bd1c446 security: session cookie authenticates only GET and HEAD and is SameSite=Lax`
+- `2cc961d fix: wordplay defines the nltk guard flag without nltk`
+
 #### Docs
 
 - `aef279f docs: move legacy docs to archive/docs/legacy`
+- `03dcb8e docs: ledgers, README and runbook match the hosted-app code`
 
 ### Hosted product build
 

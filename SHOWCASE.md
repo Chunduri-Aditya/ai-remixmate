@@ -17,7 +17,7 @@ The parts worth pointing at:
 | Branch | What it is | State |
 |---|---|---|
 | `main` | Single user local app: FastAPI in one process, a thread pool job queue, SQLite, a local music library on disk | 47 commits. Still carries the old download path and no auth; not merged with `hosted-app` |
-| `hosted-app` | The multi user hosted product: Creative Commons only catalog, per user tenancy, Supabase auth, Postgres, a small VPS behind Caddy, the UI on Cloudflare Pages | 53 commits ahead of `main`. Phases 0 to 9 below |
+| `hosted-app` | The multi user hosted product: Creative Commons only catalog, per user tenancy, Supabase auth, Postgres, a small VPS behind Caddy, the UI on Cloudflare Pages | 56 commits ahead of `main` at `2cc961d`. Phases 0 to 9 below |
 
 ## Hosted migration phases (`hosted-app`)
 
@@ -32,7 +32,7 @@ The parts worth pointing at:
 | 6 | Per user mix retention | Done in code (`b8317f2`, `tests/test_mix_retention.py`, 14 tests) |
 | 7 | Deploy and infra | Deploy files done in code (`8dbfe81`, `fb1a5f9`, `a4e8b50`: Caddy, systemd, bootstrap and backup scripts, CI); the VPS, DNS and Cloudflare Pages are operator pending |
 | 8 | Legal and product surface | Done in code (`2919ec2`, `tests/test_legal_phase8.py`, 7 tests: legal pages, DMCA intake, account export and deletion, admin takedown); SMTP for DMCA email is operator pending |
-| 9 | Hardening pass | Done: 24 commits after `fb1a5f9` covering toolchain and CI, dependency security bumps, tenancy and security fixes, render correctness, feature aware UI, a local JWKS minter, ingest guards and deploy script fixes. Commit list: `git log --oneline fb1a5f9..hosted-app` |
+| 9 | Hardening pass | Done: 27 commits from `fb1a5f9` to `2cc961d` covering toolchain and CI, dependency security bumps, tenancy and security fixes, render correctness, feature aware UI, a local JWKS minter, ingest guards and deploy script fixes. Commit list: `git log --oneline fb1a5f9..2cc961d` |
 
 ## Local demo (no cloud)
 

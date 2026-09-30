@@ -8,15 +8,15 @@ the per file count `npx vitest run` prints for the frontend.
 ## One line
 
 Phases 0 to 8 are done in code and Phase 9 hardening has landed on `hosted-app`:
-`git rev-list --count main..hosted-app` prints 53, and
-`git rev-list --count fb1a5f9..hosted-app` prints 24 for the hardening run. Local
+`git rev-list --count main..2cc961d` prints 56, and
+`git rev-list --count fb1a5f9..2cc961d` prints 27 for the hardening run. Local
 gates G1 to G3 are green at `bd1c446` (full suite 1960 passed and 1 skipped,
 frontend 138 vitest tests, ruff clean). The CI replica in a fresh venv was red on one test
 that needs `nltk` (only in the `wordplay` extra); `scripts/core/wordplay.py` now defines
 the guard flag without `nltk`, and the replica is green. Nothing is deployed: the Supabase project, the Hetzner box, Cloudflare
 Pages, SMTP, a managed Postgres run and a catalog of at least 5 tracks are operator
 pending, and the branch is unpushed
-(`git rev-list --count origin/hosted-app..hosted-app` prints 24).
+(`git rev-list --count origin/hosted-app..2cc961d` prints 27).
 
 ## Phase ledger
 
@@ -31,7 +31,7 @@ pending, and the branch is unpushed
 | 6 | Per user mix retention | done, verified | `b8317f2` adds `scripts/core/mix_retention.py`, `GET /library/mixes/storage` and `POST /library/mixes/sweep` (`scripts/api/routers/library.py:316`, `:345`), and a sweep after each render; `a0d3a30` adds the lifespan background sweep of every `outputs/<uid>/` (`scripts/api/main.py:46`). `config.yaml:103` to `:107`: `mix_max_age_days: 30`, `mix_max_count: 50`, `sweep_after_render: true`, `sweep_interval_hours: 6`. Tests: `tests/test_mix_retention.py` (14), `tests/test_lifespan.py` (15) |
 | 7 | Deploy and infra | done in code; live deploy operator pending | `8dbfe81` (Caddyfile, `remixmate.service`, `remixmate.env.example`, `PROVISION.md`, `.github/workflows/ci.yml`, CORS), `fb1a5f9` (`bootstrap.sh`, `backup.sh`, `scripts/system/live_verify.py`, catalog dry run), `a4e8b50` (scripts that run, env aliases, drain on shutdown), `13a6d0f` (CI installs dev requirements, Node 22); `tests/test_cors_origins.py` (4), `tests/test_deploy_scripts.py` (25), `tests/test_env_aliases.py` (10), `tests/test_live_verify.py` (17), `tests/test_curate_catalog.py` (6). Pending: no VPS, volume, DNS or Pages project exists; `/health/ready` from the public internet, a restart drain on the box, a `pg_dump` restore and CI green on a PR all wait on provisioning and a push |
 | 8 | Legal and product surface | done in code; SMTP delivery operator pending | `2919ec2` (legal pages, `POST /legal/dmca`, `DELETE /account`, `GET /account/export`, admin takedown and flag routes), `a0d3a30` (account purge and admin hardening), `0f4b1f3` (account and legal pages, vault credits in the UI); `tests/test_legal_phase8.py` (7), `tests/test_account_lifecycle.py` (9), `tests/test_admin_takedown.py` (15), `tests/test_legal_text.py` (5); vitest `vault_account_legal.test.tsx` (10). Pending: DMCA email sends only when `REMIXMATE_SMTP_*` is set (`scripts/api/routers/legal.py:148`); no SMTP account is configured |
-| 9 | Hardening run (2026-09-27 overnight) | done locally; CI replica green after the wordplay flag fix | 24 commits, `52cd9ad` to `aef279f`; see the Phase 9 section |
+| 9 | Hardening run (2026-09-27 overnight) | done locally; CI replica green after the wordplay flag fix | 27 commits, `52cd9ad` to `2cc961d`; see the Phase 9 section |
 
 ## Green bar right now
 
@@ -65,8 +65,9 @@ set.
 
 ## Phase 9: hardening (2026-09-27 overnight)
 
-Every commit in `git log --oneline fb1a5f9..hosted-app`, oldest first, with the test
-file that guards it. Counts are file totals now, not only the tests the commit added.
+Every commit in `git log --oneline fb1a5f9..2cc961d`, oldest first, with the test
+file that guards it. Counts are file totals at `074090b` (after `2cc961d`, it adds the alias precedence
+and unit flag tests), not only the tests each commit added.
 
 | Commit | Fix | Guarded by |
 |---|---|---|
@@ -88,12 +89,15 @@ file that guards it. Counts are file totals now, not only the tests the commit a
 | `0f4b1f3` | `/features` endpoint, feature aware UI, jobs UX, vault credits, account and legal pages, API contract fixes | `tests/test_features_endpoint.py` (14), `tests/test_generative_urls.py` (3), `tests/test_job_meta_request.py` (5), `tests/test_legal_text.py` (5); vitest `features.test.tsx` (13), `jobsux.test.tsx` (6), `vault_account_legal.test.tsx` (10), `contracts.test.tsx` (37) |
 | `842fc16` | root error boundary and a global request error toast | vitest `errors.test.tsx` (10) |
 | `32bceb4` | local JWKS server and token minter for hosted mode checks | `tests/test_local_jwks.py` (8) |
-| `9c3fcae` | uvicorn runs with `--no-proxy-headers` so the DMCA limiter keys on the socket peer | no test file; `start.sh:273` and `:278` carry the flag |
+| `9c3fcae` | uvicorn runs with `--no-proxy-headers` so the DMCA limiter keys on the socket peer | no test file; `start.sh:273` and `:278` carry the flag, and since `074090b` the systemd unit does too, guarded by `tests/test_deploy_scripts.py::SystemdUnitTests::test_exec_start_ignores_proxy_headers` |
 | `42dfd79` | licence text fallback matches whole phrases and denies "all rights reserved" | `tests/test_license_text.py` (9), `tests/test_license.py` (8) |
 | `664a18a` | ingest never targets the library root, fails on a Demucs failure, gates before the shortcut, gains `--dry-run` | `tests/test_ingest_guards.py` (18) with `tests/fixtures/ingest/` |
 | `d53592d` | crate ids match the API, deck teardown swallows only `AbortError`, `/ai-lab` follows the generative flag | vitest `crates.test.tsx` (1), `WaveformDeck.test.tsx` (2), `AppShell.test.tsx` (2), `features.test.tsx` (13) |
-| `a4e8b50` | deploy scripts that run, env names the code reads, drain on shutdown, cookie domain | `tests/test_deploy_scripts.py` (25), `tests/test_env_aliases.py` (10), `tests/test_live_verify.py` (17), `tests/test_storage_isolation.py` (9); vitest `supabase.test.ts` (7) |
+| `a4e8b50` | deploy scripts that run, env names the code reads, drain on shutdown, cookie domain | `tests/test_deploy_scripts.py` (26), `tests/test_env_aliases.py` (11), `tests/test_live_verify.py` (17), `tests/test_storage_isolation.py` (9); vitest `supabase.test.ts` (8) |
 | `aef279f` | legacy docs moved to `archive/docs/legacy/` | docs only |
+| `bd1c446` | the session cookie authenticates only GET and HEAD and is `SameSite=Lax` (CSRF) | `tests/test_auth.py` (15); vitest `supabase.test.ts` (8) |
+| `03dcb8e` | docs match the hosted-app code | docs only |
+| `2cc961d` | `wordplay.py` defines the nltk guard flag without nltk, so the CI shaped venv passes | `tests/test_silent_failures.py` (15) |
 
 ## Honest gaps (still open)
 
@@ -108,8 +112,8 @@ file that guards it. Counts are file totals now, not only the tests the commit a
 - **Managed Postgres.** No hosted instance. The container path was not rerun in this
   pass (`docker info` exits 1), and the Docker image build is unverified for the same
   reason.
-- **Push, CI on a PR, merge.** `hosted-app` is 24 commits ahead of `origin/hosted-app`
-  and 53 ahead of `main`; CI has not run on the hardened branch.
+- **Push, CI on a PR, merge.** At `2cc961d`, `hosted-app` is 27 commits ahead of
+  `origin/hosted-app` and 56 ahead of `main`; CI has not run on the hardened branch.
 - **Catalog below the floor.** `ls catalog` lists 3 tracks against a floor of 5. Every
   ccMixter content download fails: `grep -c "403 Client Error: Forbidden"` over the
   ingest log in the backups directory prints 56.
@@ -119,8 +123,6 @@ file that guards it. Counts are file totals now, not only the tests the commit a
 - **Frontend advisory.** `npm audit --omit=dev` reports 2 moderate findings in
   `react-router` (`GHSA-wrjc-x8rr-h8h6`, `GHSA-337j-9hxr-rhxg`); the fix is the
   `react-router-dom` 7 major.
-- **Systemd unit proxy flag.** `app/deploy/remixmate.service` `ExecStart` lacks the
-  `--no-proxy-headers` flag that `start.sh` passes.
 - **Torch upgrade.** `requirements.txt` pins `torch==2.7.1` and `torchaudio==2.7.1`,
   coupled to Demucs.
 - **Tier 3 engine items.** Not started: transition effects on the stem blend path,
