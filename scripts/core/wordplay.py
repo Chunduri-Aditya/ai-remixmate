@@ -49,6 +49,7 @@ except ImportError:
     _HAS_GENIUS = False
     log.debug("lyricsgenius not installed — lyric fetch disabled")
 
+_ensure_nltk_data_done = False
 try:
     import nltk  # type: ignore
     from nltk.corpus import stopwords  # type: ignore
@@ -56,7 +57,6 @@ try:
     from nltk.tokenize import word_tokenize  # type: ignore
 
     _HAS_NLTK = True
-    _ensure_nltk_data_done = False
 except ImportError:
     _HAS_NLTK = False
     log.debug("nltk not installed — falling back to whitespace tokenisation")

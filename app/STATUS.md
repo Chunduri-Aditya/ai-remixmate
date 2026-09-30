@@ -11,9 +11,9 @@ Phases 0 to 8 are done in code and Phase 9 hardening has landed on `hosted-app`:
 `git rev-list --count main..hosted-app` prints 53, and
 `git rev-list --count fb1a5f9..hosted-app` prints 24 for the hardening run. Local
 gates G1 to G3 are green at `bd1c446` (full suite 1960 passed and 1 skipped,
-frontend 138 vitest tests, ruff clean); the CI replica in a fresh venv is red on one test that needs
-`nltk`, which the core install no longer carries, so CI on this branch would fail as
-written. Nothing is deployed: the Supabase project, the Hetzner box, Cloudflare
+frontend 138 vitest tests, ruff clean). The CI replica in a fresh venv was red on one test
+that needs `nltk` (only in the `wordplay` extra); `scripts/core/wordplay.py` now defines
+the guard flag without `nltk`, and the replica is green. Nothing is deployed: the Supabase project, the Hetzner box, Cloudflare
 Pages, SMTP, a managed Postgres run and a catalog of at least 5 tracks are operator
 pending, and the branch is unpushed
 (`git rev-list --count origin/hosted-app..hosted-app` prints 24).
@@ -31,7 +31,7 @@ pending, and the branch is unpushed
 | 6 | Per user mix retention | done, verified | `b8317f2` adds `scripts/core/mix_retention.py`, `GET /library/mixes/storage` and `POST /library/mixes/sweep` (`scripts/api/routers/library.py:316`, `:345`), and a sweep after each render; `a0d3a30` adds the lifespan background sweep of every `outputs/<uid>/` (`scripts/api/main.py:46`). `config.yaml:103` to `:107`: `mix_max_age_days: 30`, `mix_max_count: 50`, `sweep_after_render: true`, `sweep_interval_hours: 6`. Tests: `tests/test_mix_retention.py` (14), `tests/test_lifespan.py` (15) |
 | 7 | Deploy and infra | done in code; live deploy operator pending | `8dbfe81` (Caddyfile, `remixmate.service`, `remixmate.env.example`, `PROVISION.md`, `.github/workflows/ci.yml`, CORS), `fb1a5f9` (`bootstrap.sh`, `backup.sh`, `scripts/system/live_verify.py`, catalog dry run), `a4e8b50` (scripts that run, env aliases, drain on shutdown), `13a6d0f` (CI installs dev requirements, Node 22); `tests/test_cors_origins.py` (4), `tests/test_deploy_scripts.py` (25), `tests/test_env_aliases.py` (10), `tests/test_live_verify.py` (17), `tests/test_curate_catalog.py` (6). Pending: no VPS, volume, DNS or Pages project exists; `/health/ready` from the public internet, a restart drain on the box, a `pg_dump` restore and CI green on a PR all wait on provisioning and a push |
 | 8 | Legal and product surface | done in code; SMTP delivery operator pending | `2919ec2` (legal pages, `POST /legal/dmca`, `DELETE /account`, `GET /account/export`, admin takedown and flag routes), `a0d3a30` (account purge and admin hardening), `0f4b1f3` (account and legal pages, vault credits in the UI); `tests/test_legal_phase8.py` (7), `tests/test_account_lifecycle.py` (9), `tests/test_admin_takedown.py` (15), `tests/test_legal_text.py` (5); vitest `vault_account_legal.test.tsx` (10). Pending: DMCA email sends only when `REMIXMATE_SMTP_*` is set (`scripts/api/routers/legal.py:148`); no SMTP account is configured |
-| 9 | Hardening run (2026-09-27 overnight) | done locally; CI replica red on one test | 24 commits, `52cd9ad` to `aef279f`; see the Phase 9 section |
+| 9 | Hardening run (2026-09-27 overnight) | done locally; CI replica green after the wordplay flag fix | 24 commits, `52cd9ad` to `aef279f`; see the Phase 9 section |
 
 ## Green bar right now
 
@@ -58,7 +58,7 @@ set.
 | G3 ruff | `.venv/bin/ruff check .` | exit 0; `All checks passed!` |
 | G4 CI replica install | fresh `python3.12 -m venv`, then `pip install -r requirements-dev.txt` and `pip install -e .` (venv created 2026-09-30 00:30, reused for this rerun) | exit 0 |
 | G4 CI replica ruff | `ruff check .` in that venv | exit 0; `All checks passed!` |
-| G4 CI replica pytest | `python -m pytest -m "not dj_analysis" --ignore=tests/e2e_test_suite.py -q` in that venv | **red**, exit 1; `1 failed, 1863 passed, 1 skipped, 96 deselected, 25 warnings in 40.98s`. The failure is `tests/test_silent_failures.py::test_nltk_download_guarded`: `AttributeError: <module 'scripts.core.wordplay' ...> has no attribute '_ensure_nltk_data_done'`, because `nltk` is not in the core install (`import nltk` in the replica venv raises `ModuleNotFoundError`) and `scripts/core/wordplay.py:59` sets that name only when the import succeeds |
+| G4 CI replica pytest | `python -m pytest -m "not dj_analysis" --ignore=tests/e2e_test_suite.py -q` in that venv | exit 0; `1864 passed, 1 skipped, 96 deselected, 24 warnings in 41.83s` after the wordplay fix. Before it: exit 1, `1 failed, 1863 passed`, `tests/test_silent_failures.py::test_nltk_download_guarded` raised `AttributeError: ... no attribute '_ensure_nltk_data_done'` because `nltk` is not in the core install and `scripts/core/wordplay.py` set that flag only when `import nltk` succeeded |
 | G4 CI replica engine tests | `python -m pytest -m dj_analysis -q` in that venv | exit 0; `96 passed, 1865 deselected, 13 warnings in 214.12s` |
 | test functions | `grep -rc "def test_" tests \| awk -F: '{s+=$2} END {print s}'` | 1102 (1100 at `aef279f`) |
 | runtime audit | `cd frontend && npm audit --omit=dev` | exit 1; 2 moderate, both in `react-router` 6.0.0 to 7.17.0 (see gaps) |
@@ -71,7 +71,7 @@ file that guards it. Counts are file totals now, not only the tests the commit a
 | Commit | Fix | Guarded by |
 |---|---|---|
 | `52cd9ad` | storage is isolated in every pytest run unless a test opts out | `tests/test_storage_isolation.py` (9), `tests/conftest.py` |
-| `13a6d0f` | CI installs dev requirements, runs the integration and engine tests, uses Node 22 | no test file; the G4 replica above runs the workflow's commands (one step red) |
+| `13a6d0f` | CI installs dev requirements, runs the integration and engine tests, uses Node 22 | no test file; the G4 replica above runs the workflow's commands |
 | `f3aa1f3` | removed features' dependencies leave the core install; ruff lint config | `tests/test_pyproject_contract.py` (8) |
 | `3c5d3cb` | Python 3.12 image, complete `.dockerignore`, compose bound to loopback | no test file; image build unverified (`docker info` exits 1) |
 | `e30495f` | `start.sh` uses `.venv`, binds loopback, cleans up its children; `bin/` archived | `tests/test_start_sh.py` (12) |
@@ -108,11 +108,6 @@ file that guards it. Counts are file totals now, not only the tests the commit a
 - **Managed Postgres.** No hosted instance. The container path was not rerun in this
   pass (`docker info` exits 1), and the Docker image build is unverified for the same
   reason.
-- **CI replica red.** `tests/test_silent_failures.py::test_nltk_download_guarded`
-  fails in a venv built only from `requirements-dev.txt` and `pip install -e .`, since
-  `nltk` lives in the `wordplay` extra; the test needs a skip when `nltk` is absent, or
-  the CI install needs that extra. The local `.venv` has `nltk` 3.10.3, which is why G1
-  passes.
 - **Push, CI on a PR, merge.** `hosted-app` is 24 commits ahead of `origin/hosted-app`
   and 53 ahead of `main`; CI has not run on the hardened branch.
 - **Catalog below the floor.** `ls catalog` lists 3 tracks against a floor of 5. Every
