@@ -226,7 +226,7 @@ def test_remix_stream_url_resolves_through_outputs_route(remix_result, monkeypat
 
 
 def test_remix_plan_ratio_is_bpm_a_over_bpm_b(remix_result):
-    """ARCHITECTURE.md:348: stretch_ratio = bpm_a / bpm_b (B is pulled toward A)."""
+    """archive/docs/legacy/ARCHITECTURE.md:348: stretch_ratio = bpm_a / bpm_b (B is pulled toward A)."""
     res = remix_result["res"]
     assert res["bpm_a"] == pytest.approx(120.0, rel=0.03)
     assert res["bpm_b"] == pytest.approx(132.0, rel=0.03)

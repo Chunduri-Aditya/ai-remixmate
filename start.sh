@@ -292,7 +292,7 @@ print_frontend_urls() {
   echo ""
   echo "  ⚛️   React UI             →  http://localhost:$FRONTEND_PORT"
   echo "  🎧  DJ Widget (float)    →  http://localhost:$FRONTEND_PORT/widget"
-  echo "  ⬇️   Downloads            →  http://localhost:$FRONTEND_PORT/operations"
+  echo "  🛠️   Operations           →  http://localhost:$FRONTEND_PORT/operations"
   [ -n "$LAN_IP" ] && echo "  📱  Phone / LAN          →  http://$LAN_IP:$FRONTEND_PORT"
   echo "  📖  API Docs             →  http://localhost:$API_PORT/docs"
   echo "  📡  SSE stream           →  http://localhost:$API_PORT/events/stream"

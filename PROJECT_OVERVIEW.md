@@ -3,7 +3,8 @@
 A real time DJ engine built end to end in Python and React. It takes two songs, understands them
 musically, and renders a transition between them that sounds like a person made it.
 
-Every number in this document was measured on 2026-08-28 with a command, not estimated.
+Every number in this document was measured on 2026-08-28 with a command, not estimated. It describes
+the single user app on `main`; `app/STATUS.md` records what the `hosted-app` branch changed.
 
 ---
 
@@ -240,10 +241,10 @@ engines silently changed output loudness by 6 dB.
 - Track duration currently reports a placeholder value from the analysis pipeline rather than the
   measured length.
 - The UI is desktop only by design. The embedded widget covers the small screen case.
-- Downloading audio through yt-dlp may breach YouTube's Terms of Service. The project is scoped to
-  personal, educational and portfolio use; see the Legal section in `README.md`. The `hosted-app`
-  branch removes every download path and serves an operator-curated Creative Commons catalog only;
-  see `app/STATUS.md`.
+- On `main`, downloading audio through yt-dlp may breach YouTube's Terms of Service, so that branch
+  is scoped to personal, educational and portfolio use; see the Legal section in `README.md` on
+  `main`. The `hosted-app` branch removed every user download path in `8c4f204` and serves an
+  operator curated Creative Commons catalog only; see `app/STATUS.md`.
 
 ---
 
@@ -253,5 +254,5 @@ engines silently changed output loudness by 6 dB.
 |---|---|
 | `README.md` | Product overview, setup, configuration, legal position |
 | `DEVELOPING.md` | Design decisions, common tasks, and the 18 gotchas |
-| `ARCHITECTURE.md` | Deep system map, request traces, data flow |
+| `archive/docs/legacy/ARCHITECTURE.md` | Deep system map, request traces, data flow (written for `main`, archived) |
 | `CHANGELOG.md` | What changed, when, and why |

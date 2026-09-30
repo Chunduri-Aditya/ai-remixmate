@@ -1,10 +1,106 @@
-# AI RemixMate — Changelog
+# AI RemixMate Changelog
 
-All notable changes to this project are documented here in reverse-chronological order.
+All notable changes to this project, newest first.
 
 ---
 
-## [Unreleased] — Beat-quantized crossfade, job filtering, frontend health pass
+## [Unreleased] Hosted app branch (`hosted-app`)
+
+The `hosted-app` branch carries 53 commits beyond `main` (`git rev-list --count main..hosted-app`): 29 that build the hosted product in phases (`git rev-list --count 304da7e^..fb1a5f9`) and 24 from the hardening batches that followed (`git rev-list --count fb1a5f9..hosted-app`). Each line below is `git log --oneline main..hosted-app` output, grouped by area and listed oldest first within each group.
+
+Entries further down this file describe earlier states of the project. Commit `8c4f204` removed the user download routes and the Spotify import routes (the Spotify router now serves read only metadata), and commit `f3aa1f3` dropped the download and Streamlit dependencies from the core install, so the download endpoints and the Streamlit interface named in those older entries are not current features.
+
+### Hardening batches
+
+#### Test isolation
+
+- `52cd9ad test: isolate storage in every pytest run unless opted out`
+
+#### Toolchain and CI
+
+- `13a6d0f ci: install dev requirements, run integration and engine tests, node 22`
+- `f3aa1f3 build: drop download and Streamlit deps from the core install, ruff lint config`
+- `3c5d3cb build: Python 3.12 image, complete dockerignore, loopback compose`
+- `e30495f chore: start.sh uses .venv, binds loopback, cleans up; archive bin/`
+- `530ba73 style: ruff safe autofix`
+- `df66881 chore: install pre-commit with pins that match the venv`
+- `e7a053b style: resolve the remaining ruff findings by hand`
+
+#### Dependencies
+
+- `62c7e58 deps: security bumps for pyjwt, multipart, requests, click, anyio, msgpack, react-router-dom`
+- `638779c deps: fastapi 0.141.1 with starlette 1.3.1; route table test reads fastapi's flattened routes`
+
+#### Backend security and tenancy
+
+- `a0d3a30 security: tenancy and hardening batch (B2)`
+- `9c3fcae fix: uvicorn ignores proxy headers so the DMCA limiter keys on the socket peer`
+
+#### Render engine and intelligence routes
+
+- `e251f22 fix: stretch song B toward song A's tempo; end to end render test`
+- `185bfc7 fix: pitch shift only when the Camelot pair is not already compatible`
+- `23402fd fix: every reader resolves audio through audio_source`
+- `42dd8c2 fix: surface failures that were logged at DEBUG or swallowed`
+
+#### Frontend
+
+- `0f4b1f3 feat: features endpoint, feature aware UI, jobs UX, vault credits, account and legal pages, contract fixes (B5)`
+- `842fc16 feat: root error boundary and global request error toast`
+- `d53592d fix: crate ids match the API, deck teardown swallows only AbortError, /ai-lab gated on the generative flag`
+
+#### Hosted mode verification
+
+- `32bceb4 feat: local JWKS and token minter for hosted mode verification`
+
+#### Ingest safety
+
+- `42dfd79 fix: licence text fallback matches whole phrases and denies all rights reserved`
+- `664a18a fix: ingest never targets the library root, fails on Demucs failure, gates before the shortcut, dry run`
+
+#### Deploy
+
+- `a4e8b50 fix: deploy scripts that run, env names the code reads, drain on shutdown`
+
+#### Docs
+
+- `aef279f docs: move legacy docs to archive/docs/legacy`
+
+### Hosted product build
+
+- `304da7e test: isolate outputs + data dirs for the whole suite`
+- `4faac0f docs: scaffold app/ for the hosted-product layer`
+- `3d06bf2 feat(license): PUBLIC_DOMAIN type + hosted-catalogue publish gate`
+- `2f2833f feat(license): carry artist + CC deed URL through the library API`
+- `f6c0c6c chore(config): drop download.default_source and spotify.redirect_uri`
+- `2be8e01 docs: mark Phase 1 in progress, add hosted-migration status`
+- `8c4f204 feat: remove user download paths, keep operator CC-catalog ingest`
+- `a78e68c docs: record the Phase 1 backend teardown`
+- `46aa166 test: 8-case classify_license source matrix, and fix the "archive" alias`
+- `001f07c docs: tick the classify_license 8-case matrix test`
+- `dbe2db1 feat: write CREDITS.txt + manifest.json credits[] next to every mix`
+- `02bf0ea docs: tick mix credits (CREDITS.txt + manifest credits[])`
+- `cc9de1a feat: frontend catalogue teardown; descope FMA + Musopen ingest`
+- `18c4cda docs: tick Phase 1 (code); FMA/Musopen to the cut list`
+- `f27aecb feat: gate generative routes behind a flag; drop unused runtime deps (Phase 2)`
+- `c9f66ab docs: Phase 2 done — generative gate + slimmed runtime`
+- `3b75618 docs: correct two Phase 2 claims (advisor review)`
+- `653633a feat: user-scope outputs + job store via current_user contextvar`
+- `4a40867 feat: user-scope crates/feedback + stem-split gate + spectral freeze (Phase 3b)`
+- `d8b510b feat: Supabase RS256 JWT gate + cookie-auth SSE + uid migration (Phase 4 backend)`
+- `9068435 feat: Supabase auth shell — RequireAuth, login page, Bearer + SSE cookie (Phase 4 commit 2)`
+- `e4e894d refactor: SQLAlchemy Core engine for the job store (Phase 5 commit 1)`
+- `cd0ccc8 refactor: SQLAlchemy Core for the crate + feedback stores (Phase 5 commit 2)`
+- `b97b5d9 docs: Phase 5 done — SQLAlchemy Core, Postgres for jobs/crates/feedback`
+- `093c8ab Phase 5 done: sync status table, per-crate song_count test, SHOWCASE`
+- `b8317f2 Phase 6: per-user rendered-mix retention`
+- `2919ec2 feat: legal pages, DMCA intake, account deletion/export, admin takedown`
+- `8dbfe81 feat: production deploy — Caddy + systemd + Cloudflare Pages + CI`
+- `fb1a5f9 feat: operator prep — bootstrap/backup, live_verify, catalog dry-run`
+
+---
+
+## [Unreleased] — Beat-quantized crossfade, job filtering, frontend health pass (historical, predates `hosted-app`)
 
 ### Added
 
@@ -56,7 +152,7 @@ All notable changes to this project are documented here in reverse-chronological
 
 ---
 
-## [Unreleased] — Initialize Library: dynamic live dashboard
+## [Unreleased] — Initialize Library: dynamic live dashboard (historical, predates `hosted-app`)
 
 **What changed** (`scripts/ui/app.py`):
 
@@ -74,7 +170,7 @@ All notable changes to this project are documented here in reverse-chronological
 
 ---
 
-## [Unreleased] — Hotfix: `_analyze_impl` import error on startup
+## [Unreleased] — Hotfix: `_analyze_impl` import error on startup (historical, predates `hosted-app`)
 
 **Problem**: Server failed to start with `ImportError: cannot import name '_analyze_impl' from 'scripts.core.dj_engine'`.
 
@@ -91,7 +187,7 @@ All notable changes to this project are documented here in reverse-chronological
 
 ---
 
-## [Unreleased] — Reliability-First Modernization Pass
+## [Unreleased] — Reliability-First Modernization Pass (historical, predates `hosted-app`)
 
 ### Phase 1 — Deployment Model Clarity
 
@@ -247,7 +343,7 @@ All notable changes to this project are documented here in reverse-chronological
 
 ---
 
-## API Surface Summary (after this pass)
+## API Surface Summary (after this pass) (historical, predates `hosted-app`)
 
 | Category | Endpoints |
 |---|---|
@@ -263,7 +359,3 @@ All notable changes to this project are documented here in reverse-chronological
 | Crates | **All new** — see Phase 6 above |
 | Tags | **All new** — see Phase 6 above |
 | Favorites | **All new** — see Phase 6 above |
-
----
-
-*Last updated: 2026-04-05*

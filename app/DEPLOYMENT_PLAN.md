@@ -1,4 +1,4 @@
-# Deploy ai-remixmate as a multi-user hosted app (shared-catalog model)
+# Deploy ai-remixmate as a multi user hosted app (shared catalog model)
 
 > Canonical roadmap for the `hosted-app` branch. One phase at a time, top to
 > bottom. A phase is **done** only when every box in its **Verify** block is
@@ -10,60 +10,79 @@
 | # | Phase | State | Commit |
 |---|---|---|---|
 | 0 | Guardrails (test isolation fixture) | ☑ verified | 304da7e |
-| 1 | Catalog teardown + enforced CC gate | ☑ verified (code; live ingest pending an operator run) | 3d06bf2, 2f2833f, f6c0c6c, 8c4f204, 46aa166, dbe2db1, + frontend teardown |
+| 1 | Catalog teardown + enforced CC gate | ☑ verified (code; live ingest pending an operator run) | 3d06bf2, 2f2833f, f6c0c6c, 8c4f204, 46aa166, dbe2db1, cc9de1a (frontend teardown) |
 | 2 | Guard generative + slim the image | ☑ verified | f27aecb |
-| 3 | User contextvar + per-user mixes/jobs/crates/feedback | ☑ verified | 653633a (3a) + stem gate/audit/spectral/feedback/crates (3b) |
-| 4 | Auth + tenancy (Supabase) | ◐ code done | RS256 JWKS gate + cookie-auth SSE + uid migration (backend) + auth shell (frontend); live Supabase run operator-pending |
-| 5 | SQLite → Postgres (jobs, crates, feedback) | ☑ verified (code + real Postgres 16 container; live managed-Postgres run operator-pending) | SQLAlchemy Core engine factory `scripts/core/db.py`, `jobs`/`crates`/`feedback_store` on `text()` + named binds, multi-process `_load_from_db()` safety. No setlist store — `routers/setlist.py` is stateless |
-| 6 | Per-user mix retention | ☐ not started | |
-| 7 | Deploy / infra | ☐ not started | |
-| 8 | Legal / product surface | ☐ not started | |
+| 3 | User contextvar + per user mixes/jobs/crates/feedback | ☑ verified | 653633a (3a), 4a40867 (3b: stem gate, audit, spectral, feedback, crates) |
+| 4 | Auth + tenancy (Supabase) | ◐ code done | RS256 JWKS gate + cookie auth SSE + uid migration (backend) + auth shell (frontend); live Supabase run operator pending |
+| 5 | SQLite → Postgres (jobs, crates, feedback) | ☑ verified (code + real Postgres 16 container; live managed Postgres run operator pending) | SQLAlchemy Core engine factory `scripts/core/db.py`, `jobs`/`crates`/`feedback_store` on `text()` + named binds, multi process `_load_from_db()` safety. No setlist store: `routers/setlist.py` is stateless |
+| 6 | Per user mix retention | ☑ verified | b8317f2 (sweep, `/library/mixes/storage`, `/library/mixes/sweep`, after render hook), a0d3a30 (lifespan sweep of every user) |
+| 7 | Deploy / infra | ◐ code done (deploy files, CI, CORS; the live box, Pages, CI on a PR and a restore are operator pending) | 8dbfe81, fb1a5f9, 9c3fcae, a4e8b50 |
+| 8 | Legal / product surface | ◐ code done (the DMCA email send needs SMTP, operator pending) | 2919ec2, 0f4b1f3, a0d3a30 |
 
-Legend: ☐ not started · ◐ in progress · ☑ verified
+Legend: ☐ not started · ◐ in progress, or code done with a live run operator pending · ☑ verified
 
 **Phase 1 note:** all code is committed and the frontend/backend green bar passes.
 Two Verify lines need a live network ingest run and are marked
-`operator-pending` below — they get ticked on the first real catalogue fill, not
+`operator-pending` below; they get ticked on the first real catalogue fill, not
 by a code change. Phase 3 does not depend on them.
 
+**Current green bar** (rerun 2026-09-30 at `bd1c446`, which adds the cookie method
+guard to `aef279f`, repo `.venv`, Python 3.12.7; that venv has drifted above the
+`requirements.txt` pins for fastapi, starlette, uvicorn and PyJWT, see `app/STATUS.md`):
+
+| Gate | Command | Result |
+|---|---|---|
+| lint | `.venv/bin/ruff check .` | `All checks passed!`, exit 0 |
+| tests | `.venv/bin/python -m pytest tests -q` | 1960 passed, 1 skipped, exit 0 |
+| types | `cd frontend && npx tsc --noEmit` | exit 0 |
+| frontend tests | `cd frontend && npx vitest run` | 18 files, 138 passed, exit 0 |
+| frontend lint | `cd frontend && npx eslint . --max-warnings 0` | exit 0 |
+| build | `cd frontend && npx vite build` | exit 0 |
+
+Repo wide ruff is now a real gate: the ruff safe autofix (`530ba73`) and the hand
+edits (`e7a053b`) cleared the pre existing findings the earlier note below
+scoped around, and CI runs `ruff check .`.
+
 **Green bar carried between every phase** (all three must pass before ticking a phase):
-- `uvx ruff check <files changed this phase>` — clean (this is what "clean (4 files)"
-  in the Phase 0 verify meant). **Repo-wide `uvx ruff check` is not a usable gate as
-  it stands**: on a clean `HEAD` it reports ~1583 findings, dominated by pre-existing
-  `W293` blank-line whitespace (~1100), `I001` import order (~200), and `F401` unused
-  imports (~150) — debt this migration did not introduce. `E501` is correctly
-  ignored, so the `pyproject.toml` rules are being read. Scope the check to the
-  phase's own files until someone runs `ruff check --fix` repo-wide and moves the
-  config to `[tool.ruff.lint]`. That cleanup is worth doing before the Phase 7 CI
-  job — surfaced, not done here.
-- safe pytest subset — green. The command (repo `.venv`, py3.12):
+- `uvx ruff check <files changed this phase>` (Phases 0 to 5; this is what "clean
+  (4 files)" in the Phase 0 verify meant). At that point repo wide ruff was not
+  usable: a clean `HEAD` reported pre existing findings in the thousands, which the two
+  commits above later cleared. The count at the time was not recorded with its
+  command; ruff 0.15.21 over a `git archive 304da7e` extract prints `Found 1606 errors.`
+- safe pytest subset, green. The command (repo `.venv`, py3.12):
   ```
   .venv/bin/python -m pytest -m "not dj_analysis and not integration" \
     --ignore=tests/e2e_test_suite.py --ignore=tests/test_audio_source.py -q
   ```
   Baseline before Phase 0: **675 passed, 90 deselected, ~13s**. After Phase 0: **680
   passed**. After the Phase 1 licence slices + `config.yaml` alignment: **702 passed,
-  90 deselected**. After the backend teardown: **701** — the −1 is a single
+  90 deselected**. After the backend teardown: **701**; the −1 is a single
   parametrised case in `test_structured_logger_usage.py` that iterates source files,
   now one file shorter (`task_modules/download.py` deleted), not a lost assertion.
   After the licence matrix + mix-credits tests: **706 passed**. After Phase 2
   (generative gate + root-route tests): **722 passed**. After Phase 3a
   (`test_user_scope.py`, 6 cases): **728 passed**. After Phase 3b (stem-split
-  gate, audit, spectral freeze, feedback, crates — 15 more cases): **743 passed**.
+  gate, audit, spectral freeze, feedback, crates, 15 more cases): **743 passed**.
   After Phase 4 backend (`test_auth.py` 13 + `test_migrate_uids.py` 4): **760 passed**.
-- `cd frontend && npx vite build` — clean
+  After Phase 6 (commit message of `b8317f2`): **777 passed**, 93 deselected. The
+  full suite, rather than this subset, is the current gate (table above). These
+  subset counts were recorded at each phase boundary with the command above and
+  were not rerun; only the 777 is also in a commit message (`b8317f2`). The same
+  command on the current tree collects 1759 tests (193 deselected).
+- `cd frontend && npx vite build`: clean
 
 ---
 
 ## Context
 
-Today ai-remixmate is a single-user local app: FastAPI single-process, in-process
+Before the `hosted-app` branch, ai-remixmate was a single user local app: FastAPI single-process, in-process
 `ThreadPoolExecutor(2)` + SQLite job store (`api.workers: 1` is load-bearing), a
-69 GB library on plain filesystem, **no auth on any endpoint**, and `yt-dlp`
-pulling commercial YouTube audio as a first-class feature. Its own docs say it is
-"not appropriate as-is for a production service." The intended "deployment" today
-is a static React build on GitHub Pages that calls `http://localhost:8000` on the
-user's own machine.
+69 GB library on plain filesystem, **no auth on any endpoint**, and a YouTube
+downloader pulling commercial audio as a first class feature (`main` still has it). Its own docs said it was
+"not appropriate as-is for a production service." The intended "deployment" then
+was a static React build on a free static page host that calls
+`http://localhost:8000` on the user's own machine. (This section records the
+starting point; Phases 1 to 8 below record what replaced it.)
 
 Target: a **multi-user product**, catalog **cut to licensed CC audio only**,
 hosting budget **~$10-30/mo**, generative AI features **out for v1**, music from
@@ -74,7 +93,7 @@ hosting budget **~$10-30/mo**, generative AI features **out for v1**, music from
   separation, too thin for key/BPM matching, ~1.5 h of CPU-Demucs to get there.
 - Jamendo's API terms don't fit (verified): "non-commercial uses" only and
   "applications must not be specifically designed to cache the content" — but
-  download→store→separate-stems is caching by design. Same error class as yt-dlp.
+  download→store→separate-stems is caching by design. Same error class as the YouTube downloader.
   Sources become **ccMixter, Free Music Archive, Internet Archive netlabels,
   Musopen** (CC-BY / CC0 / public domain — both license *and* platform terms
   intend download + derivatives).
@@ -134,7 +153,7 @@ clean verify harness.
 **Verify**
 - [x] Safe pytest subset green with the shim active — **680 passed** (675 + 5
       new), 90 deselected, no regressions, same 3 pre-existing warnings.
-- [x] `tests/test_storage_isolation.py` (5 tests): `OUTPUTS_DIR` / `DATA_DIR` /
+- [x] `tests/test_storage_isolation.py` (5 tests at the time; 9 `def test_` now): `OUTPUTS_DIR` / `DATA_DIR` /
       `EMBEDDINGS_FILE` resolve outside the repo; `LIBRARY_DIR` still
       `<repo>/library`; `jobs`/`crates`/`feedback_store` `_DB_PATH` outside the
       repo; `cfg.metadata.cache_path` / `cfg.database.path` /
@@ -175,7 +194,7 @@ publishable; attribution carried into the API response and every mix.
 - [x] `scripts/core/config.py` + `config.yaml` (edited together — drift guard
       green): dropped `download.default_source` and `spotify.redirect_uri`.
 
-**Backend teardown — committed** (`<this commit>`; import smoke checks on
+**Backend teardown — committed** (`8c4f204`; import smoke checks on
 `scripts.api.main` / `.routes` / `.tasks` / `scripts.download` all pass; safe
 subset 701 passed — the −1 vs 702 is one parametrised lint case over the deleted
 `task_modules/download.py`, not a lost assertion):
@@ -194,7 +213,7 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
       re-exports removed.
 - [x] `scripts/core/python_bridge.py`: removed the `youtube_music` online
       auto-fetch of missing tracks.
-- [x] `requirements.txt`: dropped `yt-dlp` and `ytmusicapi`; replaced the LEGAL
+- [x] `requirements.txt`: dropped the YouTube downloader (`yt_dlp`) and `ytmusicapi`; replaced the LEGAL
       NOTE block with a MUSIC SOURCING note. **`mutagen` kept** — still used by
       `cue_export.py` (Serato GEOB) and `library.py`; the task list below is
       wrong on this.
@@ -241,59 +260,21 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
 - `scripts/core/spotify.py` still carries dead OAuth methods (`get_auth_url`,
   `exchange_code`, `disconnect`, `is_connected`) and `spotify_token.json`
   persistence. Nothing live calls them. Slim in a later pass.
-- `scripts/ui/app.py` (Streamlit, not deployed) still references `/download` and
-  `/download-playlist` — dies with the `ui` service in Phase 2.
+- `scripts/ui/app.py` (the old Python UI, not deployed; its dependencies left the
+  core install in `f3aa1f3`) still references `/download` and
+  `/download-playlist`. The `ui` compose service went in Phase 2.
 - `scripts/core/library.py:87` `_is_downloaded_track` reads `full.info.json`
-  (a `yt-dlp` artefact). Library-hygiene helper; leave until it actually bites.
+  (a YouTube downloader artefact). Library-hygiene helper; leave until it actually bites.
 - `JobType.DOWNLOAD` kept in `schemas.py` — historical `jobs.db` rows still
   deserialise through it (matches the Phase 2 "keep job types, make unreachable"
   pattern).
 
-**Tasks**
-- [ ] `scripts/download.py` → operator CLI ingest tool. Delete the `yt_dlp` /
-      `ytmusicapi` / SoundCloud branches (`search_track` L235, `download_track`
-      L347, `download_playlist` L538, `_resolve_url`, `_source_from_url`).
-- [ ] Add per-source fetchers: ccMixter, Free Music Archive, Internet Archive
-      netlabels, Musopen. Each returns audio URL + raw license field + artist +
-      source URL.
-- [ ] **Extend `classify_license`** (`scripts/core/license.py`) to recognise each
-      source's license expression: ccMixter query-API `license` field, FMA
-      embedded license URL, Internet Archive item-metadata `licenseurl`, Musopen
-      (mostly public domain, often no per-track field → map to `PUBLIC_DOMAIN`).
-      Today it only knows `youtube_tos` / `jamendo` / a CC-URL parser; an
-      unrecognised field returns `UNKNOWN` and the gate rejects it → the failure
-      mode is a catalog that won't fill, not a leak.
-- [ ] Ingest pipeline: fetch → `classify_license` → **gate** → Demucs
-      (`scripts/core/stems.py`, run here) → `run_song_analysis` → write
-      `meta.json` / `analysis.json` / `license.json` → register in catalog index.
-- [ ] `scripts/api/routes.py`: remove the `downloads` router (or reduce to an
-      `ADMIN_EMAILS`-gated `/admin/catalog/ingest`). Delete
-      `scripts/api/task_modules/download.py`.
-- [ ] `scripts/api/routers/spotify.py`: delete OAuth / import / playlist / top
-      routes. Keep `/spotify/status`, `/spotify/search`, `/spotify/track/{id}`
-      (app-credentials metadata only). Delete `spotify_token.json` handling —
-      client-credentials token in memory only.
-- [ ] `scripts/core/license.py`: confirm `LicenseType` has a `PUBLIC_DOMAIN`
-      member (**add it if missing** — Musopen is public domain, not CC0).
-      `PERMITTED = {CC0, CC_BY, PUBLIC_DOMAIN}` — **not** CC-BY-SA (viral
-      share-alike infects the mix), **not** `*_NC` / `*_ND`. Add
-      `is_publishable(info)`. Ingest aborts + cleans the song dir on a
-      non-permitted license. Guard the gate behind `REMIXMATE_LICENSE_ENFORCE`
-      (on for ingest/deploy, **off locally** so the existing dev library loads).
-- [ ] `save_license()` (L245): persist `artist_name`, `license_ccurl`, source URL.
-- [ ] **Extend `SongInfo`** (`scripts/api/schemas.py`) with `artist_name` and
-      `license_ccurl`; read both in `_song_info` (`scripts/api/routers/_helpers.py:47-60`,
-      which today extracts only `license_type` / `source`). The P1 frontend
-      attribution line and the P8 mix credits both need these in the response.
-- [x] `scripts/api/task_modules/remix.py`: after the `sf.write` in `task_dj_remix`
-      and `task_dj_chain`, `_write_mix_credits()` writes `<out_dir>/CREDITS.txt`
-      and a `credits[]` array in `<out_dir>/manifest.json` from each source song's
-      `license.json` (`dbe2db1`). Preview render excluded.
-- [x] `requirements.txt`: removed `yt-dlp`, `ytmusicapi` and the LEGAL NOTE block.
-      **`mutagen` stays** — `cue_export.py` (Serato GEOB) and `library.py` both
-      import it. The earlier "(verify unused)" note was wrong.
-- [x] `config.yaml` + `scripts/core/config.py` **together** (`test_config_drift.py`
-      green): dropped `download.default_source` and `spotify.redirect_uri`.
+**Tasks**: the original task list is superseded by the Current state block
+above, which records each item with its commit. FMA and Musopen fetchers were
+descoped rather than built, and `mutagen` stayed. The original list is in git
+history: `git show aef279f:app/DEPLOYMENT_PLAN.md`.
+
+Frontend teardown tasks (`cc9de1a`):
 - [x] `frontend/src/pages/Operations.tsx` — download/playlist form + queue +
       `DownloadJobCard`/`DownloadTimer` + YouTube ToS copy removed; keeps the
       processing / storage / maintenance panels (672 → 329 lines).
@@ -324,8 +305,8 @@ subset 701 passed — the −1 vs 702 is one parametrised lint case over the del
       `tests/test_mix_credits.py` (helper-level; a full render is outside the safe
       subset). Mutation-tested: dropping a missing-licence track, nulling the
       artist, and un-wiring `task_dj_chain` each turn it red.
-- [x] `POST /download` / `/download-batch` / `/download-playlist` → 404 (router
-      gone); `GET /library` → 200 (checked against a `TestClient`).
+- [x] The three removed POST routes (`/download`, `/download-batch`,
+      `/download-playlist`) → 404 (router gone); `GET /library` → 200 (checked against a `TestClient`).
 - [x] `tests/test_config_drift.py` green (26 passed); no runtime `yt_dlp` /
       `ytmusicapi` imports in `scripts/` (only legacy source-name string literals
       in `license.py`).
@@ -386,7 +367,7 @@ library — a maintenance route, left for Phase 4.
       **722 passed** (+16 new).
 - [x] `POST /ai/style-transfer` / `/ai/inpaint` / `GET /ai/models` → 503;
       `POST /dj-remix` and `POST /dj-chain` → 422 (reached their own handlers,
-      not the gate). `tests/test_generative_gate.py` (11 cases, incl. a
+      not the gate). `tests/test_generative_gate.py` (11 collected cases from 4 `def test_`, incl. a
       per-request-read check).
 - [x] `grep -rn "import demucs\|from demucs" scripts/api/` → no hits.
 - [x] `pip check` clean **against the pre-slim venv** (removing lines from
@@ -507,7 +488,7 @@ this batch (stem-split gate, audit, spectral freeze, feedback, crates).
       rows backfilled to `"local"`.
 - [x] Green bar: safe subset 743 · `uvx ruff` clean on the 6 touched files.
 
-**Commits:** `653633a` (3a) · this commit (3b — stem gate / audit / spectral
+**Commits:** `653633a` (3a) · `4a40867` (3b: stem gate / audit / spectral
 freeze / feedback / crates).
 **Rollback note:** `data/` was snapshotted to the scratchpad before the crates /
 feedback migrations ran. The migrations are `ADD COLUMN … DEFAULT 'local'` only —
@@ -576,8 +557,10 @@ isolation run and the browser cookie handshake are `operator-pending`.
 - [x] **Cookie decision:** no Supabase SSR chunked cookie. `syncSseCookie()`
       writes a single readable `sb-access-token` cookie (matches
       `auth.py::_DEFAULT_COOKIE_NAME`) kept in sync with the session
-      (`AuthProvider`'s `onAuthStateChange`) — `SameSite=None; Secure` on https
-      (cross-site prod topology), `SameSite=Lax` on http localhost. Not httpOnly
+      (`AuthProvider`'s `onAuthStateChange`), `SameSite=Lax` everywhere plus
+      `Secure` on https (api.<domain> under `Domain=` is same site; `None` let a
+      cross site form POST carry the token, fixed in `bd1c446`, and the API
+      accepts the cookie only on GET and HEAD). Not httpOnly
       (JS sets it; the token is in localStorage anyway via supabase-js) — a true
       httpOnly session cookie needs an SSR/edge proxy, deferred.
 - [x] **The plan's "EventSource hook unchanged" was wrong.** `useSSE.ts` now
@@ -590,7 +573,7 @@ isolation run and the browser cookie handshake are `operator-pending`.
       `QueryClientProvider` for this.
 
 **Verify**
-- [x] Synthetic-token matrix — `tests/test_auth.py` (11): valid Bearer → 200 +
+- [x] Synthetic-token matrix — `tests/test_auth.py` (11 at the time; 15 `def test_` in the current tree): valid Bearer → 200 +
       the sync handler sees `sub`; valid `sb-access-token` cookie → 200; no token
       → 401 (`WWW-Authenticate: Bearer`); expired / wrong-aud / wrong-key /
       malformed / no-`sub` → 401; `/health/live` + `/health/ready` open with auth
@@ -603,8 +586,9 @@ isolation run and the browser cookie handshake are `operator-pending`.
       disjoint. Needs a live project.
 - [ ] **operator-pending** — SSE stream connects with the browser session cookie,
       rejects without it. Needs the frontend auth flow + a live project.
-- [x] Frontend gate: `tsc --noEmit` clean · `vitest run` **53 passed** (10 files;
-      +18 — `auth.test.tsx` 7, `AuthProvider.test.tsx` 7, `supabase.test.ts` 4) ·
+- [x] Frontend gate at the time: `tsc --noEmit` clean · `vitest run` **53 passed** (10 files;
+      +18 — `auth.test.tsx` 7, `AuthProvider.test.tsx` 7, `supabase.test.ts` 4; the current
+      tree runs 138 tests in 18 files, `supabase.test.ts` 8) ·
       `vite build` clean · `eslint --max-warnings 0` clean.
 - [x] `<RequireAuth>` covered — `authConfigured=false` passes through
       (`supabase.test.ts` + `smoke.test.ts`); `=true` shows login with no
@@ -617,8 +601,8 @@ isolation run and the browser cookie handshake are `operator-pending`.
       `queryClient.clear()` on `SIGNED_OUT` (not on other events); subscription
       + handler torn down on unmount.
 
-**Commits:** `<backend batch>` (RS256 gate + SSE cookie + uid migration) ·
-`<this batch>` (frontend auth shell).
+**Commits:** `d8b510b` (RS256 gate + SSE cookie + uid migration) ·
+`9068435` (frontend auth shell).
 
 ---
 
@@ -694,122 +678,241 @@ commit 1)` · `refactor: SQLAlchemy Core for the crate + feedback stores (Phase
 
 ---
 
-## Phase 6 — Per-user mix retention
+## Phase 6: Per user mix retention
 
 **Goal:** `outputs/` cannot grow unbounded; the shared catalog is a fixed asset.
 
-**Tasks**
-- [ ] Add a TTL sweep (mixes older than 30 days) + per-user cap (e.g. 50 mixes,
-      LRU by session mtime), reusing the delete path in
-      `scripts/api/routers/library.py` (`/library/delete-batch` internals, L310).
-- [ ] `/library/storage` + `/library/storage/evict` (L190, L268) become per-user,
-      report only `outputs/<uid>/`.
+**State:** ☑ done. `b8317f2` (sweep module, the two `/library/mixes/*` routes, the
+after render hook) and `a0d3a30` (the lifespan sweep of every user).
+
+**What shipped** (corrects the original task text, which proposed reusing the
+`/library/delete-batch` internals and turning `/library/storage` and
+`/library/storage/evict` per user; neither happened, see the last item)
+- [x] `scripts/core/mix_retention.py`: `sweep_dir(root, max_age_days, max_count,
+      dry_run)` removes every session dir whose newest file is older than the TTL,
+      then evicts the oldest by mtime until at most the cap remain; it only touches
+      the root it is handed. `sweep_current_user()` runs it on the acting user's
+      `outputs/<uid>/` and never raises; `sweep_all_users()` walks every
+      `outputs/<uid>/`. A removed session's job row is marked expired
+      (`_mark_swept_expired`); a dry run marks nothing.
+- [x] Config: a `retention` section in `config.yaml` (lines 103 to 107) and
+      `scripts/core/config.py`: `mix_max_age_days: 30`, `mix_max_count: 50`,
+      `sweep_after_render: true`, `sweep_interval_hours: 6`.
+- [x] `GET /library/mixes/storage`: the acting user's mix footprint against the
+      limits. `POST /library/mixes/sweep?dry_run=`: manual sweep of the acting
+      user, dry run by default. Both in `scripts/api/routers/library.py`.
+- [x] After render hook: `_sweep_user_mixes()` in
+      `scripts/api/task_modules/remix.py` runs at the end of `task_dj_remix`,
+      `task_dj_chain` and `task_remix_preview` when `retention.sweep_after_render`
+      is set.
+- [x] Lifespan sweep: `_retention_sweep_loop()` in `scripts/api/main.py` starts
+      with the app, sweeps every `outputs/<uid>/` `SWEEP_START_DELAY_SEC` (60)
+      seconds after start and then every `retention.sweep_interval_hours`, runs
+      the filesystem work in a thread, and is cancelled on shutdown before the
+      executor drain.
+- [x] `/library/storage` and `/library/storage/evict` stay catalog level: they
+      report on and evict the shared library, not user mixes.
+      `/library/storage/evict` sits behind `require_operator` (admin when auth is
+      on). Per user mix storage lives only on the `/library/mixes/*` routes.
 
 **Verify**
-- [ ] Exceed the per-user cap → oldest *own* mix evicted, other users untouched.
-- [ ] TTL sweep removes an artificially back-dated mix, keeps a fresh one.
-- [ ] `/library/storage` shows only the caller's `outputs/` usage.
-- [ ] Green bar.
+- [x] Exceed the per user cap: oldest own mix evicted, other users untouched.
+      Evidence: `tests/test_mix_retention.py` `test_cap_evicts_oldest_until_at_cap`,
+      `test_sibling_root_untouched`, `test_scoped_to_user_outputs_dir_and_config`.
+- [x] TTL sweep removes a back dated mix and keeps a fresh one. Evidence:
+      `test_ttl_removes_backdated_keeps_fresh`, `test_ttl_runs_before_cap`.
+- [x] Storage report shows only the caller's usage. Evidence:
+      `test_storage_status_is_per_user` against `/library/mixes/storage` (the
+      route that shipped in place of a per user `/library/storage`).
+- [x] Lifespan sweep covers every user dir and repeats on the interval. Evidence:
+      `tests/test_lifespan.py` `test_lifespan_sweep_covers_every_user_dir_and_marks_job`,
+      `test_lifespan_sweep_repeats_on_the_configured_interval`.
+- [x] Rerun for this ledger: `.venv/bin/python -m pytest tests/test_mix_retention.py
+      tests/test_lifespan.py -q` → 32 passed (`test_mix_retention.py` has 14
+      `def test_`, `test_lifespan.py` 15; the rest are parametrised cases).
+- [x] Green bar: see "Current green bar" above.
 
-**Commit:** `feat: TTL + per-user cap on rendered mixes`
+**Commits:** `b8317f2` (Phase 6: per user rendered mix retention) · `a0d3a30`
+(lifespan sweep, inside the B2 tenancy and hardening batch).
 
 ---
 
-## Phase 7 — Deploy / infra
+## Phase 7: Deploy / infra
 
 **Goal:** the app is live behind TLS on the target stack, reproducible from a runbook.
 
+**State:** ◐ code done. Every file the runbook needs is in `app/deploy/` and CI
+exists; nothing has been provisioned, so every line that needs the VPS, the
+Cloudflare Pages project, a managed Postgres or a pushed branch stays unticked.
+
 **Tasks**
-- [ ] Frontend on Cloudflare Pages; CI builds `frontend/dist`; set
-      `VITE_API_BASE=https://api.<domain>`, `VITE_EVENTS_URL=…/events/stream`,
-      `VITE_SUPABASE_URL=https://<ref>.supabase.co`, `VITE_SUPABASE_ANON_KEY=…`
-      (both required to turn auth on client-side; must pair with the API's
-      `REMIXMATE_AUTH_ENABLED=true` + `SUPABASE_JWKS_URL`). Stop committing
-      `frontend/dist/`. API CORS must echo the Pages origin (not `*`) with
-      `Access-Control-Allow-Credentials: true` for the cross-site SSE cookie.
-- [ ] Hetzner CX22: bare `uvicorn` (1 worker) under `systemd`, `Caddy` for
-      auto-TLS + reverse proxy. `apt install ffmpeg libsndfile1`; project venv;
-      `pip install -r requirements.txt && pip install -e .` (`demucs` is in
-      `requirements.txt` — it is only reached via the `REMIXMATE_STEM_SPLIT_ENABLED`
-      route, off in prod; keeping it installed is cheap and avoids a broken
-      `/stems/split` if the flag is ever flipped on for a debug session).
-- [ ] `pip install -e .` **without** `[generative]` / `[wordplay]` — no
-      transformers, no MusicGen weights on the box.
-- [ ] Mount the catalog volume **read-only** at `LIBRARY_DIR`.
-- [ ] `/etc/remixmate.env` (chmod 600, from `app/deploy/remixmate.env.example`):
-      `REMIXMATE_*` overrides, Spotify app creds, `DATABASE_URL`,
-      `REMIXMATE_AUTH_ENABLED=true`,
-      `SUPABASE_JWKS_URL=https://<ref>.supabase.co/auth/v1/.well-known/jwks.json`
-      (+ `SUPABASE_JWT_AUD` only if not `authenticated`; `SUPABASE_COOKIE_NAME` if
-      the frontend uses a non-default session cookie), `REMIXMATE_LICENSE_ENFORCE=true`,
-      `REMIXMATE_SPECTRAL_LEARNING=false`, `REMIXMATE_FRONTEND_URL=https://<domain>`,
-      `REMIXMATE_STEM_SPLIT_ENABLED` unset, `REMIXMATE_GENERATIVE_ENABLED` unset.
-      **Do not deploy `config.local.yaml`.**
-- [ ] CORS (`scripts/api/main.py:119-152`): `_default_origins` → frontend domain
-      only; **delete** the `_allow_private_network` middleware and the
-      `chunduri-aditya.github.io` / `localhost:8501` entries. Keep `allow_credentials=True`.
-- [ ] `systemd` `ExecStop` drain (`_executor.shutdown(wait=True)` already in the
-      lifespan) with `TimeoutStopSec=600`. Document "a redeploy fails any running render."
-- [ ] New `.github/workflows/ci.yml`: `uvx ruff check`; pytest safe subset on
-      SQLite; `cd frontend && npx tsc --noEmit && npx vitest run && npx vite build`.
-      Deploy job: SSH → `git pull` → `pip install` → `systemctl restart remixmate`
-      + Pages deploy. Leave `pages.yml` / `codeql.yml` disabled.
-- [ ] Catalog deploy: separate `rsync` of the built volume, not part of code deploy.
-- [ ] Backups: nightly `pg_dump $DATABASE_URL | gzip` + `rclone` to Backblaze/R2.
-- [ ] Fill `app/deploy/` — `Caddyfile`, `remixmate.service`, `remixmate.env.example`,
-      `PROVISION.md`.
+- [x] Frontend build for Cloudflare Pages: CI builds the frontend
+      (`.github/workflows/ci.yml` job `frontend`: `npm ci`, `tsc --noEmit`,
+      `vitest run`, `eslint --max-warnings 0`, `vite build` on Node 22).
+      `frontend/dist/` is no longer committed (`git ls-files frontend/dist | wc -l`
+      → 0). The Pages settings (root `frontend`, output `dist`, the `VITE_*`
+      variables) are written out in `app/deploy/PROVISION.md`.
+- [ ] **operator pending:** create the Cloudflare Pages project and set its
+      variables. Needs the Cloudflare account and a domain.
+- [x] CORS: `scripts/api/cors.py` `resolve_cors_origins()` takes
+      `REMIXMATE_CORS_ORIGINS`, else `REMIXMATE_FRONTEND_URL`, else configured
+      origins with the legacy `:8501` and old static host entries stripped, else
+      the Vite localhost ports; `*` is dropped. `allow_credentials=True` kept in
+      `scripts/api/main.py`. The `_allow_private_network` middleware is gone
+      (`grep -rn "_allow_private_network" scripts/api/` → no hits). Evidence:
+      `tests/test_cors_origins.py` (4 `def test_`).
+- [x] Hetzner CX22 files: `app/deploy/remixmate.service` runs bare `uvicorn`
+      with `--workers 1 --timeout-graceful-shutdown 30` on 127.0.0.1:8000,
+      `After=network-online.target`, `RequiresMountsFor=/mnt/catalog`,
+      `ProtectSystem=strict` with `ReadWritePaths` limited to `data` and
+      `outputs`; `app/deploy/Caddyfile` proxies to it with
+      `request_body { max_size 120MB }` and `flush_interval -1` for `/events/*`.
+- [x] `app/deploy/bootstrap.sh` installs `requirements.txt` and `pip install -e .`
+      without the `[generative]` and `[wordplay]` extras, checks for root,
+      refuses to run before the repo is cloned, installs the Caddyfile and
+      reloads Caddy, restarts the service and prints the `/health/ready` result.
+- [x] Catalog volume read only: the service can write only `data` and `outputs`
+      under `ProtectSystem=strict`; `PROVISION.md` covers the volume mount, the
+      fstab `ro` switch after the first rsync, and the catalog rsync from
+      `catalog/` (never `library/`).
+- [x] `/etc/remixmate.env` template: `app/deploy/remixmate.env.example` documents
+      every environment variable the code reads, uses
+      `REMIXMATE_LIBRARY_DIR=/mnt/catalog`, and marks
+      `REMIXMATE_LICENSE_ENFORCE` as ingest only. `scripts/core/paths.py` honours
+      `REMIXMATE_LIBRARY_DIR` and `REMIXMATE_OUTPUTS_DIR` as aliases. Evidence:
+      `tests/test_env_aliases.py` (10 `def test_`). **Do not deploy
+      `config.local.yaml`.**
+- [x] Drain on stop: the lifespan shutdown sets the SSE closing flag, cancels
+      the sweep, then calls `_executor.shutdown(wait=True)`; the unit sets
+      `TimeoutStopSec=600`, so a render still running when that expires is
+      killed by systemd. The runbook does not yet state that limit. Evidence:
+      `tests/test_lifespan.py`
+      `test_shutdown_sets_closing_before_executor_drain_and_ends_open_stream`.
+- [x] `.github/workflows/ci.yml` on pull requests and on pushes to `hosted-app`
+      and `main`: `ruff check .`, pytest without `dj_analysis` (ignoring
+      `tests/e2e_test_suite.py`), pytest `-m dj_analysis`, and the frontend job
+      above. `pages.yml` and `codeql.yml` keep only `workflow_dispatch` (their
+      `push` triggers are commented out).
+- [ ] Deploy job (SSH, `git pull`, `pip install`, `systemctl restart remixmate`,
+      Pages deploy): **not built.** `ci.yml` has no deploy job; deploys follow
+      `PROVISION.md` by hand.
+- [x] Backups: `app/deploy/backup.sh` strips `+psycopg` from `DATABASE_URL`
+      before `pg_dump`, gzips the dump, tars `data/` (and `outputs/` when
+      `BACKUP_OUTPUTS=1`), uploads with `rclone` when `RCLONE_REMOTE` is set,
+      prunes files older than 14 days, and reads the env file line by line.
+      Evidence: `tests/test_deploy_scripts.py` (25 `def test_`, covering both
+      scripts, the unit and the Caddyfile).
+- [x] `app/deploy/` holds `Caddyfile`, `remixmate.service`,
+      `remixmate.env.example`, `PROVISION.md`, `README.md`, `bootstrap.sh`,
+      `backup.sh`. `bash -n` on both scripts exits 0.
+- [x] `scripts/system/live_verify.py`: the two token hosted check the runbook
+      ends with; with auth off it prints a skip line for cross tenant isolation
+      and exits 0. Evidence: `tests/test_live_verify.py` (17 `def test_`).
 
 **Verify**
-- [ ] `grep -rn "import demucs\|from demucs" scripts/api/` → no hits (re-check on the deploy box).
-- [ ] Fresh VPS from the runbook boots the API behind Caddy TLS, catalog volume read-only.
-- [ ] `/health/ready` → 200 from the public internet.
-- [ ] Frontend on its domain: sign up, log in, render a mix from two catalog
-      tracks end to end, download it with `CREDITS.txt`.
-- [ ] Two concurrent `dj-remix` jobs on the box → RSS stays under box RAM, both
-      complete. End-to-end render latency for two catalog tracks: `___ s`.
-- [ ] `systemctl restart remixmate` drains in-flight then comes back healthy.
-- [ ] `pg_dump` output restores into a scratch DB without error.
-- [ ] CI green on a PR.
+- [x] `grep -rn "import demucs\|from demucs" scripts/api/` → no hits in the repo
+      (exit 1).
+- [ ] **operator pending:** the same grep on the deploy box. Needs the VPS.
+- [ ] **operator pending:** a fresh VPS from the runbook boots the API behind
+      Caddy TLS with the catalog volume read only. Needs the Hetzner VPS and volume.
+- [ ] **operator pending:** `/health/ready` → 200 from the public internet. Needs
+      the VPS and DNS.
+- [ ] **operator pending:** frontend on its domain: sign up, log in, render a mix
+      from two catalog tracks end to end, download it with `CREDITS.txt`. Needs
+      Pages, the VPS and a Supabase project.
+- [ ] **operator pending:** two concurrent `dj-remix` jobs on the box keep RSS
+      under box RAM and both complete; end to end render latency for two catalog
+      tracks: `___ s`. Needs the VPS.
+- [ ] **operator pending:** `systemctl restart remixmate` drains in flight jobs
+      then comes back healthy. Needs the VPS (the drain order itself is covered
+      by the lifespan test above).
+- [ ] **operator pending:** a `pg_dump` output restores into a scratch DB without
+      error. Needs a managed Postgres.
+- [ ] **operator pending:** CI green on a PR. Needs the branch pushed, which is
+      Aditya's call.
+- [x] Rerun for this ledger: `.venv/bin/python -m pytest tests/test_cors_origins.py
+      tests/test_deploy_scripts.py tests/test_env_aliases.py
+      tests/test_live_verify.py -q` → 65 passed, 1 skipped (the skip is the
+      shellcheck case: shellcheck is not installed here).
 
-**Commit:** `feat: production deploy — Caddy + systemd + Cloudflare Pages + CI`
+**Commits:** `8dbfe81` (Caddy, systemd, env example, `PROVISION.md`, CI, CORS) ·
+`fb1a5f9` (bootstrap and backup scripts, `live_verify`, catalog dry run) ·
+`9c3fcae` (uvicorn ignores proxy headers so the DMCA limiter keys on the socket
+peer) · `a4e8b50` (deploy scripts that run, env names the code reads, drain on
+shutdown).
 
 ---
 
-## Phase 8 — Legal / product surface
+## Phase 8: Legal / product surface
 
-**Goal:** the public-facing legal minimum for a CC-catalog remix product.
+**Goal:** the public facing legal minimum for a CC catalog remix product.
+
+**State:** ◐ code done. One Verify line waits on SMTP.
 
 **Tasks**
-- [ ] Frontend routes + footer: `/legal/terms`, `/legal/privacy`, `/legal/dmca`,
-      `/legal/acceptable-use`. Cover: data stored (email via Supabase, mixes,
-      crates, feedback, audit log); DMCA/takedown procedure + agent contact; "Not
-      affiliated with ccMixter, Free Music Archive, Internet Archive, Musopen,
-      Spotify, or any rights holder"; Acceptable Use for user-published mixes;
-      CC-BY attribution requirement (mixes carry `CREDITS.txt`); account deletion + export.
-- [ ] `POST /legal/dmca` (public, rate-limited) → `dmca_reports` row + email.
-- [ ] `DELETE /account` (auth) → purge `outputs/<uid>`, all `user_id` rows in
-      jobs/crates/feedback/setlists, the Supabase user.
-- [ ] `GET /account/export` → zip of the user's mix manifests + crates + favorites.
-- [ ] Admin (`ADMIN_EMAILS`-gated, no UI): `DELETE /admin/mix/{job_id}`,
-      `POST /admin/user/{id}/flag` (flagged → `require_user` returns 403).
-- [ ] Add the `credits` list to the MixVault detail view and the export/share panel.
+- [x] Frontend routes and footer: `/legal/:page` in `frontend/src/App.tsx`
+      rendered by `frontend/src/pages/LegalPage.tsx`; the four links (terms,
+      privacy, DMCA, acceptable use) sit at the bottom of
+      `frontend/src/shell/LeftRail.tsx` and on the login page. The page text in
+      `scripts/api/routers/legal.py` covers data stored, the DMCA procedure, the
+      "Not affiliated with ccMixter, Free Music Archive, Internet Archive,
+      Musopen" line, acceptable use, `CREDITS.txt` attribution, and account
+      export and deletion.
+- [x] `POST /legal/dmca` (public): writes a `dmca_reports` row
+      (`scripts/core/legal_store.py`), rate limited to 5 per hour per client,
+      keyed on the socket peer unless `REMIXMATE_TRUST_PROXY=1`; emails the report
+      when `REMIXMATE_SMTP_HOST` is set, otherwise logs that the email is stubbed.
+- [x] `DELETE /account` (auth): cancels the user's jobs, purges `outputs/<uid>`,
+      every `user_id` row in jobs, crates and feedback, the user's audit lines,
+      and the Supabase user when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
+      are set; reports `clean: false` with a reason when a step fails. There is
+      no setlist store, so the original "setlists" scope was vacuous.
+- [x] `GET /account/export`: a zip of five files scoped to the caller:
+      `library.json` (crates, tags and favorites), `manifests.json`, `meta.json`,
+      `feedback.json`, `jobs.json`.
+- [x] Admin (`ADMIN_EMAILS` gated through `require_admin`, no UI):
+      `DELETE /admin/mix/{job_id}`, `POST /admin/user/{user_id}/flag`, and
+      `DELETE /admin/user/{user_id}/flag` to unflag; a flagged user gets 403 from
+      `require_user`.
+- [x] `credits` list in the MixVault detail view (`frontend/src/pages/MixVault.tsx`)
+      plus a `CREDITS.txt` download link beside the mix.
 
 **Verify**
-- [ ] All four footer links resolve and render content.
-- [ ] `POST /legal/dmca` stores a row and sends the email.
-- [ ] `DELETE /account` leaves zero rows and zero files for that uid.
-- [ ] A flagged user gets 403 on every gated route.
-- [ ] `DELETE /admin/mix/{job_id}` removes the output dir and marks the job.
-- [ ] Green bar.
+- [x] All four footer links resolve and render content. Evidence:
+      `tests/test_legal_phase8.py` `test_legal_pages_return_200` (terms, privacy,
+      `dmca`, `acceptable-use` → 200) and `frontend/src/__tests__/vault_account_legal.test.tsx`
+      "LoginPage carries the four legal links" (the file runs 10 passed).
+- [x] `POST /legal/dmca` stores a row. Evidence:
+      `test_dmca_stores_row_without_smtp`.
+- [ ] **operator pending:** `POST /legal/dmca` sends the email. No test drives
+      the SMTP path with `REMIXMATE_SMTP_HOST` set; needs a real SMTP account.
+- [x] `DELETE /account` leaves zero rows and zero files for that uid. Evidence:
+      `tests/test_account_lifecycle.py` (9 `def test_`), including
+      `test_delete_with_running_job_leaves_no_row_and_no_files_after_task_completes`
+      and `test_delete_purges_audit_lines_for_the_uid_and_keeps_other_users`.
+      Deleting a real Supabase user is part of the Phase 4 live run.
+- [x] A flagged user gets 403 on every gated route. Evidence:
+      `test_flagged_user_gets_403`.
+- [x] `DELETE /admin/mix/{job_id}` removes the output dir and marks the job.
+      Evidence: `tests/test_admin_takedown.py` (15 `def test_`), including
+      `test_takedown_uses_the_owner_dir_not_the_admin_dir`,
+      `test_takedown_is_persisted_to_the_database`,
+      `test_non_admin_cannot_take_down`.
+- [x] Rerun for this ledger: `.venv/bin/python -m pytest tests/test_legal_phase8.py
+      tests/test_legal_text.py tests/test_account_lifecycle.py
+      tests/test_admin_takedown.py -q` → 42 passed.
+- [x] Green bar: see "Current green bar" above.
 
-**Commit:** `feat: legal pages, DMCA intake, account deletion/export, admin takedown`
+**Commits:** `2919ec2` (legal pages, DMCA intake, account deletion and export,
+admin takedown) · `0f4b1f3` (account and legal pages, vault credits, B5) ·
+`a0d3a30` (account lifecycle and takedown hardening, B2).
 
 ---
 
 ## Cut list (explicitly deferred past v1)
 
 MusicGen / VampNet / DAC (routers guarded, code kept) · all Spotify OAuth + import
-· all yt-dlp / YouTube / SoundCloud · **Free Music Archive + Musopen ingest
+· all YouTube / SoundCloud downloading · **Free Music Archive + Musopen ingest
 sources** (fetchers dropped from `scripts/download.py`; `classify_license` still
 recognises both, so re-adding a fetcher needs no classifier change — v1 fills
 from ccMixter + Internet Archive only) · per-user libraries and uploads · per-user
@@ -818,7 +921,8 @@ runtime GPU · Redis / arq / multi-worker API / horizontal scaling · DJ-engine
 `analyze()` reading cached `analysis.json` instead of recomputing per job (perf,
 do only if render latency bites) · `scripts/core/database.py` Postgres migration
 (CLI-only) · `track_metadata.py` Postgres migration · collaborative / shared
-crates · admin dashboard UI · Streamlit UI (stays in repo, not deployed).
+crates · admin dashboard UI · the old Python UI under `scripts/ui/` (stays in repo,
+not deployed).
 
 ## Riskiest parts
 
@@ -848,8 +952,8 @@ crates · admin dashboard UI · Streamlit UI (stays in repo, not deployed).
 | `scripts/core/paths.py` | `REMIXMATE_DATA_DIR` override (P0); per-user `OUTPUTS_DIR` + `session_dir` (P3); `LIBRARY_DIR` untouched |
 | `scripts/core/audit.py` | `_AUDIT_PATH` derives from `DATA_DIR` (P0); `user_id` field (P3) |
 | `scripts/download.py` + `scripts/core/license.py` | operator ingest tool + `classify_license` per source + `{CC0, CC_BY, PUBLIC_DOMAIN}` gate |
-| `scripts/api/routes.py` + `routers/{downloads,spotify,generative}.py` | router deletion / guarding |
-| `scripts/core/{crates,feedback_store}.py` + setlist store | per-user column + Postgres |
+| `scripts/api/routes.py` + `routers/{spotify,generative}.py` (`downloads.py` deleted in `8c4f204`) | router deletion / guarding |
+| `scripts/core/{crates,feedback_store}.py` | per-user column + Postgres |
 | `scripts/core/{spectral_matching,mastering}.py` | `REMIXMATE_SPECTRAL_LEARNING` freeze in prod |
 | `scripts/core/db.py` (new), `scripts/api/auth.py` (new) | SQLAlchemy engine, JWT dependency + contextvar |
 | `frontend/src/pages/Operations.tsx`, `frontend/src/lib/api.ts`, `frontend/src/shell/` | download UI → catalog browser + auth shell |
