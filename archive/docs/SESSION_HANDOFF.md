@@ -1,5 +1,7 @@
 # Session Handoff — June 30, 2026
 
+> Archived: this file is history, not a source of truth, whatever it says below. Current agent context starts at `CLAUDE.md` in the repo root.
+
 Read this first in the new chat. It's the state of the live-testing/bug-fix session that
 just ended, written so a fresh session doesn't have to re-derive any of it.
 

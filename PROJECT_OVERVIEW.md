@@ -1,5 +1,7 @@
 # AI RemixMate: Project Overview
 
+> Portfolio summary with numbers pinned to `main`, not a map of this branch. Agents start at `CLAUDE.md` and `ARCHITECTURE.md`.
+
 A real time DJ engine built end to end in Python and React. It takes two songs, understands them
 musically, and renders a transition between them that sounds like a person made it.
 

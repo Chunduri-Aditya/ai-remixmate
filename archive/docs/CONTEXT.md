@@ -1,5 +1,7 @@
 # AI RemixMate — Context
 
+> Archived: this file is history, not a source of truth, whatever it says below. Current agent context starts at `CLAUDE.md` in the repo root.
+
 > Single source of truth for current project state. Verified against the actual codebase
 > (`ls`/`grep`/`pytest`), not just against other docs — several other `.md` files in this repo
 > describe stale architecture (Streamlit-primary, old API shapes) or duplicate content under
