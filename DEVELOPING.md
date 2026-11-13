@@ -20,7 +20,7 @@ source .venv/bin/activate
 ```
 
 ```bash
-./start.sh               # install deps, then API (127.0.0.1:8000) + React UI (5173)
+./start.sh               # install deps when missing or changed, then API (127.0.0.1:8000) + React UI (5173)
 ./start.sh frontend      # same as the default
 ./start.sh setup         # install or update packages only
 ./start.sh api           # API only
@@ -32,6 +32,7 @@ source .venv/bin/activate
 docker compose up        # API only, published on 127.0.0.1:8000
 ```
 
+Ports: `REMIXMATE_API_PORT` (default 8000) and `REMIXMATE_UI_PORT` (default 5173); use them for `stop` too.
 The API binds 127.0.0.1 unless `--host ADDR` says otherwise. The old `ui` and `both` modes exit
 with status 2.
 

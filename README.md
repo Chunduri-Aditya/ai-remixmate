@@ -13,20 +13,26 @@ A DJ engine that takes two songs and renders a beat locked transition between th
 Requirements: Python 3.12, Node 22, ffmpeg. Full details in [PREREQUISITES.md](PREREQUISITES.md).
 
 ```bash
-git clone https://github.com/Chunduri-Aditya/ai-remixmate.git
-cd ai-remixmate
-python3.12 -m venv .venv      # start.sh also creates .venv on first run if it is missing
-./start.sh setup              # install Python packages into .venv and npm packages into frontend/
-./start.sh api                # API only, on http://127.0.0.1:8000
+git clone https://github.com/Chunduri-Aditya/ai-remixmate.git && cd ai-remixmate
+./start.sh setup
+./start.sh
 ```
+
+`./start.sh setup` creates `.venv`, installs the Python packages (runtime and test) and the npm packages. `./start.sh` then starts the API and the React UI. It installs again only when packages are missing or the dependency files changed. Run the tests with:
+
+```bash
+.venv/bin/python -m pytest -m "not dj_analysis" --ignore=tests/e2e_test_suite.py -q
+```
+
+Ports: `REMIXMATE_API_PORT` (default 8000) and `REMIXMATE_UI_PORT` (default 5173) move the two servers, for example `REMIXMATE_API_PORT=8765 REMIXMATE_UI_PORT=5199 ./start.sh`. Use the same variables with `./start.sh stop`. `start.sh` stops only its own listeners and exits when another program holds a port.
 
 Other modes (from `start.sh`):
 
 ```bash
-./start.sh                    # API plus React UI (default)
-./start.sh --skip-setup       # start without reinstalling packages
+./start.sh api                # API only, on http://127.0.0.1:8000
+./start.sh --skip-setup       # start without checking packages
 ./start.sh --dev              # API with --reload
-./start.sh stop               # stop the API and the UI
+./start.sh stop               # stop this app's API and UI listeners
 ```
 
 The API binds to `127.0.0.1` by default. Then open:

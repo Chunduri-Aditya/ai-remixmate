@@ -40,6 +40,7 @@ dependencies = [
 dev = [
     "pytest>=8.4",
     "pytest-asyncio>=0.25",
+    "httpx>=0.28",  # fastapi.testclient transport; the API tests import it
     "black>=25.1",
     "ruff>=0.12",
     "mypy>=1.16",

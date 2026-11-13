@@ -2,22 +2,31 @@
 # start.sh — Install/update dependencies and start AI RemixMate.
 #
 # Usage:
-#   ./start.sh              # setup + React UI + API (default)
+#   ./start.sh              # React UI + API (default); installs packages first
+#                           # when they are missing or the dependency files changed
 #   ./start.sh frontend     # same as default
-#   ./start.sh setup        # install/update packages only
+#   ./start.sh setup        # install/update packages only (always reinstalls)
 #   ./start.sh api          # API only
-#   ./start.sh stop         # kill everything
-#   ./start.sh --skip-setup # start without reinstalling packages
+#   ./start.sh stop         # stop this app's listeners on the configured ports
+#   ./start.sh --skip-setup # start without checking or installing packages
 #   ./start.sh --no-open    # don't auto-open a browser tab (default: opens one)
 #   ./start.sh --host ADDR  # API bind address (default: 127.0.0.1)
 #   ./start.sh --dev        # run the API with --reload
 #   (ui and both were the Streamlit UI modes; they now exit 2)
+#
+# Ports (environment variables):
+#   REMIXMATE_API_PORT  API port (default 8000)
+#   REMIXMATE_UI_PORT   React dev server port (default 5173)
+#   Example:  REMIXMATE_API_PORT=8765 REMIXMATE_UI_PORT=5199 ./start.sh
+# start.sh stops only listeners that belong to this checkout. When another
+# program holds a port it prints who and exits non zero.
 
 set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-API_PORT=8000
-FRONTEND_PORT=5173
+ROOT_REAL="$(cd "$ROOT" && pwd -P)"
+API_PORT="${REMIXMATE_API_PORT:-8000}"
+FRONTEND_PORT="${REMIXMATE_UI_PORT:-5173}"
 CERT_DIR="$ROOT/certs"
 CERT_FILE="$CERT_DIR/cert.pem"
 KEY_FILE="$CERT_DIR/key.pem"
@@ -30,15 +39,23 @@ OPEN_BROWSER=true
 DEV_MODE=false
 PY="$ROOT/.venv/bin/python"
 VENV_DIR="$ROOT/.venv"
+STAMP_FILE="$VENV_DIR/.remixmate-setup-stamp"
 PY_CHECKED=false
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Print "major minor" for interpreter $1, or nothing when it does not run.
+py_version_of() {
+  "$1" -c 'import sys; print(sys.version_info[0], sys.version_info[1])' 2>/dev/null
+}
+
 # Resolve the Python interpreter RemixMate should use.
 # Homebrew/macOS Python 3.12+ is PEP-668 "externally managed" — pip install
 # only works inside a venv. We always use $ROOT/.venv and create it when needed.
+# The project needs exactly Python 3.12 (torch/demucs pins), so every
+# interpreter is probed and only one that reports 3.12 is accepted.
 ensure_python_env() {
   if $PY_CHECKED; then
     return
@@ -47,20 +64,35 @@ ensure_python_env() {
 
   # 1. Project venv from a previous run
   if [ -x "$PY" ]; then
+    local venv_ver
+    venv_ver="$(py_version_of "$PY" || true)"
+    if [ "$venv_ver" != "3 12" ]; then
+      local shown="${venv_ver/ /.}"
+      echo "❌  .venv runs Python ${shown:-of unknown version}, but this project needs Python 3.12."
+      echo "    Delete the .venv folder, then run ./start.sh setup (needs python3.12 on PATH)."
+      echo "    macOS:  brew install python@3.12    See PREREQUISITES.md"
+      exit 1
+    fi
     echo "  Using project venv: $PY ($($PY --version 2>&1))"
     return
   fi
 
-  # 2. Create .venv/ — Python 3.12 (pyproject requires >=3.12; torch pins rule out 3.14)
-  local BASE=""
-  for candidate in python3.12 python3.13 python3; do
-    if command -v "$candidate" &>/dev/null; then
-      BASE="$(command -v "$candidate")"
+  # 2. Create .venv/ from the first base interpreter that reports 3.12
+  local BASE="" found="" candidate path ver
+  for candidate in python3.12 python3 python; do
+    path="$(command -v "$candidate" 2>/dev/null || true)"
+    [ -n "$path" ] || continue
+    ver="$(py_version_of "$path" || true)"
+    found="$found $candidate=${ver/ /.}"
+    [ -n "$ver" ] || found="${found}does-not-run"
+    if [ "$ver" = "3 12" ]; then
+      BASE="$path"
       break
     fi
   done
   if [ -z "$BASE" ]; then
-    echo "❌  Python 3 not found. Install Python 3.12 and retry."
+    echo "❌  Python 3.12 not found. This project needs exactly Python 3.12."
+    echo "    Found:${found:- no python3.12, python3 or python on PATH}"
     echo "    macOS:  brew install python@3.12"
     echo "    See PREREQUISITES.md"
     exit 1
@@ -68,8 +100,20 @@ ensure_python_env() {
 
   echo "  Creating virtual environment .venv/ (PEP 668 safe)…"
   echo "  Base interpreter: $BASE ($($BASE --version 2>&1))"
-  "$BASE" -m venv "$VENV_DIR"
+  if ! "$BASE" -m venv "$VENV_DIR"; then
+    echo "❌  Could not create .venv with $BASE."
+    echo "    Debian/Ubuntu:  sudo apt install python3.12-venv, delete .venv, then run ./start.sh setup"
+    exit 1
+  fi
   echo "  ✅  Created $PY ($($PY --version 2>&1))"
+}
+
+# 0 when $1 is a TCP port number (digits only, 1 to 65535).
+valid_port() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "${#1}" -le 5 ] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
 }
 
 # Wait until $1 (a URL) responds, up to $2 seconds (default 25). Returns
@@ -112,27 +156,77 @@ open_browser() {
   echo "  🌐  Opened $url in your browser."
 }
 
+# Print the working directory of pid $1, or nothing when lsof cannot read it.
+listener_cwd() {
+  lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1 || true
+}
+
+# 0 only when pid $1 belongs to this checkout: its cwd is $ROOT_REAL or below
+# it, and its command is the API (uvicorn scripts.api.main, or the
+# multiprocessing child that --reload spawns) or Vite. An unknown cwd is foreign.
+listener_is_ours() {
+  local pid=$1 cwd cmd
+  cwd="$(listener_cwd "$pid")"
+  [ -n "$cwd" ] || return 1
+  case "$cwd" in
+    "$ROOT_REAL"|"$ROOT_REAL"/*) ;;
+    *) return 1 ;;
+  esac
+  cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+  case "$cmd" in
+    *scripts.api.main*|*multiprocessing*|*vite*) return 0 ;;
+  esac
+  return 1
+}
+
+# Free port $1 when only this app listens on it. When another program holds
+# it, print who and how to pick another port via env var $2, signal nothing
+# and return 1.
 kill_port() {
   local port=$1
-  local pids
+  local envvar=$2
+  local pids pid ours foreign=false
   pids=$(lsof -ti tcp:"$port" -sTCP:LISTEN 2>/dev/null || true)
+  if [ -z "$pids" ]; then
+    echo "  Port $port is free."
+    return 0
+  fi
+  for pid in $pids; do
+    if ! listener_is_ours "$pid"; then
+      foreign=true
+      echo "❌  Port $port is held by another program (not this checkout of RemixMate):"
+      echo "    pid:     $pid"
+      echo "    command: $(ps -o command= -p "$pid" 2>/dev/null || true)"
+      echo "    cwd:     $(listener_cwd "$pid")"
+    fi
+  done
+  if $foreign; then
+    echo "    Left it running. Stop that program, or pick another port:"
+    echo "      $envvar=<other port> ./start.sh"
+    return 1
+  fi
+  echo "  Stopping this app's listener(s) on port $port:" $pids
+  kill $pids 2>/dev/null || true
+  local waited=0
+  while [ -n "$pids" ] && [ "$waited" -lt 10 ]; do
+    sleep 0.5
+    waited=$((waited + 1))
+    pids=$(lsof -ti tcp:"$port" -sTCP:LISTEN 2>/dev/null || true)
+  done
   if [ -n "$pids" ]; then
-    echo "  Stopping listener(s) on port $port: $pids"
-    kill $pids 2>/dev/null || true
-    local waited=0
-    while [ -n "$pids" ] && [ "$waited" -lt 10 ]; do
-      sleep 0.5
-      waited=$((waited + 1))
-      pids=$(lsof -ti tcp:"$port" -sTCP:LISTEN 2>/dev/null || true)
+    ours=""
+    for pid in $pids; do
+      if listener_is_ours "$pid"; then
+        ours="$ours $pid"
+      fi
     done
-    if [ -n "$pids" ]; then
-      echo "  Port $port still busy after 5s, sending KILL: $pids"
-      kill -9 $pids 2>/dev/null || true
+    if [ -n "$ours" ]; then
+      echo "  Port $port still busy after 5s, sending KILL:$ours"
+      kill -9 $ours 2>/dev/null || true
       sleep 0.5
     fi
-  else
-    echo "  Port $port is free."
   fi
+  return 0
 }
 
 banner() {
@@ -167,13 +261,10 @@ setup_deps() {
   ensure_python_env
   echo ""
 
-  # Warn if Python is very new (torch/demucs may lack wheels yet)
-  local PY_MAJOR PY_MINOR
-  read -r PY_MAJOR PY_MINOR < <($PY -c 'import sys; print(sys.version_info.major, sys.version_info.minor)')
-  if [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -ge 13 ]; then
-    echo "  ⚠️   Python $PY_MAJOR.$PY_MINOR detected — this project requires 3.12."
-    echo "      If pip fails, run:  brew install python@3.12 && rm -rf .venv && ./start.sh"
-    echo ""
+  if ! $PY -m pip --version &>/dev/null; then
+    echo "❌  .venv has no pip."
+    echo "    Debian/Ubuntu:  sudo apt install python3.12-venv, delete .venv, then run ./start.sh setup"
+    exit 1
   fi
 
   # ── System tools ──────────────────────────────────────────────────────
@@ -199,9 +290,9 @@ setup_deps() {
   echo "🐍  Python packages"
   cd "$ROOT"
   $PY -m pip install --upgrade pip setuptools wheel -q
-  $PY -m pip install -r requirements.txt -q
+  $PY -m pip install -r requirements-dev.txt -q
   $PY -m pip install -e ".[dev]" -q
-  echo "  ✅  requirements.txt + editable install"
+  echo "  ✅  requirements-dev.txt (includes requirements.txt) + editable install"
   echo ""
 
   # ── Frontend packages ─────────────────────────────────────────────────
@@ -218,6 +309,26 @@ setup_deps() {
   cd "$ROOT"
   echo "✅  Dependency setup complete."
   echo ""
+  # Last step: a setup that failed above leaves no stamp, so the next run installs again.
+  deps_fingerprint > "$STAMP_FILE"
+}
+
+# Checksums of the dependency files; a change to any of them means reinstall.
+deps_fingerprint() {
+  local f
+  for f in requirements.txt requirements-dev.txt pyproject.toml frontend/package.json frontend/package-lock.json; do
+    if [ -f "$ROOT/$f" ]; then
+      printf '%s ' "$f"
+      cksum < "$ROOT/$f"
+    fi
+  done
+}
+
+# 0 when the last complete setup matches the dependency files and node_modules exists.
+deps_current() {
+  [ -f "$STAMP_FILE" ] || return 1
+  [ -d "$ROOT/frontend/node_modules" ] || return 1
+  [ "$(cat "$STAMP_FILE")" = "$(deps_fingerprint)" ]
 }
 
 run_check() {
@@ -225,28 +336,24 @@ run_check() {
 }
 
 stop_all() {
-  echo "⏹  Stopping all RemixMate processes..."
-  kill_port $API_PORT
-  kill_port $FRONTEND_PORT
+  echo "⏹  Stopping RemixMate listeners on API port $API_PORT and UI port $FRONTEND_PORT..."
+  echo "    (set REMIXMATE_API_PORT / REMIXMATE_UI_PORT to the ports you started with)"
+  kill_port "$API_PORT" REMIXMATE_API_PORT || true
+  kill_port "$FRONTEND_PORT" REMIXMATE_UI_PORT || true
   echo "Done."
 }
 
 start_frontend() {
-  echo "⚛️   Clearing port $FRONTEND_PORT..."
-  kill_port $FRONTEND_PORT
   LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
 
   echo "🚀  Starting React frontend at http://localhost:$FRONTEND_PORT"
   [ -n "$LAN_IP" ] && echo "    LAN URL: http://$LAN_IP:$FRONTEND_PORT"
-  (cd "$ROOT/frontend" && exec npm run dev) &
+  (cd "$ROOT/frontend" && REMIXMATE_API_PORT="$API_PORT" REMIXMATE_UI_PORT="$FRONTEND_PORT" exec npm run dev -- --strictPort) &
   FRONTEND_PID=$!
   echo "    PID: $FRONTEND_PID"
 }
 
 start_api() {
-  echo "🔧  Clearing port $API_PORT..."
-  kill_port $API_PORT
-
   ensure_python_env
 
   # --reload with no --reload-dir watches the ENTIRE project root by
@@ -270,12 +377,12 @@ start_api() {
     scheme=https
     echo "🚀  Starting API at https://$API_HOST:$API_PORT (HTTPS)"
     echo "    Docs: https://$API_HOST:$API_PORT/docs"
-    (cd "$ROOT" && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --no-proxy-headers --host "$API_HOST" --port $API_PORT \
+    (cd "$ROOT" && unset REMIXMATE_UI_PORT && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --no-proxy-headers --host "$API_HOST" --port $API_PORT \
       --ssl-certfile "$CERT_FILE" --ssl-keyfile "$KEY_FILE") &
   else
     echo "🚀  Starting API at http://$API_HOST:$API_PORT"
     echo "    Docs: http://$API_HOST:$API_PORT/docs"
-    (cd "$ROOT" && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --no-proxy-headers --host "$API_HOST" --port $API_PORT) &
+    (cd "$ROOT" && unset REMIXMATE_UI_PORT && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --no-proxy-headers --host "$API_HOST" --port $API_PORT) &
   fi
   API_PID=$!
   echo "    PID: $API_PID"
@@ -357,6 +464,19 @@ case "$MODE" in
     ;;
 esac
 
+for port_spec in "REMIXMATE_API_PORT=$API_PORT" "REMIXMATE_UI_PORT=$FRONTEND_PORT"; do
+  if ! valid_port "${port_spec#*=}"; then
+    echo "❌  ${port_spec%%=*} must be a port number from 1 to 65535, got '${port_spec#*=}'."
+    exit 1
+  fi
+done
+API_PORT=$((10#$API_PORT))
+FRONTEND_PORT=$((10#$FRONTEND_PORT))
+if [ "$API_PORT" -eq "$FRONTEND_PORT" ]; then
+  echo "❌  REMIXMATE_API_PORT and REMIXMATE_UI_PORT are both $API_PORT; pick two different ports."
+  exit 1
+fi
+
 banner
 
 case "$MODE" in
@@ -372,10 +492,26 @@ case "$MODE" in
     ;;
 esac
 
+# Port preflight before any install: a port held by another program fails
+# in seconds, not after the install.
+case "$MODE" in
+  api)
+    kill_port "$API_PORT" REMIXMATE_API_PORT || exit 1
+    ;;
+  frontend|"")
+    kill_port "$API_PORT" REMIXMATE_API_PORT || exit 1
+    kill_port "$FRONTEND_PORT" REMIXMATE_UI_PORT || exit 1
+    ;;
+esac
+
 # Always resolve Python (creates .venv/ on first run)
 ensure_python_env
 
-if ! $SKIP_SETUP; then
+if $SKIP_SETUP; then
+  :
+elif deps_current; then
+  echo "📦  Dependencies up to date. Run ./start.sh setup to reinstall."
+else
   setup_deps
   run_check
 fi

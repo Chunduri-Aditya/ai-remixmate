@@ -10,7 +10,7 @@ What a machine needs before `./start.sh` runs. The script creates the Python env
 | Node.js and npm | Node 22 | CI runs the frontend job on `node-version: "22"` |
 | ffmpeg | any current release | `start.sh` exits if `ffmpeg` is not on `PATH` |
 
-Use 3.12 exactly: `start.sh` warns that the project requires 3.12 when the venv runs 3.13 or later, and its comments note that the `torch` pins in `requirements.txt` rule out 3.14.
+Use 3.12 exactly: `start.sh` exits with a message when no 3.12 interpreter exists or when an existing `.venv` runs another version, and its comments note that the `torch` pins in `requirements.txt` rule out 3.14.
 
 ## Install on macOS (Homebrew)
 
@@ -31,13 +31,13 @@ Install Python 3.12, Node 22 and ffmpeg with your distribution's package manager
 
 ## Python environment
 
-`start.sh` always uses the project venv at `.venv/`. On the first run it creates `.venv/` from the first interpreter it finds among `python3.12`, `python3.13` and `python3`, so with Homebrew's `python@3.12` installed it picks 3.12. A venv is required on macOS because Homebrew Python blocks system wide `pip` installs (PEP 668).
+`start.sh` always uses the project venv at `.venv/`. On the first run it creates `.venv/` from the first interpreter it finds among `python3.12`, then `python3` or `python`, and only one that reports 3.12 is accepted. An existing `.venv` on another version makes it exit: delete `.venv` and run `./start.sh setup`. A venv is required on macOS because Homebrew Python blocks system wide `pip` installs (PEP 668).
 
 To create it by hand:
 
 ```bash
 python3.12 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m pip install -e ".[dev]"
 cd frontend && npm ci && cd ..
 ```
@@ -47,18 +47,18 @@ On the maintainer's machine on 2026-09-30, `.venv/` took 1.5G and `frontend/node
 ## start.sh modes
 
 ```bash
-./start.sh              # install packages, then API (port 8000) and React UI (port 5173)
+./start.sh              # install packages only when missing or changed, then API (port 8000) and React UI (port 5173)
 ./start.sh frontend     # same as the default
 ./start.sh api          # install packages, then the API only
 ./start.sh setup        # install or update packages only, start nothing
-./start.sh stop         # stop whatever listens on ports 8000 and 5173
+./start.sh stop         # stop this app's listeners on the configured ports (8000 and 5173 by default)
 ```
 
 Flags, combinable with `frontend` and `api`:
 
 | Flag | Effect |
 |------|--------|
-| `--skip-setup` | skip the package install for a faster restart |
+| `--skip-setup` | never check or install packages. Without it, a run installs only when the stamp in `.venv/` differs from the dependency files or `frontend/node_modules` is missing; `./start.sh setup` always installs |
 | `--no-open` | do not open a browser tab |
 | `--dev` | run the API with `--reload`, watching `scripts/` only |
 | `--https` | serve the API over TLS, generating `certs/cert.pem` and `certs/key.pem` with `certs/generate.sh` (mkcert, or openssl as fallback) when missing |
@@ -69,6 +69,8 @@ Those five are the only modes. The retired `ui` and `both` modes print a message
 After the API starts, `start.sh` polls `GET /health/live` for up to 25 seconds and warns if it does not answer.
 
 ## URLs after startup
+
+The ports below are the defaults. Set `REMIXMATE_API_PORT` and `REMIXMATE_UI_PORT` to change them, and set the same variables for `./start.sh stop`. `start.sh` exits when another program holds a port.
 
 | Service | URL |
 |---------|-----|

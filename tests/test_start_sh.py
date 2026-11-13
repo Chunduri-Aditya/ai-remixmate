@@ -58,7 +58,7 @@ case " $* " in
   *" --version"*) echo "Python 3.12.0"; exit 0 ;;
 esac
 case " $* " in
-  *" -c "*) echo "3 12"; exit 0 ;;
+  *" -c "*) echo "${STUB_PY_VERSION:-3 12}"; exit 0 ;;
 esac
 case " $* " in
   *uvicorn*)
@@ -324,3 +324,290 @@ def test_sigint_leaves_no_api_child(sandbox):
                 os.kill(child_pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Ports, listener ownership, Python 3.12 gate, setup stamp (fix 3)
+# ---------------------------------------------------------------------------
+
+# lsof stand in. For `-ti tcp:PORT -sTCP:LISTEN` it prints $STUB_LSOF_PID when
+# PORT is $STUB_LSOF_PORT and that pid is alive and not a zombie (the same rule
+# as pid_alive). For `-a -p PID -d cwd -Fn` it prints the -Fn record with
+# $STUB_LSOF_CWD, or nothing when that variable is empty.
+LSOF_STUB = r"""#!/bin/sh
+printf 'lsof %s\n' "$*" >> "$STUB_LOG"
+mode=listen; port=""; pid=""; prev=""
+for a in "$@"; do
+  case "$a" in tcp:*) port="${a#tcp:}" ;; esac
+  [ "$prev" = "-p" ] && pid="$a"
+  [ "$a" = "cwd" ] && mode=cwd
+  prev="$a"
+done
+if [ "$mode" = cwd ]; then
+  if [ -n "$STUB_LSOF_CWD" ] && [ "$pid" = "$STUB_LSOF_PID" ]; then
+    printf 'p%s\nfcwd\nn%s\n' "$pid" "$STUB_LSOF_CWD"
+  fi
+  exit 0
+fi
+if [ -n "$STUB_LSOF_PID" ] && [ "$port" = "$STUB_LSOF_PORT" ]; then
+  st=$(ps -o stat= -p "$STUB_LSOF_PID" 2>/dev/null | tr -d ' ')
+  case "$st" in
+    ""|Z*) ;;
+    *) echo "$STUB_LSOF_PID" ;;
+  esac
+fi
+exit 0
+"""
+
+# A base interpreter on PATH (python3.12, python3, python). VERSION is what a
+# `-c` probe prints; `-m venv DIR` writes the venv python stub into DIR.
+BASE_PY_STUB = r"""#!/bin/sh
+printf '%s %s\n' "$(basename "$0")" "$*" >> "$STUB_LOG"
+case " $* " in
+  *" --version"*) echo "Python {dotted}"; exit 0 ;;
+esac
+case " $* " in
+  *" -c "*) echo "{version}"; exit 0 ;;
+esac
+if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then
+  mkdir -p "$3/bin"
+  cp "{template}" "$3/bin/python"
+  chmod +x "$3/bin/python"
+fi
+exit 0
+"""
+
+BROKEN_SHIM = "#!/bin/sh\nexit 127\n"
+
+APP_ARGV = [sys.executable, "-c", "import time; time.sleep(60)", "scripts.api.main:app"]
+FOREIGN_ARGV = ["sleep", "60"]
+
+
+def _stubs_dir(sb: dict) -> Path:
+    return sb["root"].parent / "stubs"
+
+
+def _install_lsof_stub(sb: dict) -> None:
+    _write_exec(_stubs_dir(sb) / "lsof", LSOF_STUB)
+
+
+def _install_base_pythons(sb: dict, versions: dict[str, str | None]) -> None:
+    """Drop .venv and put base interpreter stubs on PATH; None means a broken shim."""
+    shutil.rmtree(sb["root"] / ".venv")
+    template = _stubs_dir(sb) / "venv_python_template"
+    template.write_text(PY_STUB)
+    for name, version in versions.items():
+        if version is None:
+            _write_exec(_stubs_dir(sb) / name, BROKEN_SHIM)
+            continue
+        body = (
+            BASE_PY_STUB.replace("{dotted}", version.replace(" ", ".") + ".0")
+            .replace("{version}", version)
+            .replace("{template}", str(template))
+        )
+        _write_exec(_stubs_dir(sb) / name, body)
+
+
+def _log_text(sb: dict) -> str:
+    return sb["log"].read_text() if sb["log"].exists() else ""
+
+
+def _uvicorn_lines(sb: dict) -> list[str]:
+    return [ln for ln in _log_text(sb).splitlines() if "uvicorn" in ln]
+
+
+def _pip_lines(sb: dict) -> list[str]:
+    return [ln for ln in _log_text(sb).splitlines() if "pip install" in ln]
+
+
+def _reap(child: subprocess.Popen) -> None:
+    try:
+        os.kill(child.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    child.wait(timeout=10)
+
+
+def test_api_port_follows_env(sandbox):
+    rc, out = run_script(sandbox, "api", "--skip-setup", "--no-open", REMIXMATE_API_PORT="8765")
+    argv = uvicorn_argv(sandbox)
+    assert argv[argv.index("--port") + 1] == "8765", f"--port does not follow REMIXMATE_API_PORT: {argv}\n{out}"
+    sandbox["log"].unlink()
+    rc, out = run_script(sandbox, "api", "--skip-setup", "--no-open")
+    argv = uvicorn_argv(sandbox)
+    assert argv[argv.index("--port") + 1] == "8000", f"default API port is not 8000: {argv}\n{out}"
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"REMIXMATE_API_PORT": "abc"},
+        {"REMIXMATE_API_PORT": "0"},
+        {"REMIXMATE_UI_PORT": "70000"},
+        {"REMIXMATE_API_PORT": "8765", "REMIXMATE_UI_PORT": "8765"},
+    ],
+    ids=["api-abc", "api-zero", "ui-70000", "equal-ports"],
+)
+def test_invalid_port_env_is_rejected(sandbox, env):
+    rc, out = run_script(sandbox, "api", "--skip-setup", "--no-open", **env)
+    assert rc != 0, f"start.sh accepted {env}\n{out}"
+    assert not _uvicorn_lines(sandbox), f"uvicorn launched with {env}:\n{_log_text(sandbox)}"
+
+
+@pytest.mark.parametrize(
+    "argv,cwd_kind",
+    [
+        (FOREIGN_ARGV, "repo"),
+        (APP_ARGV, "other"),
+        (APP_ARGV, "sibling"),
+        (APP_ARGV, "empty"),
+    ],
+    ids=["foreign-command-repo-cwd", "app-command-other-cwd", "app-command-sibling-prefix-cwd", "app-command-empty-cwd"],
+)
+def test_foreign_listener_is_refused_and_survives(sandbox, argv, cwd_kind):
+    _install_lsof_stub(sandbox)
+    root_real = os.path.realpath(sandbox["root"])
+    cwd = {
+        "repo": root_real,
+        "other": os.path.realpath(sandbox["root"].parent),
+        "sibling": root_real + "-other",
+        "empty": "",
+    }[cwd_kind]
+    child = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        rc, out = run_script(
+            sandbox, "api", "--skip-setup", "--no-open",
+            STUB_LSOF_PID=str(child.pid), STUB_LSOF_PORT="8000", STUB_LSOF_CWD=cwd,
+        )
+        assert rc != 0, f"start.sh started over a foreign listener\n{out}"
+        assert str(child.pid) in out, f"output does not name pid {child.pid}\n{out}"
+        assert "REMIXMATE_API_PORT" in out, f"output does not name REMIXMATE_API_PORT\n{out}"
+        assert pid_alive(child.pid), f"foreign listener {child.pid} was signalled\n{out}"
+        assert not _uvicorn_lines(sandbox), f"uvicorn launched over a foreign listener:\n{_log_text(sandbox)}"
+    finally:
+        _reap(child)
+
+
+def test_own_listener_is_stopped(sandbox):
+    _install_lsof_stub(sandbox)
+    child = subprocess.Popen(APP_ARGV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        rc, out = run_script(
+            sandbox, "api", "--skip-setup", "--no-open",
+            STUB_LSOF_PID=str(child.pid), STUB_LSOF_PORT="8000",
+            STUB_LSOF_CWD=os.path.realpath(sandbox["root"]),
+        )
+        # No rc check: when the stub API exits at once, the EXIT trap's kill on
+        # dead pids fails under set -e and start.sh exits 1 (pre existing).
+        assert any(
+            f"-p {child.pid}" in ln and "cwd" in ln for ln in _log_text(sandbox).splitlines()
+        ), f"ownership (cwd) was never checked before the signal:\n{_log_text(sandbox)}"
+        assert not pid_alive(child.pid), f"own listener {child.pid} still alive\n{out}"
+        assert len(_uvicorn_lines(sandbox)) == 1, f"expected one uvicorn launch:\n{_log_text(sandbox)}"
+    finally:
+        _reap(child)
+
+
+def test_stop_leaves_foreign_listener(sandbox):
+    _install_lsof_stub(sandbox)
+    child = subprocess.Popen(FOREIGN_ARGV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        rc, out = run_script(
+            sandbox, "stop",
+            STUB_LSOF_PID=str(child.pid), STUB_LSOF_PORT="8000",
+            STUB_LSOF_CWD=os.path.realpath(sandbox["root"]),
+        )
+        assert rc == 0, f"stop exited {rc}\n{out}"
+        assert pid_alive(child.pid), f"stop signalled a foreign listener {child.pid}\n{out}"
+        assert str(child.pid) in out, f"stop does not name who holds the port\n{out}"
+    finally:
+        _reap(child)
+
+
+def test_existing_venv_not_312_fails(sandbox):
+    rc, out = run_script(sandbox, "api", "--skip-setup", "--no-open", STUB_PY_VERSION="3 13")
+    assert rc != 0, f"start.sh ran on a 3.13 .venv\n{out}"
+    assert "3.12" in out, f"message does not name Python 3.12\n{out}"
+    assert not _uvicorn_lines(sandbox), f"uvicorn launched on a 3.13 .venv:\n{_log_text(sandbox)}"
+
+
+def test_no_python_312_fails(sandbox):
+    _install_base_pythons(sandbox, {"python3.12": "3 13", "python3": "3 13", "python": "3 13"})
+    rc, out = run_script(sandbox, "api", "--skip-setup", "--no-open")
+    assert rc != 0, f"start.sh accepted a non 3.12 interpreter\n{out}"
+    assert "3.12" in out, f"message does not name Python 3.12\n{out}"
+    assert not (sandbox["root"] / ".venv").exists(), f".venv created without Python 3.12\n{out}"
+    assert not _uvicorn_lines(sandbox)
+
+
+def test_python3_reporting_312_is_accepted(sandbox):
+    # python3.12 is a shim that does not run; python3 reports 3.12.
+    _install_base_pythons(sandbox, {"python3.12": None, "python3": "3 12", "python": "3 13"})
+    rc, out = run_script(sandbox, "api", "--skip-setup", "--no-open")
+    assert "python3 -m venv" in _log_text(sandbox), f".venv not built with python3:\n{_log_text(sandbox)}\n{out}"
+    assert len(_uvicorn_lines(sandbox)) == 1, f"run did not reach the uvicorn launch:\n{_log_text(sandbox)}\n{out}"
+
+
+def test_setup_installs_requirements_dev(sandbox):
+    rc, out = run_script(sandbox, "setup")
+    assert rc == 0, f"setup exited {rc}\n{out}"
+    assert any("pip install -r requirements-dev.txt" in ln for ln in _pip_lines(sandbox)), (
+        f"setup does not install requirements-dev.txt:\n{_log_text(sandbox)}"
+    )
+
+
+def test_dev_extra_covers_requirements_dev():
+    import tomllib
+
+    def name(req: str) -> str:
+        m = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", req)
+        assert m, f"unparseable requirement: {req!r}"
+        return re.sub(r"[-_.]+", "-", m.group(1)).lower()
+
+    pinned = set()
+    for line in (ROOT / "requirements-dev.txt").read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line or line.startswith("-r"):
+            continue
+        pinned.add(name(line))
+    with (ROOT / "pyproject.toml").open("rb") as fh:
+        dev = {name(r) for r in tomllib.load(fh)["project"]["optional-dependencies"]["dev"]}
+    assert pinned, "no packages parsed from requirements-dev.txt"
+    missing = sorted(pinned - dev)
+    assert not missing, f"requirements-dev.txt pins packages the dev extra lacks: {missing}"
+
+
+def test_run_installs_once_then_skips(sandbox):
+    req = sandbox["root"] / "requirements.txt"
+    req.write_text("numpy\n")
+    rc, out = run_script(sandbox, "api", "--no-open")
+    assert len(_uvicorn_lines(sandbox)) == 1, out
+    assert _pip_lines(sandbox), f"first run did not install:\n{_log_text(sandbox)}"
+
+    (sandbox["root"] / "frontend" / "node_modules").mkdir()
+    sandbox["log"].unlink()
+    rc, out = run_script(sandbox, "api", "--no-open")
+    assert not _pip_lines(sandbox), f"second run installed again:\n{_log_text(sandbox)}"
+    assert "Dependencies up to date" in out, out
+    assert len(_uvicorn_lines(sandbox)) == 1
+
+    req.write_text("numpy\nscipy\n")
+    sandbox["log"].unlink()
+    rc, out = run_script(sandbox, "api", "--no-open")
+    assert len(_uvicorn_lines(sandbox)) == 1, out
+    assert _pip_lines(sandbox), f"run after a requirements change did not install:\n{_log_text(sandbox)}"
+
+
+def test_vite_config_reads_port_env():
+    text = (ROOT / "frontend" / "vite.config.ts").read_text()
+    assert "REMIXMATE_API_PORT" in text and "REMIXMATE_UI_PORT" in text, "vite.config.ts ignores the port env vars"
+    assert "localhost:8000" not in text, "vite.config.ts still hardcodes the API port"
+
+
+def test_port_env_vars_load_cleanly(monkeypatch):
+    from scripts.core.config import load_config
+
+    monkeypatch.setenv("REMIXMATE_API_PORT", "8765")
+    monkeypatch.setenv("REMIXMATE_UI_PORT", "5199")
+    cfg = load_config()
+    assert cfg.api.port == 8765
