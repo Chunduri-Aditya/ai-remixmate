@@ -125,6 +125,65 @@ def test_rescan_same_folder_creates_no_duplicates(lib, music, capsys):
     assert (wav.read_bytes(), wav.stat().st_mtime_ns) == before
 
 
+def _case_insensitive(d: Path) -> bool:
+    probe = d / "CaseProbe"
+    probe.write_bytes(b"")
+    try:
+        return (d / "caseprobe").exists()
+    finally:
+        probe.unlink()
+
+
+@needs_ffmpeg
+def test_rescan_with_other_letter_case_indexes_the_on_disk_name(lib, tmp_path, capsys):
+    if not _case_insensitive(lib.root):
+        pytest.skip("tmp filesystem is case sensitive: 'Song' and 'song' are two dirs here")
+    _write_audio(tmp_path / "m1" / "Song.wav")
+    _write_audio(tmp_path / "m2" / "song.wav")
+    assert scan.main([str(tmp_path / "m1")]) == 0
+    capsys.readouterr()
+
+    assert scan.main([str(tmp_path / "m2")]) == 0
+    out = capsys.readouterr()
+    assert "already in library" in out.out
+    assert "-> Song " in out.out
+    assert _song_dirs(lib.root) == ["Song"]
+    assert list(lib.mgr._load_index()) == ["Song"]
+    assert [s.name for s in lib.mgr.list_songs()] == ["Song"]
+
+
+def test_interrupt_during_ffmpeg_leaves_no_temp_file_or_new_dir(lib, music, monkeypatch):
+    src = _write_audio(music / "Cut Short.wav")
+
+    def interrupted(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"partial")  # ffmpeg had started writing
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(scan.subprocess, "run", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        scan.import_file(src, "Cut Short")
+
+    assert list(lib.root.rglob(".full.*")) == []
+    assert _song_dirs(lib.root) == []
+    assert lib.mgr.list_songs() == []
+
+
+def test_interrupt_keeps_a_song_dir_that_existed_before(lib, music, monkeypatch):
+    src = _write_audio(music / "Kept.wav")
+    (lib.root / "Kept").mkdir()
+
+    def interrupted(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"partial")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(scan.subprocess, "run", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        scan.import_file(src, "Kept")
+
+    assert list(lib.root.rglob(".full.*")) == []
+    assert _song_dirs(lib.root) == ["Kept"]
+
+
 # ---------------------------------------------------------------------------
 # Non ASCII names
 # ---------------------------------------------------------------------------

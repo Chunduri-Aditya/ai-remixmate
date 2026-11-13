@@ -3,7 +3,8 @@ scripts/api/cors.py — Resolve CORS allow-origins for prod vs local (Phase 7).
 
 Prod: ``REMIXMATE_CORS_ORIGINS`` (comma-separated) or ``REMIXMATE_FRONTEND_URL``.
 Dev: Vite localhost origins on the UI port only — no Streamlit ``:8501``, no
-GitHub Pages. ``start.sh`` passes the UI port as ``RMX_UI_PORT`` (default 5173).
+GitHub Pages. ``start.sh`` passes the UI port as ``RMX_UI_PORT``; without it
+``REMIXMATE_UI_PORT`` is read, then the default 5173.
 """
 
 from __future__ import annotations
@@ -22,9 +23,15 @@ def _is_legacy(origin: str) -> bool:
 
 
 def _ui_port() -> int:
-    """The Vite port from ``RMX_UI_PORT``; the default when unset or not a port."""
+    """The Vite port from ``RMX_UI_PORT``, else ``REMIXMATE_UI_PORT`` (an API
+    started without ``start.sh``, which unsets it); the default when both are
+    unset or the value is not a port."""
     default = 5173
-    raw = os.environ.get("RMX_UI_PORT", "").strip()
+    var = "RMX_UI_PORT"
+    raw = os.environ.get(var, "").strip()
+    if not raw:
+        var = "REMIXMATE_UI_PORT"
+        raw = os.environ.get(var, "").strip()
     if not raw:
         return default
     try:
@@ -33,7 +40,7 @@ def _ui_port() -> int:
         port = 0
     if 1 <= port <= 65535:
         return port
-    logger.warning("Ignored RMX_UI_PORT=%r (not a port from 1 to 65535); using %d", raw, default)
+    logger.warning("Ignored %s=%r (not a port from 1 to 65535); using %d", var, raw, default)
     return default
 
 
@@ -53,7 +60,7 @@ def resolve_cors_origins(config_origins: Optional[Sequence[str]] = None) -> List
     1. ``REMIXMATE_CORS_ORIGINS`` (comma-separated)
     2. ``REMIXMATE_FRONTEND_URL`` (single origin)
     3. non-wildcard ``config_origins`` with legacy entries stripped
-    4. Vite localhost origins on the ``RMX_UI_PORT`` port (default 5173)
+    4. Vite localhost origins on ``RMX_UI_PORT``, else ``REMIXMATE_UI_PORT`` (default 5173)
     """
     env = os.environ.get("REMIXMATE_CORS_ORIGINS", "").strip()
     if env:

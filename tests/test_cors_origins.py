@@ -21,6 +21,7 @@ def _no_cors_env(monkeypatch):
     monkeypatch.delenv("REMIXMATE_CORS_ORIGINS", raising=False)
     monkeypatch.delenv("REMIXMATE_FRONTEND_URL", raising=False)
     monkeypatch.delenv("RMX_UI_PORT", raising=False)
+    monkeypatch.delenv("REMIXMATE_UI_PORT", raising=False)
 
 
 def test_dev_defaults_are_vite_only():
@@ -40,6 +41,28 @@ def test_dev_defaults_follow_ui_port(monkeypatch):
 @pytest.mark.parametrize("value", ["abc", "0", "70000", "5173,http://evil.example", ""])
 def test_bad_ui_port_falls_back_to_5173(monkeypatch, value):
     monkeypatch.setenv("RMX_UI_PORT", value)
+    origins = resolve_cors_origins()
+    assert origins == _vite_origins(5173)
+    assert not any("evil" in o for o in origins)
+
+
+def test_remixmate_ui_port_used_when_rmx_ui_port_unset(monkeypatch):
+    """An API started without start.sh (uvicorn by hand) sees only REMIXMATE_UI_PORT."""
+    monkeypatch.setenv("REMIXMATE_UI_PORT", "5199")
+    origins = resolve_cors_origins(["*"])
+    assert origins == _vite_origins(5199)
+    assert not any("5173" in o for o in origins)
+
+
+def test_rmx_ui_port_wins_over_remixmate_ui_port(monkeypatch):
+    monkeypatch.setenv("RMX_UI_PORT", "5200")
+    monkeypatch.setenv("REMIXMATE_UI_PORT", "5199")
+    assert resolve_cors_origins() == _vite_origins(5200)
+
+
+@pytest.mark.parametrize("value", ["abc", "0", "70000", "5173,http://evil.example", ""])
+def test_bad_remixmate_ui_port_falls_back_to_5173(monkeypatch, value):
+    monkeypatch.setenv("REMIXMATE_UI_PORT", value)
     origins = resolve_cors_origins()
     assert origins == _vite_origins(5173)
     assert not any("evil" in o for o in origins)

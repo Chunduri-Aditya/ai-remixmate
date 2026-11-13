@@ -91,8 +91,9 @@ def import_file(src: Path, name: str) -> Path:
 
     ffmpeg writes a temp file in the song dir that replaces full.wav only on
     success, so a corrupt source never leaves a partial full.wav behind. On
-    failure the temp file and any dir this call created are removed and a
-    RuntimeError carries ffmpeg's last stderr line."""
+    failure, an interrupt included, the temp file and any dir this call
+    created are removed; ffmpeg's failure raises RuntimeError with its last
+    stderr line, and an interrupt is raised again as it came."""
     dest = paths.song_dir(name)
     if dest.resolve().parent != paths.LIBRARY_DIR.resolve():
         raise ValueError(f"song name {name!r} resolves outside the library")
@@ -100,18 +101,23 @@ def import_file(src: Path, name: str) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     wav = dest / "full.wav"
     tmp = dest / f".full.{os.getpid()}.tmp.wav"
-    proc = subprocess.run(
-        ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", str(src.resolve()),
-         "-vn", "-ac", "1", "-ar", "44100", str(tmp)],
-        capture_output=True, text=True, errors="replace",
-    )
-    if proc.returncode != 0 or not tmp.exists():
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", str(src.resolve()),
+             "-vn", "-ac", "1", "-ar", "44100", str(tmp)],
+            capture_output=True, text=True, errors="replace",
+        )
+        if proc.returncode != 0 or not tmp.exists():
+            lines = proc.stderr.strip().splitlines()
+            raise RuntimeError(lines[-1] if lines else f"ffmpeg exit code {proc.returncode}")
+        os.replace(tmp, wav)
+    except BaseException:
+        # Without this an interrupted import leaves a dir list_songs adopts
+        # as a song with no full.wav.
         tmp.unlink(missing_ok=True)
-        if created and not any(dest.iterdir()):
+        if created and dest.is_dir() and not any(dest.iterdir()):
             dest.rmdir()
-        lines = proc.stderr.strip().splitlines()
-        raise RuntimeError(lines[-1] if lines else f"ffmpeg exit code {proc.returncode}")
-    os.replace(tmp, wav)
+        raise
     return wav
 
 
@@ -135,6 +141,24 @@ def _has_analysis(d: Path) -> bool:
     from scripts.core.analysis_pipeline import has_analysis
 
     return has_analysis(d)
+
+
+def _on_disk_name(name: str) -> str:
+    """The real name of the existing library entry for name. On a case
+    insensitive volume song_dir("song") opens the dir "Song", and indexing
+    "song" would list one dir as two songs. Exact match first, then NFC and
+    case folded, as the in scan collision check compares."""
+    try:
+        entries = sorted(os.listdir(paths.LIBRARY_DIR))
+    except OSError:
+        return name
+    if name in entries:
+        return name
+    key = unicodedata.normalize("NFC", name).casefold()
+    for entry in entries:
+        if unicodedata.normalize("NFC", entry).casefold() == key:
+            return entry
+    return name
 
 
 def _register(name: str, imported: bool, made_stems: bool) -> None:
@@ -203,6 +227,9 @@ def main(argv: list[str] | None = None) -> int:
         claimed[key] = f
 
         d = paths.song_dir(name)
+        if d.exists():
+            name = _on_disk_name(name)
+            d = paths.song_dir(name)
         is_new = False
         if _present(d):
             print(f"already in library: {f} -> {name} "
