@@ -37,7 +37,7 @@ The parts worth pointing at:
 ## Local demo (no cloud)
 
 ```bash
-cd ~/Desktop/Projects/ai-remixmate
+cd ai-remixmate
 
 # backend and frontend gates
 .venv/bin/python -m pytest tests -q
@@ -76,4 +76,4 @@ Measured on 2026-09-30 on `hosted-app` at `bd1c446`, the cookie method guard (2 
 
 ## Layout
 
-`~/Desktop/Projects/ai-remixmate`, default branch `main`, active branch `hosted-app`, repository <https://github.com/Chunduri-Aditya/ai-remixmate>
+Default branch `main`, active branch `hosted-app`, repository <https://github.com/Chunduri-Aditya/ai-remixmate>

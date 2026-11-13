@@ -109,3 +109,6 @@ frontend/vite.config.ts.timestamp-*.mjs
 
 # Graphify local output, never pushed
 graphify-out
+
+# Git bundles never ship in the tree
+*.bundle

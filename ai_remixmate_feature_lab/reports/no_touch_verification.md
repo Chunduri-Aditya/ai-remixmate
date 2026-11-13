@@ -83,7 +83,7 @@ Python command:
 
 ```bash
 cd ai_remixmate_feature_lab/python
-/Users/chunduri/Desktop/ai-remixmate/.venv/bin/python -m pytest -p no:cacheprovider
+../../.venv/bin/python -m pytest -p no:cacheprovider
 ```
 
 Result: 5 test files passed, 8 tests passed.

@@ -6,9 +6,9 @@ Only the latest code is maintained. Reproduce the issue on the current commit be
 
 ## Reporting a vulnerability
 
-Email is the only channel: **chunduriaditya2@gmail.com**, with `SECURITY: ai-remixmate` in the subject line.
+Report through GitHub private vulnerability reporting: <https://github.com/Chunduri-Aditya/ai-remixmate/security/advisories/new>.
 
-The repository is private, so GitHub private vulnerability reporting is not available for it. Do not put vulnerability details in a public issue, a public fork, or any other public place.
+Do not put vulnerability details in a public issue, a public fork, or any other public place.
 
 ## What to include
 

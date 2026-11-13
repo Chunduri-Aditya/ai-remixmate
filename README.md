@@ -270,4 +270,4 @@ MIT, see [LICENSE](LICENSE).
 
 ## Author
 
-**Aditya Chunduri** · [github.com/Chunduri-Aditya](https://github.com/Chunduri-Aditya) · chunduri@usc.edu · chunduriaditya2@gmail.com
+**Aditya Chunduri** · [github.com/Chunduri-Aditya](https://github.com/Chunduri-Aditya)

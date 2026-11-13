@@ -17,7 +17,7 @@
 - `frontend/src/pages/MixDeck.tsx`
 - `frontend/src/pages/LibraryAtlas.tsx`
 - `frontend/src/pages/SetBuilder.tsx`
-- `/Users/chunduri/Downloads/djay-pro-mac-manual-loqual.pdf` via `pdfinfo` and `pypdf` text extraction for selected reference pages
+- the djay Pro for Mac manual PDF via `pdfinfo` and `pypdf` text extraction for selected reference pages
 
 ## Project Structure Observed
 

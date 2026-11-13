@@ -6,7 +6,7 @@ Prerequisite:
 
 Start the web application:
 
-  cd /Users/chunduri/Downloads/ai-remixmate
+  cd ai-remixmate
   python3 -m venv .venv
   source .venv/bin/activate
   python -m pip install --upgrade pip

@@ -62,6 +62,6 @@ Completed.
 
 - JSON schema files parse as valid JSON.
 - TypeScript tests: `../../frontend/node_modules/.bin/vitest run --config vitest.config.ts` from `ai_remixmate_feature_lab/typescript` passed 10 files / 21 tests.
-- Python tests: `/Users/chunduri/Desktop/ai-remixmate/.venv/bin/python -m pytest -p no:cacheprovider` from `ai_remixmate_feature_lab/python` passed 6 files / 12 tests.
+- Python tests: `../../.venv/bin/python -m pytest -p no:cacheprovider` from `ai_remixmate_feature_lab/python` passed 6 files / 12 tests.
 - Python tests, updated after the `spectral_entry_match` prototype: same command now passes 7 files / 35 tests (the 23 new tests are in `tests/test_spectral_entry_match.py`).
 - Extra TypeScript typecheck was attempted with the existing root frontend `tsc` binary, but local lab dependencies were intentionally not installed. It failed on missing local `react`/`vitest` type packages, so it is recorded as an environment limitation rather than a source test failure.
