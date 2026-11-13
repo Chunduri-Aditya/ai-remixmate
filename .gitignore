@@ -85,7 +85,13 @@ certs/*.crt
 *.mp3
 *.ogg
 *.aiff
+*.aif
 *.m4a
+*.aac
+*.opus
+*.wma
+*.webm
+*.mp4
 
 # ── Embeddings / index caches ────────────────────────────────
 embeddings.json
@@ -112,3 +118,12 @@ graphify-out
 
 # Git bundles never ship in the tree
 *.bundle
+
+# Tool caches and local agent state (never part of the public tree)
+.mypy_cache/
+.ruff_cache/
+*.db
+MEMORY.md
+.task/
+.fable/
+.archify/
