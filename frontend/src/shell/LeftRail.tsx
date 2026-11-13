@@ -27,6 +27,8 @@ import { useAuth } from './authContext'
 import type { NavDestination } from '@/types'
 import './LeftRail.css'
 
+const REPO_URL = 'https://github.com/Chunduri-Aditya/ai-remixmate'
+
 interface NavItem {
   id: NavDestination
   path: string
@@ -213,6 +215,17 @@ export function LeftRail() {
         <div className="left-rail__status-dot">
           <ConnectionDot />
         </div>
+        <p className="left-rail__credit" data-testid="left-rail-credit">
+          AI RemixMate by Aditya Chunduri ·{' '}
+          <a
+            className="left-rail__credit-link"
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub
+          </a>
+        </p>
       </div>
     </nav>
   )

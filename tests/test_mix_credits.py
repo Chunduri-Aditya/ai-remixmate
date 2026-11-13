@@ -67,10 +67,20 @@ def test_credits_written_one_licensed_one_missing(library, tmp_path):
     assert _BY in txt
     assert "Unknown Local Track" in txt        # missing-licence track is NOT dropped
     assert "unknown" in txt.lower()
+    assert txt.rstrip("\n").splitlines()[-1] == (
+        "Rendered with AI RemixMate by Aditya Chunduri, "
+        "https://github.com/Chunduri-Aditya/ai-remixmate (MIT)"
+    )
 
     # manifest.json — machine-readable credits[]
     manifest = json.loads((out_dir / "manifest.json").read_text())
     assert manifest["songs"] == songs
+    assert manifest["rendered_with"] == {
+        "name": "AI RemixMate",
+        "author": "Aditya Chunduri",
+        "repository": "https://github.com/Chunduri-Aditya/ai-remixmate",
+        "license": "MIT",
+    }
     assert [c["song"] for c in manifest["credits"]] == songs
 
     licensed, missing = manifest["credits"]

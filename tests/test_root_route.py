@@ -39,6 +39,24 @@ def test_root_returns_pointer_when_unset(client, monkeypatch, path):
     body = r.json()
     assert body["docs"] == "/docs"
     assert "health" in body
+    assert body["service"] == "ai-remixmate API"
+    assert body["author"] == "Aditya Chunduri"
+    assert body["repository"] == "https://github.com/Chunduri-Aditya/ai-remixmate"
+
+
+def test_openapi_info_names_author_and_license(client):
+    info = client.get("/openapi.json").json()["info"]
+    assert info["contact"] == {
+        "name": "Aditya Chunduri",
+        "url": "https://github.com/Chunduri-Aditya/ai-remixmate",
+    }
+    assert info["license"] == {
+        "name": "MIT",
+        "url": "https://github.com/Chunduri-Aditya/ai-remixmate/blob/main/LICENSE",
+    }
+    # download was removed from the app; the description must not advertise it
+    assert "Download" not in info["description"]
+    assert "harmonic compatibility" in info["description"]
 
 
 def test_no_static_ui_dir_created_on_import():

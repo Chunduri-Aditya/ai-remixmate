@@ -8,6 +8,7 @@ version = "0.2.0"
 description = "AI-powered music remix engine — download, separate, analyse and blend tracks"
 readme = "README.md"
 license = { file = "LICENSE" }
+authors = [{ name = "Aditya Chunduri" }]
 requires-python = ">=3.12"
 keywords = ["music", "remix", "audio", "ai", "demucs", "librosa"]
 
@@ -35,6 +36,10 @@ dependencies = [
     "tenacity>=9.0",
     "typing_extensions>=4.14",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Chunduri-Aditya/ai-remixmate"
+Repository = "https://github.com/Chunduri-Aditya/ai-remixmate"
 
 [project.optional-dependencies]
 dev = [

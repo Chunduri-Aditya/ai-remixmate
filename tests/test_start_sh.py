@@ -185,6 +185,15 @@ def test_no_yt_dlp_pip_install():
     assert not hits, f"pip install yt-dlp line still present: {hits}"
 
 
+def test_banner_credits_author_and_repo():
+    body = function_body("banner")
+    credit = [ln for ln in body.splitlines() if "github.com/Chunduri-Aditya/ai-remixmate" in ln]
+    assert credit, f"banner() does not name the repo path:\n{body}"
+    assert "Aditya Chunduri" in credit[0], f"credit line lacks the author: {credit[0].strip()}"
+    # The credit is wider than the box, so it sits under it, not inside a border.
+    assert "\u2551" not in credit[0], f"credit line breaks the box: {credit[0].strip()}"
+
+
 # ---------------------------------------------------------------------------
 # Static: host, dev flag, kill_port, trap, readiness
 # ---------------------------------------------------------------------------

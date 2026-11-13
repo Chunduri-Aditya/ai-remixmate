@@ -130,10 +130,12 @@ app = FastAPI(
     title="AI RemixMate API",
     description=(
         "Metadata-first DJ remix engine. "
-        "Download songs, check harmonic compatibility via the Camelot Wheel, "
-        "detect genre, and render phrase-aligned DJ transitions."
+        "Scan a local music folder, check harmonic compatibility via the Camelot Wheel, "
+        "and render phrase-aligned DJ transitions and sets."
     ),
     version="0.2.0",
+    contact={"name": "Aditya Chunduri", "url": "https://github.com/Chunduri-Aditya/ai-remixmate"},
+    license_info={"name": "MIT", "url": "https://github.com/Chunduri-Aditya/ai-remixmate/blob/main/LICENSE"},
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -225,6 +227,8 @@ def _root_payload():
         "docs": "/docs",
         "health": "/health/ready",
         "frontend": "set REMIXMATE_FRONTEND_URL to redirect here",
+        "author": "Aditya Chunduri",
+        "repository": "https://github.com/Chunduri-Aditya/ai-remixmate",
     })
 
 

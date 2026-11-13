@@ -199,6 +199,18 @@ def _mix_credits(song_names: list) -> list:
     return credits
 
 
+_RENDERED_WITH = {
+    "name": "AI RemixMate",
+    "author": "Aditya Chunduri",
+    "repository": "https://github.com/Chunduri-Aditya/ai-remixmate",
+    "license": "MIT",
+}
+_RENDERED_WITH_LINE = (
+    "Rendered with AI RemixMate by Aditya Chunduri, "
+    "https://github.com/Chunduri-Aditya/ai-remixmate (MIT)"
+)
+
+
 def _write_mix_credits(out_dir: Path, song_names: list, session_id: Optional[str] = None) -> list:
     """Write `CREDITS.txt` + `manifest.json` into `out_dir`; return the credits.
 
@@ -228,6 +240,7 @@ def _write_mix_credits(out_dir: Path, song_names: list, session_id: Optional[str
             lines.append(f"   License: {lic}" + (f"  ({c['license_url']})" if c["license_url"] else ""))
             lines.append(f"   Source:  {c['source'] or 'unknown'}" + (f"  {c['source_url']}" if c["source_url"] else ""))
             lines.append("")
+        lines.append(_RENDERED_WITH_LINE)
 
         (out_dir / "CREDITS.txt").write_text("\n".join(lines), encoding="utf-8")
         (out_dir / "manifest.json").write_text(
@@ -237,6 +250,7 @@ def _write_mix_credits(out_dir: Path, song_names: list, session_id: Optional[str
                     "generated_utc": generated,
                     "songs": list(song_names),
                     "credits": credits,
+                    "rendered_with": _RENDERED_WITH,
                 },
                 indent=2,
             ),

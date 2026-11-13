@@ -241,6 +241,7 @@ banner() {
     echo "║      AI RemixMate — Starting up      ║"
   fi
   echo "╚══════════════════════════════════════╝"
+  echo "  by Aditya Chunduri · github.com/Chunduri-Aditya/ai-remixmate"
   echo ""
 }
 

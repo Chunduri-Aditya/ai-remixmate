@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use AI RemixMate in your work, please cite it as below."
+title: "AI RemixMate"
+authors:
+  - family-names: "Chunduri"
+    given-names: "Aditya"
+repository-code: "https://github.com/Chunduri-Aditya/ai-remixmate"
+url: "https://github.com/Chunduri-Aditya/ai-remixmate"
+license: MIT
+type: software

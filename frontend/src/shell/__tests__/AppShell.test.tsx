@@ -98,3 +98,17 @@ describe('AppShell /ai-lab gate', () => {
     expect(screen.getByTestId('path').textContent).toBe('/ai-lab')
   })
 })
+
+describe('LeftRail footer credit', () => {
+  it('shows the author line with a link to the public repo', async () => {
+    installFetch(ALL_ON)
+    mountAt('/mission-control')
+
+    const credit = await screen.findByTestId('left-rail-credit')
+    expect(credit.textContent).toBe('AI RemixMate by Aditya Chunduri · GitHub')
+    const link = screen.getByRole('link', { name: 'GitHub' })
+    expect(link.getAttribute('href')).toBe('https://github.com/Chunduri-Aditya/ai-remixmate')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+})

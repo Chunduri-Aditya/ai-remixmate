@@ -145,6 +145,25 @@
   color: var(--color-text-secondary, #a1a1aa);
 }
 
+.left-rail__credit {
+  margin: 0;
+  padding: 0 var(--space-1);
+  color: var(--color-text-muted, #71717a);
+  font-size: 9px;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.left-rail__credit-link {
+  color: var(--color-text-secondary, #a1a1aa);
+  text-decoration: underline;
+}
+
+.left-rail__credit-link:hover {
+  color: var(--color-amber-500);
+}
+
 .left-rail__status-dot {
   display: flex;
   align-items: center;
