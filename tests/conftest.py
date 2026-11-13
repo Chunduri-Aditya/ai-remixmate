@@ -31,6 +31,7 @@ Supported marks
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -101,6 +102,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "integration: marks tests that start a full FastAPI TestClient",
     )
+    # The scan and end to end tests skip without ffmpeg; on CI (GitHub sets
+    # CI=true) that skip would read as green, so fail the session instead.
+    if os.environ.get("CI") == "true" and shutil.which("ffmpeg") is None:
+        pytest.exit("ffmpeg is required in CI; install it in the workflow", returncode=1)
 
 
 # ---------------------------------------------------------------------------
