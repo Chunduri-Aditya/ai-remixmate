@@ -221,10 +221,10 @@ Page list and one line purposes: `DEVELOPING.md` section "Frontend pages". Each 
 - Entry: `song_a` and `song_b` query params seed the decks once, then are cleared.
 - User can: pick two songs, check compatibility, see strict matches for Deck A and load one into Deck B, choose preset, effect and bridge beat, set crossfade bars, render a preview or a full remix, rate the result, play it in the global player.
 - Calls: `GET /library/{name}` per deck, `GET /library/similar/{name}`, `GET /compatibility/matches/{name}` (any error becomes null, which hides the panel), `POST /compatibility`, `POST /dj-remix/preview`, `POST /dj-remix`, `POST /dj-remix/feedback`.
-- Request bodies: `transition_bars` comes from the "Crossfade bars" slider only, clamped to 8 to 64. Four defaults disagree: the slider state starts at 32 (`transitionDuration` in `MixDeck`), `frontend/src/components/remixOptions.ts::REMIX_DEFAULTS` gives 16 (what Set Builder sends), `TransitionTimeline` falls back to 16, and the request models default to 16 while `dj.default_transition_bars` never reaches an API render (MX-67). No route exposes config values, so showing the server default in the UI needs a new response field or a hardcode kept in sync across all four. Pydantic ignores unknown fields, so extra fields in the frontend request types are dropped silently (UI-33, MX-33).
+- Request bodies: `transition_bars` is `remixOpts.transition_bars`, one value written by both the RemixControls picker (8, 16, 32) and the "Crossfade bars" slider (8 to 64, step 8, for the lengths the picker lacks), clamped to 8 to 64; `TransitionTimeline` draws it through its `transitionBars` prop instead of the plan's value. It starts at 16 from `frontend/src/components/remixOptions.ts::REMIX_DEFAULTS` (also what Set Builder sends); `TransitionTimeline` falls back to 16 without the prop, and the request models default to 16 while `dj.default_transition_bars` never reaches an API render (MX-67). No route exposes config values, so showing the server default in the UI needs a new response field or a hardcode kept in sync across all four. Pydantic ignores unknown fields, so extra fields in the frontend request types are dropped silently (UI-33, MX-33).
 - States: splash with no deck loaded; per field spinners; a `compatError` box for compatibility, preview and remix failures; job badge from the store.
 - "Check compatibility" on an unanalysed song makes the server analyse inside the request, and the client aborts at the request timeout.
-- Backlog: wheel mislabels keys (UI-01); preview drops effect and preset (UI-09); the RemixControls bars control is ignored here (UI-16); cue regions and timeline depend on a field the API never sends (UI-12); "Mix Ready" ignores `quality_passed` (UI-15); "Open in Vault" is a raw anchor (UI-27).
+- Backlog: wheel mislabels keys (UI-01); preview drops effect and preset (UI-09); cue regions and timeline depend on a field the API never sends (UI-12); "Mix Ready" ignores `quality_passed` (UI-15); "Open in Vault" is a raw anchor (UI-27).
 
 ### Set Builder (`/set-builder`)
 
@@ -296,7 +296,7 @@ Page list and one line purposes: `DEVELOPING.md` section "Frontend pages". Each 
 | `frontend/src/pages/MixVault.tsx::WaveformPlayer` | Mix Vault | same fetch behaviour |
 | `StemsPlayerRow` | Library Atlas | a plain audio element per stem |
 | `CamelotWheel` | Mix Deck, Widget | UI-01 |
-| `RemixControls` with `frontend/src/components/remixOptions.ts::REMIX_DEFAULTS` | Mix Deck, Set Builder | bars control is dead in Mix Deck (UI-16) |
+| `RemixControls` with `frontend/src/components/remixOptions.ts::REMIX_DEFAULTS` | Mix Deck, Set Builder | in Mix Deck the bars picker shares one value with the Crossfade bars slider |
 | `TransitionTimeline` | Mix Deck | UI-12 |
 
 ### Operator gating

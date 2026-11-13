@@ -7,7 +7,8 @@
    ============================================================ */
 
 export interface RemixOptions {
-  transition_bars: 8 | 16 | 32
+  // 8..64 bars (the API range); the picker offers 8/16/32, MixDeck's slider the rest.
+  transition_bars: number
   preset: string
   transition_effect: string
   bridge_beat_mode: 'none' | 'auto'

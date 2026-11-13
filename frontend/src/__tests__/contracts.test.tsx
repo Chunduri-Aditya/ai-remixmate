@@ -14,8 +14,9 @@
  *    no caller are gone while the live ones stay; GET /ai/models is the
  *    backend object and AILab renders its `.models[].name` in the Model
  *    select; a COMPLETED generative job is played from `result.stream_url`.
- *  - MixDeck: the "Crossfade bars" slider is the source of `transition_bars`
- *    on POST /dj-remix, clamped to 8..64; no `target_bpm` control or key.
+ *  - MixDeck: the "Crossfade bars" slider and the "Transition bars" picker
+ *    write one `transition_bars` value, sent on POST /dj-remix, clamped to
+ *    8..64; no `target_bpm` control or key.
  *
  * Seam: `fetch` is stubbed globally and routed by path, so the real
  * `@/lib/api` client runs end to end and the bytes on the wire are asserted.
@@ -96,6 +97,13 @@ const MODELS = {
   ],
 }
 
+// POST /compatibility: the backend plan proposes 16 bars, whatever the user picks.
+const COMPAT = {
+  song_a: 'Song A', song_b: 'Song B', compatible: true, overall: 0.9, bpm_score: 0.9, key_score: 0.9, energy_score: 0.9,
+  bpm_a: 124, bpm_b: 126,
+  transition_plan: { exit_bar_a: 64, entry_bar_b: 0, transition_bars: 16, stretch_ratio: 1.0 },
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return {
     ok: status >= 200 && status < 300,
@@ -141,6 +149,7 @@ function installFetch(opts: { songs?: SongInfo[]; libraryFails?: boolean } = {})
     if (/^\/ai\/models(\?|$)/.test(path)) return jsonResponse(MODELS)
     if (/^\/ai\/style-transfer/.test(path)) return jsonResponse({ job_id: 'gen-1', status: 'pending', job_type: 'analyze', progress: 0, created_at: 0 }, 202)
     if (/^\/dj-remix(\?|$)/.test(path)) return jsonResponse({ job_id: 'job-remix', status: 'pending', job_type: 'dj_remix', progress: 0, created_at: 0 }, 202)
+    if (/^\/compatibility(\?|$)/.test(path)) return jsonResponse(COMPAT)
     return jsonResponse([])
   })
 }
@@ -375,7 +384,7 @@ describe('MixDeck', () => {
     expect(body, 'dead target_bpm key still sent').not.toHaveProperty('target_bpm')
   })
 
-  it('slider at 48 sends transition_bars 48 (the slider, not the 8/16/32 segment, is the source)', async () => {
+  it('slider at 48 sends transition_bars 48 (a length the 8/16/32 picker lacks)', async () => {
     const body = await renderMixDeckAndSubmit('48')
     expect(body.transition_bars, JSON.stringify(body)).toBe(48)
   })
@@ -383,5 +392,80 @@ describe('MixDeck', () => {
   it('slider below 8 sends transition_bars 8', async () => {
     const body = await renderMixDeckAndSubmit('0')
     expect(body.transition_bars, JSON.stringify(body)).toBe(8)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// MixDeck: the "Transition bars" picker and the "Crossfade bars" slider are
+// one value; the timeline draws it and POST /dj-remix sends it.
+// ---------------------------------------------------------------------------
+
+function barsButton(n: number): HTMLButtonElement {
+  const label = screen.getByText('Transition bars')
+  const field = label.parentElement!
+  const btn = Array.from(field.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent === String(n))
+  if (!btn) throw new Error(`no ${n} button in the Transition bars picker`)
+  return btn
+}
+
+async function mountMixDeckWithPlan() {
+  installFetch()
+  const view = mount(<MixDeck />, `/mix-deck?song_a=${encodeURIComponent('Song A')}&song_b=${encodeURIComponent('Song B')}`)
+  await screen.findByText(/crossfade bars/i)
+  fireEvent.click(screen.getByRole('button', { name: /check compatibility/i }))
+  await waitFor(() => expect(view.container.querySelector('.tt-xfade-label')).not.toBeNull())
+  return view
+}
+
+async function submitRemix(): Promise<Record<string, unknown>> {
+  fireEvent.click(screen.getByRole('button', { name: /full remix/i }))
+  await waitFor(() => expect(requests.some((r) => r.method === 'POST' && /^\/dj-remix(\?|$)/.test(r.path))).toBe(true))
+  return requests.find((r) => r.method === 'POST' && /^\/dj-remix(\?|$)/.test(r.path))!.body as Record<string, unknown>
+}
+
+describe('MixDeck transition length has one source of truth', () => {
+  it('on load the picker, the slider and the timeline show the same value', async () => {
+    const { container } = await mountMixDeckWithPlan()
+    const slider = crossfadeSlider()
+    const active = container.querySelector('.rc-seg-btn--active')
+    expect(active?.textContent, 'picker selection').toBe(slider.value)
+    expect(container.querySelector('.tt-xfade-label')!.textContent).toBe(`${slider.value} bars`)
+  })
+
+  it('picking 16 moves the slider to 16, the timeline draws 16 and the request sends 16', async () => {
+    const { container } = await mountMixDeckWithPlan()
+    fireEvent.click(barsButton(16))
+    expect(crossfadeSlider().value).toBe('16')
+    expect(barsButton(16).className).toMatch(/rc-seg-btn--active/)
+    expect(container.querySelector('.tt-xfade-label')!.textContent).toBe('16 bars')
+    const body = await submitRemix()
+    expect(body.transition_bars, JSON.stringify(body)).toBe(16)
+  })
+
+  it('picking 8 overrides the plan: the timeline draws 8, not the plan 16', async () => {
+    const { container } = await mountMixDeckWithPlan()
+    fireEvent.click(barsButton(8))
+    expect(crossfadeSlider().value).toBe('8')
+    expect(container.querySelector('.tt-xfade-label')!.textContent).toBe('8 bars')
+    const body = await submitRemix()
+    expect(body.transition_bars, JSON.stringify(body)).toBe(8)
+  })
+
+  it('moving the slider to 8 selects 8 in the picker, the timeline draws 8 and the request sends 8', async () => {
+    const { container } = await mountMixDeckWithPlan()
+    fireEvent.change(crossfadeSlider(), { target: { value: '8' } })
+    expect(barsButton(8).className).toMatch(/rc-seg-btn--active/)
+    expect(container.querySelector('.tt-xfade-label')!.textContent).toBe('8 bars')
+    const body = await submitRemix()
+    expect(body.transition_bars, JSON.stringify(body)).toBe(8)
+  })
+
+  it('a slider value the picker lacks (48) clears the picker selection and is sent as is', async () => {
+    const { container } = await mountMixDeckWithPlan()
+    fireEvent.change(crossfadeSlider(), { target: { value: '48' } })
+    expect(container.querySelector('.rc-seg-btn--active'), 'no picker button should claim 48').toBeNull()
+    expect(container.querySelector('.tt-xfade-label')!.textContent).toBe('48 bars')
+    const body = await submitRemix()
+    expect(body.transition_bars, JSON.stringify(body)).toBe(48)
   })
 })

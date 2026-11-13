@@ -7,10 +7,14 @@
   flex-direction: column;
   align-items: center;
   width: var(--shell-rail-width);
-  height: 100dvh;
+  /* Fill the shell grid row, which already stops above the fixed player bar.
+     100dvh made the rail 68px taller than its row, so the footer credit sat
+     under the player bar. */
+  height: 100%;
+  min-height: 0;
   background: var(--color-bg-void);
   border-right: 1px solid var(--color-border-subtle);
-  padding: var(--space-3) 0;
+  padding: var(--space-2) 0;
   overflow: hidden;
   position: relative;
   z-index: var(--z-raised);
@@ -27,6 +31,7 @@
   border-radius: var(--radius-md);
   margin-bottom: var(--space-2);
   position: relative;
+  flex-shrink: 0;
 }
 
 .left-rail__logo-icon {
@@ -39,6 +44,7 @@
   height: 1px;
   background: var(--color-border-subtle);
   margin: var(--space-2) 0;
+  flex-shrink: 0;
 }
 
 /* Nav list */
@@ -48,6 +54,10 @@
   flex-direction: column;
   gap: var(--space-1);
   flex: 1;
+  /* On a short window the nav scrolls so the footer stays in view. */
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
   width: 100%;
   padding: 0 var(--space-2);
 }
@@ -112,23 +122,25 @@
   box-shadow: 0 0 8px var(--color-amber-glow-strong);
 }
 
-/* Footer: legal + sign out + connection status */
+/* Footer: legal + sign out + connection status + credit.
+   Kept compact so it fits above the player bar at 1280x800 with every nav item. */
 .left-rail__footer {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
-  padding-bottom: var(--space-2);
+  flex-shrink: 0;
+  gap: var(--space-1);
   width: 100%;
 }
 
+/* Legal links as a 2x2 grid instead of four stacked rows */
 .left-rail__legal {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  justify-items: center;
+  gap: 2px 0;
   width: 100%;
-  padding: 0 var(--space-1);
+  padding: 0;
 }
 
 .left-rail__legal-link {
@@ -139,6 +151,7 @@
   line-height: 1.2;
   cursor: pointer;
   padding: 1px 0;
+  white-space: nowrap;
 }
 
 .left-rail__legal-link:hover {
@@ -147,10 +160,10 @@
 
 .left-rail__credit {
   margin: 0;
-  padding: 0 var(--space-1);
+  padding: 0 2px;
   color: var(--color-text-muted, #71717a);
   font-size: 9px;
-  line-height: 1.2;
+  line-height: 1.1;
   text-align: center;
   overflow-wrap: anywhere;
 }
@@ -168,6 +181,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: var(--space-6);
+  height: var(--space-4);
 }

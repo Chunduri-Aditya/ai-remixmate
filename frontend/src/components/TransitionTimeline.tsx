@@ -9,16 +9,17 @@ interface TransitionTimelineProps {
   result: CompatibilityResult
   durationA?: number    // total duration of Song A in seconds
   durationB?: number    // total duration of Song B in seconds
+  transitionBars?: number // the user's chosen length; overrides the plan's
 }
 
-export function TransitionTimeline({ result, durationA, durationB }: TransitionTimelineProps) {
+export function TransitionTimeline({ result, durationA, durationB, transitionBars }: TransitionTimelineProps) {
   const plan = result.transition_plan
 
   const tempoRatio = result.bpm_a && result.bpm_b
     ? result.bpm_b / result.bpm_a
     : 1.0
 
-  const transBars = plan?.transition_bars ?? 16
+  const transBars = transitionBars ?? plan?.transition_bars ?? 16
 
   // If we have timing data, compute proportional widths; otherwise use 2:1:2.
   let flexA = 2

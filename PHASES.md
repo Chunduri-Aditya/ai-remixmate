@@ -69,7 +69,6 @@ High and medium UI ids from `docs/agents/BACKLOG.md`, in its rank order. Rules f
 - [ ] UI-13. Check: in `frontend/src/__tests__/features.test.tsx`, with the operator flag off, Library Atlas hides the operator actions, and a 403 surfaces instead of being swallowed.
 - [ ] UI-14. Check: mount Mission Control over a store that holds an SSE job with `meta` and assert the job and its `meta` survive.
 - [ ] UI-15. Check: render the result card with `quality_passed` false and assert a warning state.
-- [ ] UI-16. Check: change the RemixControls transition bars and assert the remix body sends that value, or assert the duplicate control is gone.
 - [ ] UI-17. Check: in track mode, Signal Search never requests more than the cap on `scripts/api/routers/analysis.py::similar_songs`.
 - [ ] UI-18. Check: one case per `apiHealth` and `sseConnected` pair asserts the ConnectionDot label and colour class.
 - [ ] UI-19 (unproven). Check: with `GET /features` reporting auth on and frontend auth unconfigured, the shell shows a configuration error.

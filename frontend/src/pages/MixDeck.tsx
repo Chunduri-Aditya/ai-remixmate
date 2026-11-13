@@ -361,7 +361,6 @@ export default function MixDeck() {
   const [compat, setCompat]         = useState<CompatibilityResult | null>(null)
   const [compatLoading, setCompatLoading] = useState(false)
   const [compatError, setCompatError]     = useState<string | null>(null)
-  const [transitionDuration, setTransitionDuration] = useState(32)
   const [remixOpts, setRemixOpts]       = useState<RemixOptions>(REMIX_DEFAULTS)
   const [previewJobId, setPreviewJobId] = useState<string | null>(null)
   const [remixJobId, setRemixJobId]     = useState<string | null>(null)
@@ -431,8 +430,15 @@ export default function MixDeck() {
     return names.filter((n) => n !== songA)
   }, [strictMatches, similarTracksA, songA])
   const canCompare = songA && songB && songA !== songB
-  // The "Crossfade bars" slider is the source of transition_bars; the API accepts 8..64.
-  const transitionBars = Math.min(64, Math.max(8, transitionDuration))
+  // One source of truth for the transition length: remixOpts.transition_bars.
+  // The "Transition bars" picker (8/16/32) and the "Crossfade bars" slider
+  // (8..64, step 8, for the lengths the picker lacks) both write it; the
+  // timeline draws it and both requests send it. The API accepts 8..64.
+  const transitionBars = remixOpts.transition_bars
+  function setTransitionBars(raw: number) {
+    const bars = Number.isFinite(raw) ? Math.min(64, Math.max(8, raw)) : REMIX_DEFAULTS.transition_bars
+    setRemixOpts((prev) => ({ ...prev, transition_bars: bars }))
+  }
   const shortcutDeck: 'A' | 'B' | null = songA ? 'A' : songB ? 'B' : null
 
   // Audio URLs for waveform display.
@@ -466,7 +472,7 @@ export default function MixDeck() {
       const res = await remixApi.preview({
         song_a: songA,
         song_b: songB,
-        transition_duration: transitionDuration,
+        transition_duration: transitionBars,
         transition_bars: transitionBars,
         preset: remixOpts.preset,
       })
@@ -486,7 +492,7 @@ export default function MixDeck() {
       const res = await remixApi.create({
         song_a: songA,
         song_b: songB,
-        transition_duration: transitionDuration,
+        transition_duration: transitionBars,
         transition_bars: transitionBars,
         preset: remixOpts.preset,
         transition_effect: remixOpts.transition_effect,
@@ -611,6 +617,7 @@ export default function MixDeck() {
             result={compat}
             durationA={songInfoA?.duration}
             durationB={songInfoB?.duration}
+            transitionBars={transitionBars}
           />
         )}
 
@@ -632,8 +639,8 @@ export default function MixDeck() {
                     min={8}
                     max={64}
                     step={8}
-                    value={transitionDuration}
-                    onChange={(e) => setTransitionDuration(parseInt(e.target.value))}
+                    value={transitionBars}
+                    onChange={(e) => setTransitionBars(parseInt(e.target.value, 10))}
                     className="md-slider"
                   />
                   <span className="md-slider-val font-mono">{transitionBars}</span>

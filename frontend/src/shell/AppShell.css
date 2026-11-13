@@ -5,7 +5,9 @@
 .app-shell {
   display: grid;
   grid-template-columns: var(--shell-rail-width) 1fr;
-  grid-template-rows: 1fr;
+  /* minmax(0, 1fr): a child with a taller min-content height (the inspector at
+     100dvh) must not grow the row past the shell and under the player bar. */
+  grid-template-rows: minmax(0, 1fr);
   /* Global PlayerBar is fixed at the bottom — keep the shell above it */
   height: calc(100dvh - var(--player-bar-height, 68px));
   width: 100dvw;

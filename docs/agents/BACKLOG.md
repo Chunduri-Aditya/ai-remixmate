@@ -33,7 +33,6 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 | UI-13 | medium | confirmed | Library Atlas shows operator only actions to everyone and swallows the 403 |
 | UI-14 | medium | confirmed | Mission Control replaces the whole job store on mount |
 | UI-15 | medium | confirmed | Mix Ready card ignores quality_passed |
-| UI-16 | medium | confirmed | Mix Deck ignores the RemixControls transition bars control |
 | UI-17 | medium | confirmed | Signal Search offers k=50 but the similar route caps k at 20 |
 | UI-18 | medium | confirmed | ConnectionDot labels are inverted relative to how apiHealth is set |
 | MX-05 | medium | confirmed | /recommend ranks unanalysed songs above analysed ones and treats real 0.5 scores as missing |
@@ -302,14 +301,6 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 - Symptom: RemixResultCard always shows 'Mix Ready' and never reads the quality_passed flag that the remix task puts in the job result.
 - Impact: A render that failed the quality report looks the same as one that passed. scripts/api/task_modules/remix.py sets quality_passed in the result.
 - Fix sketch: Read r.quality_passed and show a warning state when it is false.
-
-### UI-16 Mix Deck ignores the RemixControls transition bars control
-
-- Severity: medium. Evidence: confirmed by reading.
-- Where: `frontend/src/pages/MixDeck.tsx::MixDeck` (line 490): `transition_bars: transitionBars,`
-- Symptom: RemixControls renders a Transition bars segmented control that writes remixOpts.transition_bars, but launchRemix and launchPreview send transitionBars from the separate Crossfade bars slider.
-- Impact: A user who picks 8 or 32 in the segmented control gets the slider value instead. Set Builder does honour the segmented value.
-- Fix sketch: Drive one control: feed the slider from remixOpts.transition_bars, or hide the segmented control in Mix Deck.
 
 ### UI-17 Signal Search offers k=50 but the similar route caps k at 20
 
