@@ -321,6 +321,11 @@ def analyze_structure(
         bars.append((float(b_start), float(b_end)))
 
     total_bars = len(bars)
+    if total_bars == 0:
+        raise ValueError(
+            f"no beats or bars detected ({len(beat_times)} beats in "
+            f"{duration:.1f} s of audio); structure analysis needs at least 4 beats"
+        )
 
     # ── 3. Per-bar energy + spectral features ─────────────────────────
     bar_energies:  List[float] = []

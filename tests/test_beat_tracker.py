@@ -406,3 +406,87 @@ class TestSnapToBarGrid:
         assert isinstance(result, list)
         # May return raw or empty — just must not crash
         assert len(result) <= 1
+
+
+# ---------------------------------------------------------------------------
+# refine_bpm_from_beats: librosa's scalar tempo sits on the autocorrelation
+# lag grid 60 * sr / (hop * lag). At sr 44100 and hop 512 a true 124 BPM
+# (lag 41.68) reads 123.05 (lag 42). The beat times follow the real clicks,
+# so the mean of the inlier beat intervals recovers the true tempo. The
+# median does not: intervals at 124 BPM are 41 or 42 frames and the median
+# lands on 42 again.
+# ---------------------------------------------------------------------------
+
+_FRAME_S = 512 / 44100
+
+
+def _quantized_beats(bpm: float, n_beats: int = 120) -> np.ndarray:
+    """Beat times at `bpm`, rounded to the 512 / 44100 s frame grid."""
+    t = np.arange(n_beats) * 60.0 / bpm
+    return np.round(t / _FRAME_S) * _FRAME_S
+
+
+class TestRefineBpmFromBeats:
+    def test_quantized_grid_recovers_true_tempo(self):
+        from scripts.core.beat_tracker import refine_bpm_from_beats
+        beats = _quantized_beats(124.0)
+        # Control: the median interval stays on the lag grid (about 123.05).
+        median_bpm = 60.0 / float(np.median(np.diff(beats)))
+        assert abs(median_bpm - 124.0) > 0.5, f"control median read {median_bpm:.3f}"
+        refined = refine_bpm_from_beats(beats, 123.05, frame_s=_FRAME_S)
+        assert abs(refined - 124.0) <= 0.1, f"refined {refined:.3f}"
+
+    def test_too_few_beats_returns_fallback(self):
+        from scripts.core.beat_tracker import refine_bpm_from_beats
+        beats = _quantized_beats(124.0, n_beats=5)
+        assert refine_bpm_from_beats(beats, 123.05, frame_s=_FRAME_S) == 123.05
+
+    def test_empty_returns_fallback(self):
+        from scripts.core.beat_tracker import refine_bpm_from_beats
+        assert refine_bpm_from_beats(np.array([]), 120.0, frame_s=_FRAME_S) == 120.0
+
+    def test_one_missed_beat_is_ignored(self):
+        from scripts.core.beat_tracker import refine_bpm_from_beats
+        beats = np.delete(_quantized_beats(124.0), 60)  # one doubled interval
+        assert np.max(np.diff(beats)) > 1.9 * 60.0 / 124.0
+        refined = refine_bpm_from_beats(beats, 123.05, frame_s=_FRAME_S)
+        assert abs(refined - 124.0) <= 0.1, f"refined {refined:.3f}"
+
+    def test_disagreement_with_fallback_returns_fallback(self):
+        from scripts.core.beat_tracker import refine_bpm_from_beats
+        beats = _quantized_beats(100.0)
+        assert refine_bpm_from_beats(beats, 124.0, frame_s=_FRAME_S) == 124.0
+
+
+def _click_pad(bpm: float, seconds: float = 60.0, sr: int = 44100,
+               pad_hz: float = 220.0, seed: int = 0) -> np.ndarray:
+    """Click on each beat (noise burst, accent every 4th) over a breathing
+    two partial pad. Same shape as tests/test_render_e2e.py::_synth."""
+    rng = np.random.default_rng(seed)
+    n = int(seconds * sr)
+    t = np.arange(n) / sr
+    pad = 0.15 * (np.sin(2 * np.pi * pad_hz * t) + 0.5 * np.sin(2 * np.pi * pad_hz * 2 * t))
+    pad *= 0.5 + 0.5 * np.sin(2 * np.pi * t / 8.0) ** 2
+    y = pad.astype(np.float32)
+    beat = 60.0 / bpm
+    click_len = int(0.02 * sr)
+    env = np.exp(-np.arange(click_len) / (0.004 * sr)).astype(np.float32)
+    burst = rng.standard_normal(click_len).astype(np.float32) * env
+    k = 0
+    while k * beat < seconds:
+        s = int(k * beat * sr)
+        e = min(n, s + click_len)
+        y[s:e] += (0.9 if k % 4 == 0 else 0.6) * burst[: e - s]
+        k += 1
+    return np.clip(y, -1.0, 1.0)
+
+
+@pytest.mark.dj_analysis
+class TestLibrosaTempoAccuracy:
+    @pytest.mark.parametrize("bpm", [120.0, 124.0, 128.0, 97.0])
+    def test_click_track_bpm_within_half(self, bpm):
+        from scripts.core.beat_tracker import LibrosaBeatTracker
+        audio = _click_pad(bpm)
+        read = LibrosaBeatTracker().track(audio, 44100).bpm
+        print(f"bpm {bpm} read {read:.3f}")
+        assert abs(read - bpm) <= 0.5, f"true {bpm} read {read:.3f}"

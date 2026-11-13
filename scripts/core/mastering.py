@@ -5,8 +5,10 @@ Implements the full post-render mastering chain:
   1. ITU-R BS.1770-4 integrated loudness measurement (LUFS)
   2. LUFS normalisation (gain-only, no dynamic processing)
   3. True-peak brick-wall limiter with look-ahead
-  4. Clipping detector
-  5. master_mix() — full chain in one call
+  4. Make up gain: bounded re-limiting passes that restore the loudness
+     the limiter removed
+  5. Clipping detector
+  6. master_mix() — full chain in one call
 
 Standards:
   Streaming:   -14 LUFS  (Spotify, Apple Music, YouTube normalised)
@@ -414,6 +416,17 @@ class QualityReport:
 
 # ── Master chain ──────────────────────────────────────────────────────────────
 
+# Make up gain after limiting. The limiter removes loudness from the level
+# normalisation reached (gain reduction on transients, plus its whole file
+# true peak correction), and nothing else restores it: a click plus pad track
+# mastered to -14 LUFS landed near -17.7. master_mix re-limits the normalised
+# signal with extra gain until it is within the tolerance of that level.
+# Read at call time inside master_mix, so a test can patch them.
+_MAKEUP_MAX_PASSES = 3
+_MAKEUP_TOLERANCE_LU = 0.3
+_MAKEUP_MAX_DB = 6.0
+
+
 def master_mix(
     audio:        np.ndarray,
     sr:           int,
@@ -427,8 +440,16 @@ def master_mix(
       1. Measure input LUFS
       2. Apply linear gain to reach target_lufs
       3. Apply true-peak brick-wall limiter (ceiling_db)
-      4. Measure output LUFS + peak + clipping
-      5. Build QualityReport
+      4. Make up: while the limited output sits more than
+         _MAKEUP_TOLERANCE_LU under the level step 2 reached, re-limit the
+         normalised signal with extra gain before the limiter (at most
+         _MAKEUP_MAX_PASSES passes, at most _MAKEUP_MAX_DB in total; a pass
+         that gains under 0.05 LU stops the loop and is discarded). The
+         returned audio is always a direct limiter output, so the true-peak
+         ceiling still holds.
+      5. Measure output peak + clipping
+      6. Build QualityReport (lufs_integrated is measured on the returned
+         audio; lufs_gain_applied is normalise gain plus make up gain)
 
     Args:
         audio:       Mono float32 mix
@@ -442,14 +463,41 @@ def master_mix(
     report = QualityReport(lufs_target=target_lufs)
 
     # 1. Normalise
+    input_lufs = compute_lufs(audio, sr)
     normalised, gain_db = normalize_to_lufs(audio, sr, target_lufs=target_lufs)
-    report.lufs_gain_applied = gain_db
 
     # 2. Limit
     mastered = apply_limiter(normalised, ceiling_db=ceiling_db, sr=sr)
+    measured = compute_lufs(mastered, sr)
 
-    # 3. Post-analysis
-    report.lufs_integrated = compute_lufs(mastered, sr)
+    # 3. Make up gain toward the level normalisation reached (never the raw
+    # target). Make up is capped at 20 dB minus the normalise gain, so the
+    # total gain never exceeds the 20 dB clamp in normalize_to_lufs. Every
+    # test is written as "if not x > y: break" so a NaN stops the loop.
+    goal = input_lufs + gain_db
+    makeup_db = 0.0
+    makeup_cap_db = min(_MAKEUP_MAX_DB, 20.0 - gain_db)
+    if input_lufs > -70.0:
+        for _ in range(_MAKEUP_MAX_PASSES):
+            deficit = goal - measured
+            if not deficit > _MAKEUP_TOLERANCE_LU:
+                break
+            trial_db = min(makeup_db + deficit, makeup_cap_db)
+            if not trial_db > makeup_db:
+                break
+            cand = apply_limiter(
+                normalised * np.float32(10.0 ** (trial_db / 20.0)),
+                ceiling_db=ceiling_db, sr=sr,
+            )
+            cand_lufs = compute_lufs(cand, sr)
+            if not cand_lufs > measured + 0.05:
+                break
+            mastered, measured, makeup_db = cand, cand_lufs, trial_db
+
+    report.lufs_gain_applied = gain_db + makeup_db
+
+    # 4. Post-analysis
+    report.lufs_integrated = measured
     _, _, peak             = detect_clipping(mastered, threshold_db=ceiling_db)
     # Clipping is judged on the pre limiter mix: the limiter holds its output
     # AT the ceiling by design, so a ">= ceiling" count after limiting flagged
@@ -459,13 +507,13 @@ def master_mix(
     report.clip_count      = count
     report.peak_dbfs       = peak
 
-    # 4. Dynamic range (simplified: peak − RMS)
+    # 5. Dynamic range (simplified: peak − RMS)
     rms_db = float(20.0 * np.log10(
         float(np.sqrt(np.mean(mastered.astype(np.float64) ** 2))) + 1e-10
     ))
     report.dynamic_range_db = float(peak - rms_db)
 
-    # 5. Verdict
+    # 6. Verdict
     issues: List[str] = []
     if clipping:
         issues.append(
@@ -486,10 +534,10 @@ def master_mix(
     report.passed = len(issues) == 0
 
     log.info(
-        'Master  %.1f→%.1f LUFS  gain=+%.1f dB  peak=%.1f dBFS  '
-        'DR=%.1f dB  %s',
-        compute_lufs(audio, sr), report.lufs_integrated,
-        gain_db, peak, report.dynamic_range_db,
+        'Master  %.1f→%.1f LUFS  gain=+%.1f dB  makeup=+%.1f dB  '
+        'peak=%.1f dBFS  DR=%.1f dB  %s',
+        input_lufs, report.lufs_integrated,
+        gain_db, makeup_db, peak, report.dynamic_range_db,
         '✅ PASS' if report.passed else '⚠️  WARN',
     )
     return mastered.astype(np.float32), report

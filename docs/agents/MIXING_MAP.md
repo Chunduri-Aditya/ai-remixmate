@@ -28,7 +28,7 @@ One two song remix, `POST /dj-remix`, on the current engine. The chain and previ
 | 9 | `scripts/api/task_modules/remix.py::_should_use_stem_blend` | Stems on disk for both songs and `0.5 * harmonic_score + 0.5 * spectral match score` (or `harmonic_score` alone) at or above `dj.transition_confidence_threshold` picks the stem path; with the current scorer's 0.89 floor the gate cannot fail (MX-27), and a negative `harmonic_score` (the -1.0 not computed sentinel) skips it | nothing |
 | 10 | `scripts/core/dj_engine.py::DJEngine.render_stem_blend` or `scripts/core/dj_engine.py::DJEngine.render` | Produces the full mono mix | nothing |
 | 11 | `scripts/core/spectral_sync.py::apply_spectral_sync` | Multiband EQ over the transition window on the rendered array | nothing |
-| 12 | `scripts/core/mastering.py::master_mix` | LUFS normalise to `audio.target_lufs`, true peak limit, `QualityReport` | nothing |
+| 12 | `scripts/core/mastering.py::master_mix` | LUFS normalise to `audio.target_lufs`, true peak limit, up to 3 make up passes, `QualityReport` | nothing |
 | 13 | `scripts/api/task_modules/remix.py::_fade_out_tail` | 3 s fade, only when song B was cut at the load cap (MX-38) | nothing |
 | 14 | `task_dj_remix`, `scripts/api/task_modules/remix.py::_write_mix_credits` | Writes the mix as mono PCM_24 plus `CREDITS.txt` and `manifest.json` | `outputs/<uid>/dj_<sid>/` |
 | 15 | `scripts/core/spectral_matching.py::record_render` | Stores the render's spectral info for later feedback learning | `data/spectral_match_history.json` |
@@ -116,9 +116,9 @@ Inside `run_song_analysis`:
 
 - Tracker: `scripts/core/beat_tracker.py::get_configured_tracker` reads `analysis.beat_backend` (default `auto`; `config.yaml` has no `analysis:` block, so only `config.local.yaml` or `REMIXMATE_ANALYSIS_BEAT_BACKEND` changes it). `auto` picks `scripts/core/beat_tracker.py::BeatThisTracker` when `import beat_this` works, else `scripts/core/beat_tracker.py::LibrosaBeatTracker`. The repo `.venv` has no `beat_this` package, so local runs use librosa.
 - `scripts/core/beat_tracker.py::BeatResult`: `beat_times`, `beat_frames` (hop 512), `downbeat_times`, `bpm`, `sr`, `backend`.
-- BPM goes through `scripts/core/beat_tracker.py::resolve_bpm_octave` (onset autocorrelation, log normal prior centred at 122 BPM, range 70 to 180). Only the scalar changes; beat times keep the tracker's density (MX-20).
+- BPM goes through `scripts/core/beat_tracker.py::resolve_bpm_octave` (onset autocorrelation, log normal prior centred at 122 BPM, range 70 to 180). The librosa backend first refines the scalar with `scripts/core/beat_tracker.py::refine_bpm_from_beats` (mean of inlier beat intervals), because librosa's tempo sits on the lag grid. Only the scalar changes; beat times keep the tracker's density (MX-20).
 - Downbeats on the librosa path are `beat_frames[::4]` from the first detected beat. No downbeat phase detection happens by default.
-- Bar grid in `analyze_structure`: bar `i` spans `beat_times[4i]` to `beat_times[4i+4]`, one entry per complete group of four beats. It ignores `downbeat_times` (MX-54). Trailing beats past the last full bar carry a bar index with no `bars` entry.
+- Bar grid in `analyze_structure`: bar `i` spans `beat_times[4i]` to `beat_times[4i+4]`, one entry per complete group of four beats. It ignores `downbeat_times` (MX-54). Trailing beats past the last full bar carry a bar index with no `bars` entry. Fewer than four beats means no bars, and `analyze_structure` raises `ValueError` "no beats or bars detected".
 - `SongStructure.bar_start_time` falls back to `bar * 4 * 60 / bpm` outside the grid; `SongStructure.phrase_boundary` rounds up to a multiple of 8 counted from the first detected beat, not from a musical phrase start.
 - Genre, danceability and the phrase detector fallback each run their own `librosa.beat.beat_track`; the genre BPM feature is not octave corrected.
 
@@ -307,7 +307,8 @@ Background: `docs/DJ_THEORY.md` "6. EQ and Frequency Management" (Gain Staging).
 Current `master_mix` steps:
 1. `scripts/core/mastering.py::normalize_to_lufs`: one gain to the target, clamped to plus or minus 20 dB, skipped at or below -70 LUFS.
 2. `scripts/core/mastering.py::apply_limiter`: 4x oversampled look ahead peak envelope, 2 ms attack and 50 ms release through `scripts/core/mastering.py::_smooth_gain_envelope` (numba with a Python fallback), clip at the ceiling, decimate, then one corrective gain if the true peak is still over. Ceiling -1 dBFS.
-3. Report with `scripts/core/mastering.py::compute_lufs` (own BS.1770 gating, not pyloudnorm). `scripts/core/mastering.py::QualityReport` fields: `lufs_integrated`, `lufs_target`, `lufs_gain_applied`, `peak_dbfs`, `has_clipping`, `clip_count`, `dynamic_range_db`, `passed`, `notes`. Clipping is judged on the input to `master_mix` (MX-44). `passed` is false on input clipping, output LUFS more than 3 LU off target, or a peak over the ceiling. The truncation fade runs after the report (MX-38). The UI ignores `quality_passed` (UI-15).
+3. Make up: `scripts/core/mastering.py::master_mix` measures loudness after limiting and runs at most 3 make up passes (gain applied before the limiter, 0.3 LU tolerance, 6 dB cap) toward the level step 1 reached. `lufs_gain_applied` holds the normalise gain plus the make up gain. This applies to every caller of `scripts/core/mastering.py::master_mix`, the -8.0 chain included, and not to the classic chain.
+4. Report with `scripts/core/mastering.py::compute_lufs` (own BS.1770 gating, not pyloudnorm). `scripts/core/mastering.py::QualityReport` fields: `lufs_integrated`, `lufs_target`, `lufs_gain_applied`, `peak_dbfs`, `has_clipping`, `clip_count`, `dynamic_range_db`, `passed`, `notes`. Clipping is judged on the input to `master_mix` (MX-44). `passed` is false on input clipping, output LUFS more than 3 LU off target, or a peak over the ceiling. The truncation fade runs after the report (MX-38). The UI ignores `quality_passed` (UI-15).
 
 Classic `master_mix`: same normalise step, then a sample peak limiter with one time constant in a per sample Python loop (slow on long mixes) and a hard clip; clipping verdict: MX-21.
 

@@ -609,7 +609,7 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 ### MX-12 Unknown key_profile is accepted and silently replaced by a different key detector
 
 - Severity: medium. Evidence: confirmed by reading.
-- Where: `scripts/core/dj_analysis.py::analyze_structure` (line 410): `log.warning("Key detection (profile=%s) failed: %s", key_profile, exc)`
+- Where: `scripts/core/dj_analysis.py::analyze_structure` (line 415): `log.warning("Key detection (profile=%s) failed: %s", key_profile, exc)`
 - Symptom: POST /analyze?key_profile=bogus returns 202 and the job succeeds with the KS only music_intelligence.detect_key result; GET /analysis/v1/{name}/structure does the same
 - Impact: key_detection.detect_key raises ValueError for an invalid profile, the broad except at line 409 swallows it, _key_tuple stays None and compute_track_vector re detects with a different algorithm; the routers type key_profile as a free str.
 - Fix sketch: Type key_profile as Literal['ks','edma','edmm','auto'] on both routes (422) and let ValueError propagate from analyze_structure
@@ -660,7 +660,7 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 ### MX-67 `dj.default_transition_bars` is dead for API renders; the real default is the request model literal 16
 
 - Severity: medium. Evidence: confirmed by reading.
-- Where: `scripts/core/dj_analysis.py::plan_transition` (line 824): `if transition_bars is None:`
+- Where: `scripts/core/dj_analysis.py::plan_transition` (line 829): `if transition_bars is None:`
 - Where: `scripts/api/schemas.py::DJRemixRequest` (line 261): `transition_bars: int = Field(16, ge=8, le=64, description="8 | 16 | 32")`
 - Symptom: plan_transition reads the config default only when transition_bars is None, and every route passes req.transition_bars, whose default is the literal 16 in DJRemixRequest, DJChainRequest and DJPreviewRequest. Inside the unreachable branch the 8 bar rule for a BPM ratio off by more than 0.08 outranks the config value.
 - Impact: Changing `dj.default_transition_bars` in config.yaml changes nothing on any API render; an agent or operator tuning it sees no effect. Mix Deck starts its slider at its own value, so three defaults exist.
@@ -710,7 +710,7 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 ### MX-20 Octave corrected BPM disagrees with the beat grid
 
 - Severity: medium. Evidence: unproven.
-- Where: `scripts/core/beat_tracker.py::LibrosaBeatTracker.track` (line 241): `bpm = resolve_bpm_octave(bpm, audio, sr, hop_length=hop_length)`
+- Where: `scripts/core/beat_tracker.py::LibrosaBeatTracker.track` (line 289): `bpm = resolve_bpm_octave(refined_bpm, audio, sr, hop_length=hop_length)`
 - Symptom: When resolve_bpm_octave doubles or halves the tempo, bars stay four tracked beats long while transition_seconds uses the corrected BPM
 - Impact: resolve_bpm_octave only changes the scalar (its docstring says so); analyze_structure builds bars from beat_times at the tracker's density; plan_transition mixes bar_start_time (grid) with bars * 4 * 60 / bpm_a. No test checks grid against corrected BPM.
 - Fix sketch: When the correction changes the octave, resample the beat grid (interpolate or decimate beats) or skip the correction for the grid and store both values
@@ -726,7 +726,7 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 ### MX-22 Section key confidence gate at 0.35 can never reject a successful detection
 
 - Severity: medium. Evidence: unproven.
-- Where: `scripts/core/dj_analysis.py::plan_transition` (line 894): `_MIN_SECTION_KEY_CONF = 0.35`
+- Where: `scripts/core/dj_analysis.py::plan_transition` (line 899): `_MIN_SECTION_KEY_CONF = 0.35`
 - Symptom: plan_transition always prefers the local phrase key over the whole track key when per phrase data exists
 - Impact: key_detection.detect_key maps confidence as (best_r + 1) / 2; rotations of a profile sum to a constant so the best of 24 correlations is at least 0, giving confidence >= 0.5 on every success. Only the 0.0 failure fallback is filtered. DJ_THEORY 'Key Detection Pipeline' says confidence is the normalised correlation.
 - Fix sketch: Define confidence from the gap between best and second best correlation (or best_r itself) and recalibrate the gate against labelled tracks
@@ -768,7 +768,7 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 - Severity: medium. Evidence: unproven.
 - Where: `scripts/core/key_detection.py::psychoacoustic_consonance` (line 128): `max_roughness = n_partials * n_partials  # conservative upper bound`
 - Symptom: plan_transition never shortens a clashing transition, render never picks the filter sweep exit, and the stem blend confidence gate passes whenever spectral_score is above about -0.29
-- Impact: A standalone replica of lines 81 to 130 (no project import) gives min 0.892 (C vs C#) over all 144 tonic pairs at 72e2368; the function also ignores mode and places both tonics in octave 4. dj_analysis.py:906 `harmonic_score < 0.35`, dj_engine.py:1016 and :1248, and remix.py::_should_use_stem_blend threshold 0.30 are unreachable or always true. tests/test_behavioral.py only exercises shortening by patching the scorer to 0.10.
+- Impact: A standalone replica of lines 81 to 130 (no project import) gives min 0.892 (C vs C#) over all 144 tonic pairs at 72e2368; the function also ignores mode and places both tonics in octave 4. dj_analysis.py:911 `harmonic_score < 0.35`, dj_engine.py:1016 and :1248, and remix.py::_should_use_stem_blend threshold 0.30 are unreachable or always true. tests/test_behavioral.py only exercises shortening by patching the scorer to 0.10.
 - Fix sketch: Drive plan_transition.harmonic_score from a Camelot or TIV scorer with a real low end (or rescale consonance to pitch class intervals with a normalizer that reaches 0), then add an unpatched clash test (C major vs F# major must shorten)
 
 ### MX-28 Key detection failure is cached as a real C major 8B
@@ -824,7 +824,7 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 ### MX-34 Dead mixing code: TIV branch, unused helpers, constants and branches
 
 - Severity: low. Evidence: confirmed by reading.
-- Where: `scripts/core/dj_analysis.py::plan_transition` (line 953): `chroma_a = getattr(song_a, "mean_chroma", None)`
+- Where: `scripts/core/dj_analysis.py::plan_transition` (line 958): `chroma_a = getattr(song_a, "mean_chroma", None)`
 - Where: `scripts/api/jobs.py::retry_job` (line 786): `def retry_job(job_id: str, fn: Callable, **kwargs) -> Optional[str]:`
 - Where: `scripts/core/dj_engine.py::_HP_START_HZ` (line 88): `_HP_START_HZ: float     = getattr(getattr(_cfg, "dj", None), "hp_filter_start_hz", 400.0)`
 - Where: `scripts/core/dj_engine.py::DJEngine.render_from_stems` (line 1360): `def render_from_stems(`
@@ -877,7 +877,7 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 ### MX-41 Phrase snap preference for 16 and 32 bars is subsumed by 8
 
 - Severity: low. Evidence: confirmed by reading.
-- Where: `scripts/core/dj_analysis.py::_snap_to_bar_grid` (line 681): `on_preferred = any(bar_index % n == 0 for n in preferred_lengths_bars)`
+- Where: `scripts/core/dj_analysis.py::_snap_to_bar_grid` (line 686): `on_preferred = any(bar_index % n == 0 for n in preferred_lengths_bars)`
 - Symptom: _snap_to_bar_grid docstring promises a preference for 16 and 32 bar multiples; any multiple of 8 scores the same
 - Impact: Every multiple of 16 or 32 is a multiple of 8, so the extra entries change nothing.
 - Fix sketch: Score by the largest matching length, or document 8 bar snapping only
@@ -901,7 +901,7 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 ### MX-44 Current master_mix clipping check is dead for chain renders
 
 - Severity: low. Evidence: confirmed by reading.
-- Where: `scripts/core/mastering.py::master_mix` (line 457): `clipping, count, _     = detect_clipping(audio)`
+- Where: `scripts/core/mastering.py::master_mix` (line 505): `clipping, count, _     = detect_clipping(audio)`
 - Symptom: Clipping is judged on the input to master_mix; render_chain peak normalizes its output to 0.891 before mastering, below the -0.3 dBFS threshold, so has_clipping can never be true for chains.
 - Impact: QualityReport.has_clipping carries no information for chain mixes (and for render() output unless spectral sync boosted peaks).
 - Fix sketch: Decide what the flag should mean (source clipping before engine normalization, or output overshoot) and measure at that point.
@@ -982,7 +982,7 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 ### MX-55 Short sections are dropped, leaving gaps in bar coverage
 
 - Severity: low. Evidence: unproven.
-- Where: `scripts/core/dj_analysis.py::_label_sections` (line 578): `if length >= min_section_bars:`
+- Where: `scripts/core/dj_analysis.py::_label_sections` (line 583): `if length >= min_section_bars:`
 - Symptom: Runs under 4 bars vanish from struct.sections, so a time can fall in no section
 - Impact: _local_key in plan_transition falls back to the whole track key inside gaps; analysis.json cue list skips them.
 - Fix sketch: Merge short runs into the previous section instead of dropping them
@@ -1283,7 +1283,7 @@ _Ranked problems found while mapping the repo at `72e2368`, for the fix passes t
 - Where: `scripts/api/routers/library.py::calibrate_stem_lufs` (line 520): `these corpus-derived targets instead of the flat -20 LUFS fallback.`
 - Where: `scripts/api/routers/remix.py::dj_remix_preview` (line 159): `- tempo_ratio      — bpm_b / bpm_a (1.0 = perfect match)`
 - Where: `scripts/core/config.py::DJConfig` (line 120): `# both songs' stems are on disk. Reuses the same 0.35 "harmonic clash"`
-- Where: `scripts/core/dj_analysis.py::plan_transition` (line 815): `section lengths.  Always rounded to the nearest phrase_size.`
+- Where: `scripts/core/dj_analysis.py::plan_transition` (line 820): `section lengths.  Always rounded to the nearest phrase_size.`
 - Where: `scripts/core/instrument_lab.py` (line 9): `3. Applies per-stem gain normalisation + mastering`
 - Where: `scripts/core/setlist_planner.py::SetlistPlanner` (line 427): `For larger libraries, a beam search fallback is available.`
 - Where: `scripts/core/spectral_matching.py::trajectory_similarity` (line 148): `Frames are compared pairwise (both windows span the same musical time —`

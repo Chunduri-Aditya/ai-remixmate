@@ -428,3 +428,162 @@ class TestLimiterTruePeak:
         audio = (rng.standard_normal(SR * 2) * 0.9).astype(np.float32)
         out = apply_limiter(audio, sr=SR)
         assert np.all(np.isfinite(out))
+
+
+# ---------------------------------------------------------------------------
+# Make up gain after the limiter (fix4b defect L).
+#
+# master_mix normalised to target, then limited, and nothing restored the
+# loudness the limiter removed. A click plus pad track (high crest) mastered
+# to -14 LUFS landed near -17.7 LUFS: about 1.9 dB of the loss came from the
+# limiter's whole file true peak correction, the rest from gain reduction on
+# the clicks. These tests pin the fix: the output lands within 1 LU of the
+# target, the true peak stays at the ceiling, and the report describes the
+# audio that is returned.
+# ---------------------------------------------------------------------------
+
+def _click_pad(bpm=124.0, seconds=60.0, pad_hz=220.0, seed=0, sr=SR):
+    """Metronome click (noise burst, accent every 4th beat) over a slowly
+    breathing two partial pad. Copied from tests/test_render_e2e.py::_synth."""
+    rng = np.random.default_rng(seed)
+    n = int(seconds * sr)
+    t = np.arange(n) / sr
+    pad = 0.15 * (np.sin(2 * np.pi * pad_hz * t) + 0.5 * np.sin(2 * np.pi * pad_hz * 2 * t))
+    pad *= 0.5 + 0.5 * np.sin(2 * np.pi * t / 8.0) ** 2
+    y = pad.astype(np.float32)
+    beat = 60.0 / bpm
+    click_len = int(0.02 * sr)
+    env = np.exp(-np.arange(click_len) / (0.004 * sr)).astype(np.float32)
+    burst = rng.standard_normal(click_len).astype(np.float32) * env
+    k = 0
+    while k * beat < seconds:
+        s = int(k * beat * sr)
+        e = min(n, s + click_len)
+        y[s:e] += (0.9 if k % 4 == 0 else 0.6) * burst[: e - s]
+        k += 1
+    return np.clip(y, -1.0, 1.0)
+
+
+def _dense_mix(bpm=124.0, seconds=30.0, seed=1, sr=SR):
+    """Music like bed: kick on every beat, sustained bass and chord tones,
+    noise hats on the off beats. Crest factor about 12 dB."""
+    rng = np.random.default_rng(seed)
+    n = int(seconds * sr)
+    t = np.arange(n) / sr
+    y = 0.3 * np.sin(2 * np.pi * 55.0 * t)
+    for f in (220.0, 277.18, 329.63):
+        y += 0.08 * np.sin(2 * np.pi * f * t)
+    beat = 60.0 / bpm
+    kick_len = int(0.15 * sr)
+    kt = np.arange(kick_len) / sr
+    kick = np.sin(2 * np.pi * (50.0 + 80.0 * np.exp(-kt / 0.03)) * kt) * np.exp(-kt / 0.08)
+    hat_len = int(0.03 * sr)
+    hat = rng.standard_normal(hat_len) * np.exp(-np.arange(hat_len) / (0.005 * sr))
+    k = 0
+    while k * beat < seconds:
+        s = int(k * beat * sr)
+        e = min(n, s + kick_len)
+        y[s:e] += 0.6 * kick[: e - s]
+        hs = int((k + 0.5) * beat * sr)
+        if hs < n:
+            he = min(n, hs + hat_len)
+            y[hs:he] += 0.15 * hat[: he - hs]
+        k += 1
+    y = y / np.max(np.abs(y)) * 0.9
+    return y.astype(np.float32)
+
+
+def _crest_db(audio: np.ndarray) -> float:
+    a = audio.astype(np.float64)
+    return float(20 * np.log10(np.max(np.abs(a)) / np.sqrt(np.mean(a ** 2))))
+
+
+def _pyln_lufs(audio: np.ndarray, sr: int = SR) -> float:
+    """Reference meter, independent of mastering.compute_lufs."""
+    import pyloudnorm as pyln
+    return float(pyln.Meter(sr).integrated_loudness(audio.astype(np.float64)))
+
+
+class TestMasterMixMakeup:
+    TARGET = -14.0
+    CEILING = -1.0
+
+    @pytest.fixture(scope="class")
+    def click_master(self):
+        from scripts.core.mastering import master_mix
+        return master_mix(_click_pad(), SR, target_lufs=self.TARGET, ceiling_db=self.CEILING)
+
+    @pytest.fixture(scope="class")
+    def dense_master(self):
+        from scripts.core.mastering import master_mix
+        audio = _dense_mix()
+        crest = _crest_db(audio)
+        print(f"dense mix crest factor {crest:.2f} dB")
+        assert 10.0 <= crest <= 14.0, f"dense fixture crest {crest:.2f} dB outside 10 to 14"
+        return master_mix(audio, SR, target_lufs=self.TARGET, ceiling_db=self.CEILING)
+
+    def test_click_pad_within_1lu_of_target(self, click_master):
+        out, _ = click_master
+        lufs = _pyln_lufs(out)
+        assert abs(lufs - self.TARGET) <= 1.0, (
+            f"click pad mastered to {lufs:.3f} LUFS, target {self.TARGET}"
+        )
+
+    def test_click_pad_true_peak_at_or_under_ceiling(self, click_master):
+        out, _ = click_master
+        tp = _true_peak_dbfs(out)
+        assert tp <= self.CEILING + 0.1, f"true peak {tp:.3f} dBFS over ceiling {self.CEILING}"
+
+    def test_dense_mix_within_1lu_and_under_ceiling(self, dense_master):
+        out, _ = dense_master
+        lufs = _pyln_lufs(out)
+        tp = _true_peak_dbfs(out)
+        assert abs(lufs - self.TARGET) <= 1.0, (
+            f"dense mix mastered to {lufs:.3f} LUFS, target {self.TARGET}"
+        )
+        assert tp <= self.CEILING + 0.1, f"true peak {tp:.3f} dBFS over ceiling {self.CEILING}"
+
+    def test_report_lufs_matches_returned_audio(self, click_master):
+        from scripts.core.mastering import compute_lufs
+        out, report = click_master
+        assert abs(report.lufs_integrated - compute_lufs(out, SR)) <= 0.01
+
+    def test_makeup_respects_20db_gain_clamp(self):
+        from scripts.core.mastering import compute_lufs, master_mix
+        audio = _sine(freq=1000.0, duration=5.0, amplitude=0.003)
+        in_lufs = compute_lufs(audio, SR)
+        out, report = master_mix(audio, SR, target_lufs=self.TARGET, ceiling_db=self.CEILING)
+        assert report.lufs_gain_applied <= 20.0 + 1e-6
+        assert abs(compute_lufs(out, SR) - (in_lufs + 20.0)) <= 0.5
+
+    @pytest.mark.parametrize("kind", ["single_impulse", "sparse_impulse_train"])
+    def test_makeup_respects_20db_clamp_when_limiter_engages(self, kind):
+        # A full scale impulse is very quiet in LUFS, so normalisation hits
+        # its 20 dB clamp and the limiter then pulls the peaks back down.
+        # Make up must not push the total gain past that clamp (read 26.0).
+        from scripts.core.mastering import master_mix
+        audio = np.zeros(int(SR * 5.0), dtype=np.float32)
+        if kind == "single_impulse":
+            audio[SR] = 1.0
+        else:
+            audio[:: SR // 2] = 1.0
+        out, report = master_mix(audio, SR, target_lufs=self.TARGET, ceiling_db=self.CEILING)
+        assert report.lufs_gain_applied <= 20.0 + 1e-6, (
+            f"{kind}: lufs_gain_applied {report.lufs_gain_applied:.3f} dB over the 20 dB clamp"
+        )
+        tp = _true_peak_dbfs(out)
+        assert tp <= self.CEILING + 0.1, f"{kind}: true peak {tp:.3f} dBFS over ceiling {self.CEILING}"
+
+    def test_silence_gets_no_makeup(self):
+        from scripts.core.mastering import master_mix
+        out, report = master_mix(_silence(), SR, target_lufs=self.TARGET, ceiling_db=self.CEILING)
+        assert np.all(np.isfinite(out))
+        assert np.all(out == 0.0)
+        assert report.lufs_gain_applied == 0.0
+
+    def test_unlimited_signal_gets_no_makeup(self):
+        from scripts.core.mastering import compute_lufs, master_mix
+        audio = _sine(freq=1000.0, duration=5.0, amplitude=0.5)
+        in_lufs = compute_lufs(audio, SR)
+        _, report = master_mix(audio, SR, target_lufs=self.TARGET, ceiling_db=self.CEILING)
+        assert abs(report.lufs_gain_applied - (self.TARGET - in_lufs)) <= 0.05

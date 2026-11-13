@@ -215,6 +215,49 @@ def resolve_bpm_octave(
         return float(folded)
 
 
+def refine_bpm_from_beats(
+    beat_times: np.ndarray,
+    fallback_bpm: float,
+    *,
+    frame_s: float = 0.0,
+    min_intervals: int = 8,
+    max_disagreement: float = 0.08,
+) -> float:
+    """
+    Refine a scalar tempo from the detected beat times.
+
+    librosa's scalar tempo sits on the autocorrelation lag grid
+    60 * sr / (hop * lag): at sr 44100 and hop 512 a true 124 BPM reads
+    123.05. The beat times follow the real onsets, so the mean of the inlier
+    inter beat intervals recovers the true tempo. The median does not: the
+    intervals alternate between two neighbouring frame counts and the median
+    lands on one of them, which is the same grid value again.
+
+    Intervals farther than max(10 percent of the median, 1.5 frames) from the
+    median (missed or doubled beats) are dropped. Returns `fallback_bpm` when
+    fewer than `min_intervals` inliers remain, when under half the intervals
+    are inliers, or when the refined value differs from `fallback_bpm` by more
+    than `max_disagreement` (relative). Only the scalar changes; beat times
+    are not touched.
+    """
+    times = np.asarray(beat_times, dtype=np.float64).ravel()
+    ibi = np.diff(times)
+    ibi = ibi[np.isfinite(ibi) & (ibi > 0)]
+    if len(ibi) < min_intervals:
+        return fallback_bpm
+    med = float(np.median(ibi))
+    tol = max(0.10 * med, 1.5 * frame_s)
+    inliers = ibi[np.abs(ibi - med) <= tol]
+    if len(inliers) < min_intervals or len(inliers) < 0.5 * len(ibi):
+        return fallback_bpm
+    refined = 60.0 / float(np.mean(inliers))
+    if not np.isfinite(refined) or refined <= 0:
+        return fallback_bpm
+    if fallback_bpm > 0 and abs(refined / fallback_bpm - 1.0) > max_disagreement:
+        return fallback_bpm
+    return float(refined)
+
+
 # ---------------------------------------------------------------------------
 # Backend implementations
 # ---------------------------------------------------------------------------
@@ -237,10 +280,13 @@ class LibrosaBeatTracker:
         tempo, beat_frames = librosa.beat.beat_track(
             y=audio, sr=sr, hop_length=hop_length, trim=False
         )
-        bpm = float(np.atleast_1d(tempo)[0])
-        bpm = resolve_bpm_octave(bpm, audio, sr, hop_length=hop_length)
+        raw_bpm = float(np.atleast_1d(tempo)[0])
         beat_frames = np.asarray(beat_frames, dtype=np.int64)
         beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop_length)
+        # The scalar sits on librosa's lag grid; refine it from the beat
+        # intervals first, then run the octave correction on the result.
+        refined_bpm = refine_bpm_from_beats(beat_times, raw_bpm, frame_s=hop_length / sr)
+        bpm = resolve_bpm_octave(refined_bpm, audio, sr, hop_length=hop_length)
 
         # Estimate downbeats: every 4th beat starting at index 0
         downbeat_indices = beat_frames[::4]

@@ -535,3 +535,19 @@ def test_beatless_audio_clean_job_error(fake_lib, monkeypatch):
     assert "no beats detected" in msg.lower(), (
         f"beatless audio raised {type(ei.value).__name__}: {msg!r}"
     )
+
+
+@pytest.mark.dj_analysis
+def test_analyze_structure_pure_sine_raises_clear_error():
+    """A tone with no beats must fail with a clear message, not a bare max() error."""
+    from scripts.core.dj_analysis import analyze_structure
+
+    t = np.arange(10 * SR) / SR
+    sine = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+
+    with pytest.raises(ValueError) as ei:
+        analyze_structure(sine, SR)
+
+    msg = str(ei.value).lower()
+    assert "no beats or bars detected" in msg, f"raised {msg!r}"
+    assert "max()" not in msg
