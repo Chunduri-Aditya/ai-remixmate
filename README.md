@@ -60,7 +60,7 @@ docker compose up
 
 Each `mp3`, `flac`, `wav`, `m4a`, `ogg` or `aiff` file under the folder (searched recursively; hidden files and dot folders are skipped) becomes `library/<name>/full.wav`, mono at 44.1 kHz, converted with ffmpeg. The name is the file name without its extension. Non ASCII names such as "Café del Mar" are kept.
 
-- `--stems` runs Demucs and writes `vocals.wav`, `drums.wav`, `bass.wav` and `other.wav` beside `full.wav`. The first run downloads about 96 MB of `htdemucs` weights into the torch cache. One measured run: a 2:46 CC0 MP3 took 37.4 s wall on an Apple Silicon Mac. Stems are optional. Without them the engine renders the transition on the full mixes, with no stem blend.
+- `--stems` runs Demucs and writes `vocals.wav`, `drums.wav`, `bass.wav` and `other.wav` beside `full.wav`. The first run downloads the `htdemucs` weights (one 84.1 MB checkpoint file) into the torch cache. One measured run: a 2:46 CC0 MP3 took 37.4 s wall on an Apple Silicon Mac. Stems are optional. Without them the engine renders the transition on the full mixes, with no stem blend.
 - `--analyze` runs the song analysis (tempo, key, structure) and caches `meta.json` and `analysis.json`, which the library views, recommendations and setlist planning read. A render analyses the loaded audio fresh either way.
 - A rescan skips songs already present. A song whose `full.wav` or any stem already exists is reported as "already in library" and is not converted again. Scan compares names, not contents, so a different file with the same name also reads as already present.
 - A file that fails to convert is reported on one line and the scan continues.
@@ -164,7 +164,7 @@ npx eslint . --max-warnings 0
 npx vite build
 ```
 
-At the last full run the Python CI subset passed about 1,950 tests, the `dj_analysis` group about 108, and vitest about 138. Counts shift as tests are added, so run the commands for the current number.
+At commit `c5bc599` the Python CI subset passed 1,966 tests (1 skipped), the `dj_analysis` group 108 and vitest 144, locally and in CI. Counts shift as tests are added, so run the commands for the current number.
 
 `tests/test_scan_mix_e2e.py` is the end to end check. It scans two synthetic click tracks at 120 and 124 BPM into an isolated library, confirms the tempos read within 1 BPM of 120 and 124, renders them through `POST /dj-remix`, and asserts that the mix file exists, its length is within 1 s of the plan, and its loudness is within 1 LU of the target. It also checks that a wrong tempo fails the tempo gate. Tests point the data and outputs folders at a throwaway directory, so a test run does not write into your real `outputs/` or `data/`.
 
