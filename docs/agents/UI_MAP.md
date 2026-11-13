@@ -403,7 +403,7 @@ Tracks enter only through the operator ingest tool `scripts/download.py`; there 
 | Page | Empty `library/` | Songs present, none analysed |
 |---|---|---|
 | Mission Control | shows zero songs; works | works |
-| Library Atlas | empty message naming the ingest tool | BPM, key and energy show dashes; drawer recommendations and similar may be empty |
+| Library Atlas | empty message naming `./start.sh scan <folder>` | BPM, key and energy show dashes; drawer recommendations and similar may be empty |
 | Mix Deck | deck selects hold only the placeholder | strict matches hidden (409 swallowed); compatibility analyses inside the request and can hit the client timeout |
 | Set Builder | empty pool, CTA to Operations (UI-29) | auto sequence sends null BPM and Camelot and default energy |
 | Signal Search | nothing to pick in track mode; text mode returns the empty CLAP index 404 | similar depends on the server upserting unanalysed songs into the index |

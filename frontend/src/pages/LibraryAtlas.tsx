@@ -1017,7 +1017,7 @@ export default function LibraryAtlas() {
             <div className="la-state">
               <Library size={32} strokeWidth={1} style={{ color: 'var(--color-text-faint)' }} />
               <span className="text-muted">
-                Library is empty — the operator ingests the catalogue with <code>python -m scripts.download</code>
+                Library is empty. Run <code>./start.sh scan &lt;folder&gt;</code> to import a folder of your music.
               </span>
             </div>
           ) : filtered.length === 0 ? (

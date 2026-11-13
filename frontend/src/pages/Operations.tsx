@@ -315,9 +315,8 @@ export default function Operations() {
       <div className="page-base__body ops-body">
         <section className="ops-panel">
           <p className="ops-note text-muted">
-            The catalogue is operator-curated Creative-Commons audio. There is no
-            in-app track acquisition — add tracks with the ingest tool
-            (<code>python -m scripts.download</code>). This page covers processing
+            There is no in-app track acquisition. Import a folder of your music
+            with <code>./start.sh scan &lt;folder&gt;</code>. This page covers processing
             status, storage, and library maintenance for what is already loaded.
           </p>
         </section>

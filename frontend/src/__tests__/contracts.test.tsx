@@ -3,8 +3,8 @@
  *
  * Contract these tests pin (the builder implements against it):
  *
- *  - Download era copy is gone: LibraryAtlas' empty state names the operator
- *    ingest command (`python -m scripts.download`) and has no button;
+ *  - Download era copy is gone: LibraryAtlas' empty state names the user
+ *    import command (`./start.sh scan <folder>`) and has no button;
  *    MissionControl's empty jobs line no longer says "or download"; Operations
  *    no longer talks about auto eviction "on download"; the Widget's
  *    unreachable API message no longer hard codes port 8000; the LeftRail
@@ -193,13 +193,14 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('download era copy', () => {
-  it('LibraryAtlas empty state names the operator ingest command and has no button', async () => {
+  it('LibraryAtlas empty state names ./start.sh scan and has no button', async () => {
     installFetch({ songs: [] })
     const { container } = mount(<LibraryAtlas />, '/library-atlas')
     await waitFor(() => expect(requests.some((r) => /^\/library\?/.test(r.path))).toBe(true))
     await waitFor(() => expect(container.textContent).not.toMatch(/Loading library/i))
 
-    expect(container.textContent, 'empty state must name the ingest command').toMatch(/python -m scripts\.download/)
+    expect(container.textContent, 'empty state must name the ingest command').toMatch(/\.\/start\.sh scan/)
+    expect(container.textContent).not.toMatch(/scripts\.download/)
     expect(container.textContent).not.toMatch(/add songs in Operations/i)
     expect(screen.queryByRole('button', { name: /add songs/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /operations/i })).toBeNull()

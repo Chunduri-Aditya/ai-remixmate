@@ -339,7 +339,7 @@ export default function SetBuilder() {
               <div className="sb-pool__empty">
                 <ListMusic size={22} strokeWidth={0.9} />
                 <span className="text-muted">
-                  {songs.length === 0 ? 'Library is empty — add songs first' : 'All available songs are already in the set'}
+                  {songs.length === 0 ? 'Library is empty. Run ./start.sh scan <folder> to import your music' : 'All available songs are already in the set'}
                 </span>
                 <button
                   className="sb-empty-action sb-empty-action--small"
