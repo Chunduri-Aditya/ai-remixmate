@@ -46,6 +46,7 @@ from scripts.api.schemas import JobType  # noqa: E402
 from scripts.api.task_modules import remix  # noqa: E402
 from scripts.core import paths  # noqa: E402
 from scripts.core.config import cfg  # noqa: E402
+from tests.synth_audio import synth_click_track as _synth  # noqa: E402
 
 pytestmark = [pytest.mark.integration, pytest.mark.dj_analysis]
 
@@ -61,28 +62,6 @@ ENGINES = ("current", "classic")
 # ---------------------------------------------------------------------------
 # Synthetic audio
 # ---------------------------------------------------------------------------
-
-def _synth(bpm: float, seconds: float, pad_hz: float, seed: int) -> np.ndarray:
-    """Metronome click (noise burst, accent every 4th beat) over a slowly
-    breathing two partial pad. Peak stays under 1.0."""
-    rng = np.random.default_rng(seed)
-    n = int(seconds * SR)
-    t = np.arange(n) / SR
-    pad = 0.15 * (np.sin(2 * np.pi * pad_hz * t) + 0.5 * np.sin(2 * np.pi * pad_hz * 2 * t))
-    pad *= 0.5 + 0.5 * np.sin(2 * np.pi * t / 8.0) ** 2
-    y = pad.astype(np.float32)
-    beat = 60.0 / bpm
-    click_len = int(0.02 * SR)
-    env = np.exp(-np.arange(click_len) / (0.004 * SR)).astype(np.float32)
-    burst = rng.standard_normal(click_len).astype(np.float32) * env
-    k = 0
-    while k * beat < seconds:
-        s = int(k * beat * SR)
-        e = min(n, s + click_len)
-        y[s:e] += (0.9 if k % 4 == 0 else 0.6) * burst[: e - s]
-        k += 1
-    return np.clip(y, -1.0, 1.0)
-
 
 def _tail_tempo(y: np.ndarray, sr: int, seconds: float = 15.0) -> float:
     """Tempo over the final `seconds` of the mix (librosa.feature.tempo on

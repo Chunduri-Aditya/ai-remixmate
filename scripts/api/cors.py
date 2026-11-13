@@ -2,7 +2,8 @@
 scripts/api/cors.py — Resolve CORS allow-origins for prod vs local (Phase 7).
 
 Prod: ``REMIXMATE_CORS_ORIGINS`` (comma-separated) or ``REMIXMATE_FRONTEND_URL``.
-Dev: Vite localhost ports only — no Streamlit ``:8501``, no GitHub Pages.
+Dev: Vite localhost origins on the UI port only — no Streamlit ``:8501``, no
+GitHub Pages. ``start.sh`` passes the UI port as ``RMX_UI_PORT`` (default 5173).
 """
 
 from __future__ import annotations
@@ -13,18 +14,36 @@ from typing import List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
-_DEV_ORIGINS: tuple[str, ...] = (
-    "http://localhost:5173",
-    "https://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://127.0.0.1:5173",
-)
-
 _LEGACY_BLOCK = (":8501", "chunduri-aditya.github.io")
 
 
 def _is_legacy(origin: str) -> bool:
     return any(tok in origin for tok in _LEGACY_BLOCK)
+
+
+def _ui_port() -> int:
+    """The Vite port from ``RMX_UI_PORT``; the default when unset or not a port."""
+    default = 5173
+    raw = os.environ.get("RMX_UI_PORT", "").strip()
+    if not raw:
+        return default
+    try:
+        port = int(raw)
+    except ValueError:
+        port = 0
+    if 1 <= port <= 65535:
+        return port
+    logger.warning("Ignored RMX_UI_PORT=%r (not a port from 1 to 65535); using %d", raw, default)
+    return default
+
+
+def _dev_origins(port: int) -> List[str]:
+    return [
+        f"http://localhost:{port}",
+        f"https://localhost:{port}",
+        f"http://127.0.0.1:{port}",
+        f"https://127.0.0.1:{port}",
+    ]
 
 
 def resolve_cors_origins(config_origins: Optional[Sequence[str]] = None) -> List[str]:
@@ -34,7 +53,7 @@ def resolve_cors_origins(config_origins: Optional[Sequence[str]] = None) -> List
     1. ``REMIXMATE_CORS_ORIGINS`` (comma-separated)
     2. ``REMIXMATE_FRONTEND_URL`` (single origin)
     3. non-wildcard ``config_origins`` with legacy entries stripped
-    4. Vite localhost defaults
+    4. Vite localhost origins on the ``RMX_UI_PORT`` port (default 5173)
     """
     env = os.environ.get("REMIXMATE_CORS_ORIGINS", "").strip()
     if env:
@@ -52,4 +71,4 @@ def resolve_cors_origins(config_origins: Optional[Sequence[str]] = None) -> List
         if cleaned:
             return cleaned
 
-    return list(_DEV_ORIGINS)
+    return _dev_origins(_ui_port())

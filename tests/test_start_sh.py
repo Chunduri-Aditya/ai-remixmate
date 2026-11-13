@@ -127,11 +127,13 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
-def run_script(sb: dict, *args: str, timeout: float = 60, **env_over: str) -> tuple[int, str]:
+def run_script(
+    sb: dict, *args: str, timeout: float = 60, cwd: Path | None = None, **env_over: str
+) -> tuple[int, str]:
     env = dict(sb["env"], **env_over)
     proc = subprocess.Popen(
         [str(sb["script"]), *args],
-        cwd=str(sb["root"]),
+        cwd=str(cwd or sb["root"]),
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -611,3 +613,83 @@ def test_port_env_vars_load_cleanly(monkeypatch):
     monkeypatch.setenv("REMIXMATE_UI_PORT", "5199")
     cfg = load_config()
     assert cfg.api.port == 8765
+
+
+# ---------------------------------------------------------------------------
+# Scan mode and the UI port handed to the API
+# ---------------------------------------------------------------------------
+
+SCAN_PY_STUB = r"""#!/bin/sh
+# Stand in for .venv/bin/python in scan mode: log cwd and each arg, exit 7.
+{
+  printf 'cwd=%s\n' "$(pwd -P)"
+  for a in "$@"; do printf 'arg=%s\n' "$a"; done
+} >> "$STUB_LOG"
+exit 7
+"""
+
+
+def test_scan_mode_execs_scan_with_absolute_folder(sandbox, tmp_path):
+    _write_exec(sandbox["root"] / ".venv" / "bin" / "python", SCAN_PY_STUB)
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "my music").mkdir(parents=True)
+
+    rc, out = run_script(sandbox, "scan", "my music", "--stems", "--analyze", cwd=elsewhere)
+
+    assert rc == 7, f"scan did not pass the python exit code through, got {rc}\n{out}"
+    lines = _log_text(sandbox).splitlines()
+    assert lines == [
+        f"cwd={sandbox['root'].resolve()}",
+        "arg=-m",
+        "arg=scripts.scan",
+        f"arg={(elsewhere / 'my music').resolve()}",
+        "arg=--stems",
+        "arg=--analyze",
+    ], f"unexpected scan invocation:\n{_log_text(sandbox)}\n{out}"
+    assert "AI RemixMate" not in out, f"scan printed the start banner\n{out}"
+
+
+def test_scan_mode_never_touches_ports(sandbox, tmp_path):
+    _write_exec(sandbox["root"] / ".venv" / "bin" / "python", SCAN_PY_STUB)
+    (tmp_path / "music").mkdir()
+
+    rc, out = run_script(sandbox, "scan", str(tmp_path / "music"))
+
+    assert rc == 7, f"scan exited {rc}\n{out}"
+    lsof_calls = [ln for ln in _log_text(sandbox).splitlines() if ln.startswith("lsof")]
+    assert lsof_calls == [], f"scan mode ran lsof: {lsof_calls}"
+
+
+def test_scan_mode_without_venv_asks_for_setup(sandbox, tmp_path):
+    shutil.rmtree(sandbox["root"] / ".venv")
+    (tmp_path / "music").mkdir()
+
+    rc, out = run_script(sandbox, "scan", str(tmp_path / "music"))
+
+    assert rc == 1, f"scan without .venv exited {rc}\n{out}"
+    assert "Run ./start.sh setup first" in out, out
+    assert not (sandbox["root"] / ".venv").exists(), f"scan created a .venv\n{out}"
+
+
+def test_usage_names_scan_mode():
+    usage = [ln for ln in code_lines() if "Usage:" in ln]
+    assert len(usage) == 2, f"expected two Usage strings, got {usage}"
+    assert all("scan" in ln for ln in usage), f"a Usage string omits scan: {usage}"
+
+
+def test_api_gets_ui_port_outside_the_config_prefix(sandbox):
+    stub = PY_STUB.replace(
+        "    echo $$ > \"$STUB_PID_FILE\"\n",
+        "    echo $$ > \"$STUB_PID_FILE\"\n"
+        "    printf 'env RMX_UI_PORT=%s REMIXMATE_UI_PORT=%s\\n' "
+        "\"${RMX_UI_PORT-unset}\" \"${REMIXMATE_UI_PORT-unset}\" >> \"$STUB_LOG\"\n",
+    )
+    assert stub != PY_STUB, "stub patch point moved"
+    _write_exec(sandbox["root"] / ".venv" / "bin" / "python", stub)
+
+    rc, out = run_script(sandbox, "api", "--skip-setup", "--no-open", REMIXMATE_UI_PORT="5199")
+
+    env_lines = [ln for ln in _log_text(sandbox).splitlines() if ln.startswith("env ")]
+    assert env_lines == ["env RMX_UI_PORT=5199 REMIXMATE_UI_PORT=unset"], (
+        f"API subshell env: {env_lines}\n{_log_text(sandbox)}\n{out}"
+    )

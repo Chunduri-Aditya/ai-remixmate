@@ -12,8 +12,11 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "app" / "deploy"
@@ -95,6 +98,9 @@ class BackupScriptTests(unittest.TestCase):
         self.assertTrue(mode & stat.S_IXUSR, f"backup.sh mode {oct(mode)} lacks u+x; cron cannot run it")
 
     def test_git_index_mode_100755(self):
+        # A worktree has a .git file and a clone a .git dir; a zip download has neither.
+        if not (ROOT / ".git").exists():
+            self.skipTest("no .git here (zip download?), so there is no git index to read")
         proc = subprocess.run(
             ["git", "-C", str(ROOT), "ls-files", "-s", "app/deploy/backup.sh"],
             capture_output=True, text=True, check=True,
@@ -283,6 +289,15 @@ class CaddyfileTests(unittest.TestCase):
     def test_events_flush_interval_minus_one(self):
         self.assertRegex(self.text, r"/events/\*", "no /events/* matcher")
         self.assertRegex(self.text, r"flush_interval\s+-1\b", "no flush_interval -1 for SSE")
+
+
+class GitModeSkipTests(unittest.TestCase):
+    def test_git_mode_check_skips_without_git(self):
+        module = sys.modules[__name__]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(module, "ROOT", Path(tmp)):
+            case = BackupScriptTests("test_git_index_mode_100755")
+            with self.assertRaises(unittest.SkipTest):
+                case.test_git_index_mode_100755()
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@ import pytest
 # mastering.py requires scipy — skip the whole module if it's not installed
 pytest.importorskip("scipy", reason="scipy not installed; skipping mastering tests")
 
+from tests.synth_audio import synth_click_track  # noqa: E402
+
 SR = 44100
 
 
@@ -442,28 +444,6 @@ class TestLimiterTruePeak:
 # audio that is returned.
 # ---------------------------------------------------------------------------
 
-def _click_pad(bpm=124.0, seconds=60.0, pad_hz=220.0, seed=0, sr=SR):
-    """Metronome click (noise burst, accent every 4th beat) over a slowly
-    breathing two partial pad. Copied from tests/test_render_e2e.py::_synth."""
-    rng = np.random.default_rng(seed)
-    n = int(seconds * sr)
-    t = np.arange(n) / sr
-    pad = 0.15 * (np.sin(2 * np.pi * pad_hz * t) + 0.5 * np.sin(2 * np.pi * pad_hz * 2 * t))
-    pad *= 0.5 + 0.5 * np.sin(2 * np.pi * t / 8.0) ** 2
-    y = pad.astype(np.float32)
-    beat = 60.0 / bpm
-    click_len = int(0.02 * sr)
-    env = np.exp(-np.arange(click_len) / (0.004 * sr)).astype(np.float32)
-    burst = rng.standard_normal(click_len).astype(np.float32) * env
-    k = 0
-    while k * beat < seconds:
-        s = int(k * beat * sr)
-        e = min(n, s + click_len)
-        y[s:e] += (0.9 if k % 4 == 0 else 0.6) * burst[: e - s]
-        k += 1
-    return np.clip(y, -1.0, 1.0)
-
-
 def _dense_mix(bpm=124.0, seconds=30.0, seed=1, sr=SR):
     """Music like bed: kick on every beat, sustained bass and chord tones,
     noise hats on the off beats. Crest factor about 12 dB."""
@@ -511,7 +491,7 @@ class TestMasterMixMakeup:
     @pytest.fixture(scope="class")
     def click_master(self):
         from scripts.core.mastering import master_mix
-        return master_mix(_click_pad(), SR, target_lufs=self.TARGET, ceiling_db=self.CEILING)
+        return master_mix(synth_click_track(124.0, 60.0, 220.0, 0), SR, target_lufs=self.TARGET, ceiling_db=self.CEILING)
 
     @pytest.fixture(scope="class")
     def dense_master(self):

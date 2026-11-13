@@ -8,6 +8,9 @@
 #   ./start.sh setup        # install/update packages only (always reinstalls)
 #   ./start.sh api          # API only
 #   ./start.sh stop         # stop this app's listeners on the configured ports
+#   ./start.sh scan DIR [--stems] [--analyze]
+#                           # import the audio files in DIR into library/
+#                           # (needs .venv from ./start.sh setup; opens no port)
 #   ./start.sh --skip-setup # start without checking or installing packages
 #   ./start.sh --no-open    # don't auto-open a browser tab (default: opens one)
 #   ./start.sh --host ADDR  # API bind address (default: 127.0.0.1)
@@ -331,6 +334,21 @@ deps_current() {
   [ "$(cat "$STAMP_FILE")" = "$(deps_fingerprint)" ]
 }
 
+# Scan mode: import a folder with the project venv. It never builds a venv,
+# prints no banner and never touches a port. A folder argument becomes an
+# absolute path before the cd to $ROOT, so a relative path keeps its meaning.
+run_scan() {
+  [ -x "$PY" ] || { echo "No .venv yet. Run ./start.sh setup first."; exit 1; }
+  local a args=()
+  for a in "$@"; do
+    if [ -d "$a" ]; then
+      a="$(CDPATH='' cd -- "$a" && pwd)"
+    fi
+    args+=("$a")
+  done
+  cd "$ROOT" && exec "$PY" -m scripts.scan "${args[@]}"
+}
+
 run_check() {
   : # bin/check.sh was archived to archive/bin; start_api waits on /health/live instead
 }
@@ -372,17 +390,19 @@ start_api() {
     RELOAD_ARGS=(--reload --reload-dir "$ROOT/scripts")
   fi
 
+  # The API builds its dev CORS origins from RMX_UI_PORT. The name sits outside
+  # REMIXMATE_ because scripts/core/config.py parses every REMIXMATE_ name as a key.
   local scheme=http
   if $HTTPS_MODE; then
     scheme=https
     echo "🚀  Starting API at https://$API_HOST:$API_PORT (HTTPS)"
     echo "    Docs: https://$API_HOST:$API_PORT/docs"
-    (cd "$ROOT" && unset REMIXMATE_UI_PORT && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --no-proxy-headers --host "$API_HOST" --port $API_PORT \
+    (cd "$ROOT" && unset REMIXMATE_UI_PORT && export RMX_UI_PORT="$FRONTEND_PORT" && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --no-proxy-headers --host "$API_HOST" --port $API_PORT \
       --ssl-certfile "$CERT_FILE" --ssl-keyfile "$KEY_FILE") &
   else
     echo "🚀  Starting API at http://$API_HOST:$API_PORT"
     echo "    Docs: http://$API_HOST:$API_PORT/docs"
-    (cd "$ROOT" && unset REMIXMATE_UI_PORT && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --no-proxy-headers --host "$API_HOST" --port $API_PORT) &
+    (cd "$ROOT" && unset REMIXMATE_UI_PORT && export RMX_UI_PORT="$FRONTEND_PORT" && exec $PY -m uvicorn scripts.api.main:app "${RELOAD_ARGS[@]}" --timeout-graceful-shutdown 30 --no-proxy-headers --host "$API_HOST" --port $API_PORT) &
   fi
   API_PID=$!
   echo "    PID: $API_PID"
@@ -441,12 +461,16 @@ while [ $# -gt 0 ]; do
     --host=*)
       API_HOST="${arg#--host=}"
       ;;
+    scan)
+      shift
+      run_scan "$@"
+      ;;
     stop|api|ui|both|frontend|setup)
       MODE="$arg"
       ;;
     *)
       echo "Unknown argument: $arg"
-      echo "Usage: $0 [setup|frontend|api|stop] [--https|--skip-setup|--no-open|--dev|--host ADDR]"
+      echo "Usage: $0 [setup|frontend|api|stop] [--https|--skip-setup|--no-open|--dev|--host ADDR] | $0 scan DIR [--stems] [--analyze]"
       exit 1
       ;;
   esac
@@ -542,7 +566,7 @@ case "$MODE" in
     wait
     ;;
   *)
-    echo "Usage: $0 [setup|frontend|api|stop] [--https|--skip-setup|--no-open|--dev|--host ADDR]"
+    echo "Usage: $0 [setup|frontend|api|stop] [--https|--skip-setup|--no-open|--dev|--host ADDR] | $0 scan DIR [--stems] [--analyze]"
     exit 1
     ;;
 esac
